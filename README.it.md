@@ -17,13 +17,36 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 - Versioni di core, plugin, temi e traduzioni per ogni sito, tramite i connettori inclusi
 - **Anteprima visiva di ogni sito**, rigenerata a intervalli, con le miniature nell'elenco
 - Cartelle (clienti), tag, filtri rapidi, ricerca ed esportazione CSV
+- **Diagnostica dei siti**: spazio scrivibile misurato scrivendo davvero sul sito — non lo spazio
+  libero del disco, che descrive il disco del server e ignora la quota dell'hosting — più cartella
+  temporanea, permessi, versione e memoria di PHP, supporto zip. Prima di un aggiornamento
+  grosso il connettore avvisa se lo spazio non basta, invece di fallire con un errore di
+  decompressione incomprensibile
+- **Verifica del core di WordPress** sulle impronte ufficiali di wordpress.org: file modificati,
+  mancanti e in più dentro `wp-admin` e `wp-includes`, con una notifica quando l'esito cambia
+- **Storico del peso dei siti**: file per categoria (media, plugin, temi, core, il resto) e
+  database, raccolti ogni notte e conservati due anni, con grafico e andamento degli ultimi 30
+  giorni
 
 **Aggiornamenti**
-- Aggiorni un sito, una selezione o tutto il parco — a mano o con il **ciclo notturno**
-  che ritenta da solo quello che è fallito
+- Aggiorni un sito, una selezione o tutto il parco — a mano o con il **ciclo automatico
+  orario** (`AUTOUPDATE_ENABLED=true`), che ritenta quello che è fallito dopo una pausa (24 ore
+  di base)
+- **I pulsanti Aggiorna sono una richiesta esplicita**: partono anche se il sito ha gli
+  aggiornamenti automatici spenti o un elemento è in pausa dopo un fallimento, e il pannello
+  segue l'aggiornamento e ne mostra l'esito — "2 aggiornati, 1 fallito", "niente da aggiornare",
+  "il sito non risponde: HTTP 401"
 - **Installazione e rimozione in blocco** su più siti, guidata passo passo: piattaforma,
   pacchetto o estensione, poi i siti di destinazione anche per cartella. La rimozione
   raggiunge solo i siti che hanno davvero quell'estensione
+- **L'installazione in blocco gira in sottofondo**: un lavoro per sito con l'avanzamento in
+  diretta, prosegue anche se chiudi il browser (e la pagina lo riprende), e timeout o errori del
+  server vengono ritentati un minuto dopo; gli errori veri (token rifiutato, zip rotto) si
+  fermano subito
+- **Freno per i server deboli**: i siti sono raggruppati per server (l'indirizzo IP del loro
+  dominio), mostrati per cartella cliente col nome del server. Sui server col freno scegli quanti
+  siti alla volta, quanto riposa il server dopo un sito e la pausa tra un aggiornamento e l'altro
+  dello stesso sito; gli altri server lavorano come sempre
 - Storico degli aggiornamenti con, per ogni componente, quante volte è stato aggiornato e
   da quale versione a quale
 - **Controllo della home**: un'istantanea prima e dopo ogni aggiornamento; il report dice se
@@ -31,8 +54,14 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 - I prodotti a licenza (es. Elementor Pro) si aggiornano dall'interno del backend di
   WordPress; quando un sito non riesce a scaricarli, Sentinel installa lo zip che hai
   caricato una volta in *Pacchetti*
+- **Prendi un pacchetto a licenza da un sito**: cerchi un plugin o un tema per nome tra i tuoi
+  siti WordPress e prendi lo zip della versione più alta installata, pronto da installare sui
+  siti a cui il produttore non lo consegna
 - Elementor ed Elementor Pro si muovono insieme: Elementor non salta mai a una nuova
   versione principale lasciando indietro il Pro
+- **Errori leggibili**: niente entità HTML, niente link di download coi token, niente righe di
+  avanzamento — solo la frase che conta, con un suggerimento quando la causa probabile è lo
+  spazio esaurito
 
 **Sicurezza e scadenze**
 - Vulnerabilità note confrontate con le estensioni realmente installate, con gravità e
@@ -47,11 +76,29 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 **Report e notifiche**
 - Email e Telegram per ogni evento, con **testi modificabili**, anteprima dal vivo e invio
   di prova
-- **Report mensile in PDF**, globale o uno per cartella, inviato in automatico all'indirizzo
-  che imposti
+- **Un riepilogo per ogni ciclo automatico** su Telegram: un blocco per sito con la sua cartella,
+  core e componenti principali in cima, elenchi lunghi chiusi, e in testa quello da guardare —
+  fallimenti col motivo, elementi in attesa, home cambiate. I riepiloghi lunghi si dividono tra
+  un sito e l'altro, mai a metà di un sito. Per email: **un messaggio per sito** (esito e cartella
+  nell'oggetto, comodi per le regole della posta) oppure **un riepilogo per ciclo**
+- **Report mensile in PDF**, globale o uno per cartella, inviato in automatico nel giorno e
+  all'orario che scegli (ore e minuti)
+- **Stato dei siti** in ogni report: per ogni sito CMS e versione, PHP con lo stato del supporto,
+  scadenza del dominio, peso e crescita dell'ultimo mese, database, spazio scrivibile e file del
+  core, con in rosso i valori da guardare
+- **Report per cliente**: ogni cliente riceve ogni mese il report dei **soli siti suoi**, ai suoi
+  indirizzi — mai al tuo, mai su Telegram — firmato "Report di" con la tua ragione sociale. Siti e
+  clienti sono molti-a-molti: di norma un sito per cliente, ma un **gruppo** (per esempio tutti i
+  siti di un'agenzia) riceve un solo report per tutti i suoi siti, con un solo indirizzo. I clienti
+  si creano dai siti (uno per sito, oppure un gruppo per un'intera cartella), si uniscono, si
+  eliminano in blocco; i siti si aggiungono o tolgono da un gruppo, con l'**autocompletamento** su
+  gruppi, clienti e cartelle. I report dei clienti hanno **impostazioni proprie** — invio
+  automatico, giorno e orario, sezioni, testi e layout del PDF — separate dal tuo report mensile,
+  con anteprima dal vivo su qualsiasi cliente
 - **Report dettagliati su richiesta** (PDF o CSV) per un sito, una selezione o tutto, su un
   intervallo di mesi a scelta, con la cronologia di ogni singolo aggiornamento
-- Statistiche con viste giornaliera, mensile e confronto fra due mesi
+- Statistiche con viste giornaliera, mensile e confronto fra due mesi, classifiche dei siti e
+  dei componenti più aggiornati
 
 **Amministrazione**
 - Accesso con password, **TOTP** e **passkey**
@@ -140,6 +187,10 @@ mostra e lo incolli quando aggiungi il sito nel pannello. I sorgenti stanno in `
 sono neutri — nessun indirizzo, nessuna chiave — così chiunque può costruirsi i propri;
 vedi `connectors/README.md`.
 
+Diagnostica, peso del sito e *Prendi da un sito* richiedono il **connettore 2.19 o successivo su
+WordPress e 1.30 o successivo su Joomla**. Finché un sito non ha fatto la diagnostica, il riquadro
+*Diagnostica* nella sua pagina dice quale connettore serve.
+
 ---
 
 ## Dove si imposta cosa
@@ -149,11 +200,18 @@ vedi `connectors/README.md`.
 | Logo, favicon, nome del pannello | Impostazioni → Branding |
 | Rinominare una cartella | matita accanto alla cartella nella barra laterale |
 | Zip di un plugin a licenza da installare ovunque | Impostazioni → Pacchetti |
+| Prendere lo zip di un plugin o tema a licenza da un tuo sito | Impostazioni → Pacchetti → Prendi da un sito |
 | Dopo quanti minuti avvisare che un sito non risponde | Impostazioni → Avvisa che un sito non risponde dopo |
 | Soglie di scadenza, frequenza scansioni, anteprime, conservazione cronologia | Impostazioni |
 | Indirizzo del pannello e chiave di registrazione per i connettori | Impostazioni → Connettori |
+| Un'email per sito oppure un riepilogo per ciclo automatico | Impostazioni → Email dei report di aggiornamento |
+| Spazio scrivibile, PHP, permessi, file del core, storico del peso di un sito | pagina del sito → Diagnostica, Peso del sito |
 | Testi, HTML e canali di ogni notifica | Notifiche |
-| Report mensile: giorno, destinatario, contenuto, impaginazione | Report mensile |
+| Report mensile: giorno e orario, destinatario, contenuto, impaginazione | Report mensile |
+| Clienti, i loro siti e indirizzi, gruppi, report automatico al cliente | Report clienti |
+| Report dei clienti: invio, giorno e orario, sezioni, testi, layout del PDF (uniche per tutti i clienti) | Report clienti → Impostazioni |
+| Testo dell'email che accompagna il report al cliente | Notifiche → Report mensile al cliente |
+| Freno sui server deboli (siti alla volta, riposo, pausa tra gli aggiornamenti) | Impostazioni → Server dei siti |
 | Credenziali database, SMTP, Telegram, segreti, porte | `.env` |
 
 ---
@@ -202,6 +260,12 @@ con loro storico e impostazioni.
 - **Gli aggiornamenti falliscono su più siti insieme** — quasi sempre è DNS o filesystem, non il
   pannello. `docker compose logs worker | grep "UPDATE FALLITO"` mostra il motivo vero
   restituito da ogni sito.
+- **Un aggiornamento fallisce con `PCLZIP_ERR_BAD_FORMAT` o "spazio insufficiente"** — probabilmente
+  è piena la quota dell'hosting, anche se il disco del server non lo è. Nella pagina del sito,
+  *Esegui diagnostica* scrive dati veri sul sito e dice quanto spazio è davvero scrivibile.
+- **Gli aggiornamenti vanno in timeout su un hosting condiviso economico** — metti il freno a quel
+  server in *Impostazioni → Server dei siti*: meno siti alla volta, un riposo dopo ogni sito e una
+  pausa più lunga tra un aggiornamento e l'altro dello stesso sito.
 - **Nessuna anteprima, o un rettangolo bianco dove c'è un video** — il servizio screenshot ha
   bisogno di Google Chrome per i video di sfondo in H.264:
   `docker compose logs shooter | grep pronto` deve nominare Chrome. Se è ripiegato su Chromium,

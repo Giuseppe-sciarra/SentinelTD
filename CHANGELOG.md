@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.12.2
+
+### Added
+- Monthly report and client reports: the send **time** has minutes too (e.g. 08:30), with a
+  time field instead of the hour number. The check runs every 5 minutes instead of once an
+  hour, and a report is sent from its time until one hour later: a run missed exactly at that
+  moment (worker restarting) is caught up, and the shared memory of what was sent in the period
+  prevents duplicates. Existing settings keep their hour with minute 0
+
+### Fixed
+- Report previews sometimes showed only part of the report (seen in Firefox) until a reload.
+  The height of the preview was measured once, when the document reported itself loaded; in
+  Firefox the layout could still be unfinished then (preview loaded while its box was still
+  hidden, or a column settling to its width), so the measure came out short — down to a
+  quarter of the report. The preview is now measured on the content, again shortly after
+  loading, when fonts and images are ready and whenever its content or width changes. The new
+  measure ignores the box height, so measuring repeatedly cannot make the preview grow on its own
+
+### Docs
+- README (English and Italian) rewritten around every addition: site diagnostics, core check
+  and size history, explicit update buttons with their outcome, background bulk install,
+  brake for weak servers, taking a licensed package from a site, readable errors, cycle
+  summaries, site status, client reports with groups and their own settings. The automatic
+  cycle is described as it works — hourly, not nightly. New rows in *What goes where* (the
+  Italian table also lacked the client-report rows) and two new troubleshooting entries
+
 ## 2.12.1
 
 ### Fixed

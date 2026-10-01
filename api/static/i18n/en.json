@@ -1992,5 +1992,6 @@
   "Impostazioni dei clienti salvate": "Client settings saved",
   "Ripristinare il layout PDF predefinito per i clienti?": "Restore the default PDF layout for clients?",
   "Modifiche non salvate": "Unsaved changes",
-  "✓ Salvate alle {0}": "✓ Saved at {0}"
+  "✓ Salvate alle {0}": "✓ Saved at {0}",
+  "Orario": "Time"
 }

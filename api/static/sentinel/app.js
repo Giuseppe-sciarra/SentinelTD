@@ -1274,14 +1274,46 @@ function sentinel() {
     },
 
     // ---------- anteprime ----------
+    // orario d'invio dei report come "HH:MM" (ora e minuti sono due campi della configurazione)
+    cfgTime(c) { return c ? String(c.send_hour ?? 8).padStart(2, '0') + ':' + String(c.send_minute ?? 0).padStart(2, '0') : ''; },
+    setCfgTime(target, v) {
+      const m = String(v || '').trim().match(/^(\d{1,2})[:.,](\d{2})$/) || String(v || '').trim().match(/^(\d{1,2})$/);
+      if (!m || !target.cfg) return;
+      const hh = Math.min(23, parseInt(m[1], 10)), mm = Math.min(59, parseInt(m[2] || '0', 10));
+      if (hh === target.cfg.send_hour && mm === (target.cfg.send_minute || 0)) return;
+      target.cfg.send_hour = hh; target.cfg.send_minute = mm; target.dirty = true;
+    },
     fitFrame(el, min = 200, max = 3000) {
-      // adatta l'altezza dell'iframe al contenuto: niente barre interne, niente tagli
+      // adatta l'altezza dell'iframe al contenuto: niente barre interne, niente tagli.
+      // Si misura il CONTENUTO (fondo del body), non la finestra interna: cosi' rimisurare piu'
+      // volte non fa crescere l'iframe. Firefox lancia "load" del srcdoc a impaginazione non
+      // finita (logo, caratteri, riquadro appena comparso o ancora senza larghezza) e l'anteprima
+      // restava tagliata a meta': si rimisura poco dopo e a ogni cambio di contenuto o larghezza.
+      const fit = () => {
+        try {
+          const d = el.contentDocument, win = el.contentWindow;
+          if (!d || !d.body || !win) return;
+          const cs = x => win.getComputedStyle(x);
+          const bottom = d.body.getBoundingClientRect().bottom + (win.scrollY || 0);
+          const content = Math.ceil(bottom + (parseFloat(cs(d.body).marginBottom) || 0) + (parseFloat(cs(d.documentElement).paddingBottom) || 0));
+          const h = Math.min(max, Math.max(min, Math.max(content, d.body.scrollHeight) + 8));
+          if (Math.abs((parseFloat(el.style.height) || 0) - h) > 1) el.style.height = h + 'px';
+        } catch (e) { /* documento non leggibile: resta l'altezza di default */ }
+      };
+      fit();
+      requestAnimationFrame(fit);
+      [150, 500, 1500].forEach(t => setTimeout(fit, t));
       try {
         const d = el.contentDocument;
-        if (!d || !d.body) return;
-        const h = Math.max(d.body.scrollHeight, d.documentElement.scrollHeight);
-        el.style.height = Math.min(max, Math.max(min, h + 24)) + 'px';
-      } catch (e) { /* documento non leggibile: resta l'altezza di default */ }
+        if (d && d.fonts && d.fonts.ready) d.fonts.ready.then(fit).catch(() => {});
+        if (d) [...d.images].forEach(img => { if (!img.complete) img.addEventListener('load', fit, { once: true }); });
+        if (window.ResizeObserver) {
+          if (el._fitRO) el._fitRO.disconnect();
+          el._fitRO = new ResizeObserver(() => fit());
+          el._fitRO.observe(el);                      // larghezza del riquadro (anche quando compare)
+          if (d && d.body) el._fitRO.observe(d.body); // contenuto che si riassesta
+        }
+      } catch (e) { /* niente: restano le misure a tempo */ }
     },
     previewFull: '',
     openPreviewFull(html) { this.previewFull = html || ''; },
@@ -1567,7 +1599,7 @@ function sentinel() {
     get cliSchedule() {
       const c = this.cli.cfg; if (!c) return '';
       if (!c.enabled) return 'Invio automatico ai clienti spento: si riaccende in Impostazioni.';
-      return `Partono il giorno ${c.send_day} di ogni mese alle ${String(c.send_hour).padStart(2, '0')}:00, con il mese precedente. Giorno, ora, sezioni e layout si cambiano in Impostazioni.`;
+      return `Partono il giorno ${c.send_day} di ogni mese alle ${this.cfgTime(c)}, con il mese precedente. Giorno, ora, sezioni e layout si cambiano in Impostazioni.`;
     },
     // ---- impostazioni uniche per tutti i report dei clienti ----
     async openClientSettings() {

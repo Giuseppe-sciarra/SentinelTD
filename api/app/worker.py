@@ -1856,8 +1856,8 @@ async def monthly_report(ctx):
     ccfg = await rep.get_client_config()
     now = datetime.now()
     # il tuo report e quelli dei clienti hanno giorno, ora e interruttore propri
-    mine = bool(cfg.get("enabled", True)) and now.day == int(cfg.get("send_day", 1)) and now.hour == int(cfg.get("send_hour", 8))
-    clients = bool(ccfg.get("enabled", True)) and now.day == int(ccfg.get("send_day", 1)) and now.hour == int(ccfg.get("send_hour", 8))
+    mine = rep.is_due(cfg, now)
+    clients = rep.is_due(ccfg, now)
     if not (mine or clients):
         return
     period = rep.prev_period(now)
@@ -2078,7 +2078,7 @@ class WorkerSettings:
         cron(auto_update_cycle, minute={0}),   # ogni ora, al minuto 0 (installa i pending)
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30
         cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True),  # reminder giornalieri; registry max 1 volta/7gg
-        cron(monthly_report, minute={5}),   # ogni ora al minuto 5: invia quando giorno/ora combaciano
+        cron(monthly_report, minute=set(range(0, 60, 5))),   # ogni 5 minuti: invia quando giorno e orario sono arrivati
         cron(diag_all, hour={3}, minute={40}),   # diagnostica notturna: peso dei siti e verifica del core
     ]
     on_startup = _startup

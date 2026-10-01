@@ -987,7 +987,7 @@
                     <label class="check" style="margin-bottom:10px"><input type="checkbox" x-model="cliSet.cfg.enabled" @change="cliSet.dirty=true"> Invia i report ai clienti ogni mese</label>
                     <div class="row" style="gap:8px">
                       <div class="field" style="flex:1"><label>Giorno</label><input class="input" type="number" min="1" max="28" x-model.number="cliSet.cfg.send_day" @input="cliSet.dirty=true" @change="cliSet.dirty=true"></div>
-                      <div class="field" style="flex:1"><label>Ora</label><input class="input" type="number" min="0" max="23" x-model.number="cliSet.cfg.send_hour" @input="cliSet.dirty=true" @change="cliSet.dirty=true"></div>
+                      <div class="field" style="flex:1"><label>Orario</label><input class="input" type="time" :value="cfgTime(cliSet.cfg)" @input="setCfgTime(cliSet, $event.target.value)" @change="setCfgTime(cliSet, $event.target.value)"></div>
                     </div>
                     <div class="hint">Vale per tutti i clienti con l'invio acceso: ognuno riceve il suo report ai suoi indirizzi. Il report copre sempre il mese <b>precedente</b>. Il tuo Report mensile ha giorno, ora e interruttore suoi.</div>
                   </div>
@@ -1078,7 +1078,7 @@
                   <label class="check" style="margin-bottom:10px"><input type="checkbox" x-model="rep.cfg.enabled" @change="rep.dirty=true"> Invia il report ogni mese</label>
                   <div class="row" style="gap:8px">
                     <div class="field" style="flex:1"><label>Giorno</label><input class="input" type="number" min="1" max="28" x-model.number="rep.cfg.send_day" @input="rep.dirty=true" @change="rep.dirty=true"></div>
-                    <div class="field" style="flex:1"><label>Ora</label><input class="input" type="number" min="0" max="23" x-model.number="rep.cfg.send_hour" @input="rep.dirty=true" @change="rep.dirty=true"></div>
+                    <div class="field" style="flex:1"><label>Orario</label><input class="input" type="time" :value="cfgTime(rep.cfg)" @input="setCfgTime(rep, $event.target.value)" @change="setCfgTime(rep, $event.target.value)"></div>
                   </div>
                   <div class="field"><label>Indirizzo a cui inviare i report</label><input class="input" type="email" x-model="rep.cfg.recipients" @input="rep.dirty=true" placeholder="reports@example.com"><div class="hint">Tutti i report (globale e per cartella) arrivano qui. Vuoto = destinatario impostato nel file <span class="mono">.env</span>.</div></div>
                   <div class="hint">Il report copre sempre il mese <b>precedente</b>: il giorno 1 ricevi quello appena concluso.</div>

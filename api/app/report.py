@@ -44,6 +44,7 @@ DEFAULTS = {
     "enabled": True,
     "send_day": 1,          # giorno del mese in cui inviare (1-28)
     "send_hour": 8,         # ora locale
+    "send_minute": 0,       # minuti (es. 30 per le 8:30): il controllo gira ogni 5 minuti
     "recipients": "",       # vuoto = usa REPORT_TO del .env; piu' indirizzi separati da virgola
     "company": "Tastiere Digitali",
     "title": "Report manutenzione siti web",
@@ -66,6 +67,16 @@ DEFAULTS = {
 
 GLOBAL_KEY = "__all__"
 CLIENT_PREFIX = "client:"        # perimetro "cliente": client:<id>
+
+
+def is_due(cfg: dict, now: datetime) -> bool:
+    """Giorno e orario d'invio arrivati: dal momento impostato fino a un'ora dopo. Il controllo
+    gira ogni 5 minuti; la finestra di un'ora recupera un giro saltato (worker riavviato proprio
+    in quel momento) e la memoria degli invii del periodo evita i doppioni."""
+    if not cfg.get("enabled", True) or now.day != int(cfg.get("send_day", 1)):
+        return False
+    at = now.replace(hour=int(cfg.get("send_hour", 8)), minute=int(cfg.get("send_minute", 0)), second=0, microsecond=0)
+    return at <= now < at + timedelta(hours=1)
 
 
 def is_client_scope(scope: str) -> bool:
@@ -277,6 +288,7 @@ def normalize(data: dict | None) -> dict:
         pass
     try:
         out["send_hour"] = max(0, min(23, int(src.get("send_hour", out["send_hour"]))))
+        out["send_minute"] = max(0, min(59, int(src.get("send_minute", out["send_minute"]))))
     except (TypeError, ValueError):
         pass
     try:

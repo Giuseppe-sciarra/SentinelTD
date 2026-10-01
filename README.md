@@ -17,21 +17,45 @@ Your server, your data, your branding.
 - Core, plugin, theme and translation versions for every site, through the included connectors
 - Visual **preview of each site**, refreshed on a schedule, with thumbnails in the list
 - Folders (clients), tags, quick filters, search and CSV export
+- **Site diagnostics**: writable space measured by really writing to the site — not the free
+  disk figure, which describes the host's disk and ignores the account quota — plus temporary
+  folder, permissions, PHP version and memory, zip support. Before a large update the connector
+  warns when space is short, instead of failing with a cryptic unzip error
+- **WordPress core check** against the official wordpress.org checksums: modified, missing and
+  extra files in `wp-admin` and `wp-includes`, with a notification when the result changes
+- **Site size history**: files by category (media, plugins, themes, core, the rest) and database,
+  collected every night and kept for two years, with a chart and the 30-day trend
 
 **Updates**
-- Update one site, a selection or the whole fleet — manually or on a **nightly cycle**
-  that retries what failed
+- Update one site, a selection or the whole fleet — by hand or with the **hourly automatic
+  cycle** (`AUTOUPDATE_ENABLED=true`), which retries failed items after a pause (24 hours by
+  default)
+- **Update buttons are explicit requests**: they run even when automatic updates are off for
+  the site or an item is paused after a failure, and the panel follows the update and shows
+  the outcome — "2 updated, 1 failed", "nothing to update", "the site does not answer: HTTP 401"
 - **Bulk install and remove** across many sites, guided step by step: pick the platform,
   the package or the extension, then the target sites by folder. Removal only reaches the
   sites that actually have that extension
+- **Bulk install runs in the background**: one job per site with live progress, it carries on
+  if you close the browser (and the page picks it up again), and timeouts or server errors are
+  retried a minute later; real errors (rejected token, broken zip) stop at once
+- **Brake for weak servers**: sites are grouped by server (the IP address of their domain),
+  shown by client folder with the server's name. On the servers you brake you choose how many
+  sites at a time, how long the server rests after a site and the pause between updates on
+  the same site; the other servers work as always
 - Update history with, for every component, how many times it was updated and from which
   version to which
 - **Homepage check**: a snapshot before and after every update; the report says whether the
   site looks the same, changed noticeably (snapshots attached) or broke
 - Licensed products (e.g. Elementor Pro) are updated from inside the WordPress admin; when a
   site cannot download them, Sentinel installs the zip you uploaded once in *Packages*
+- **Take a licensed package from a site**: search a plugin or theme by name across your
+  WordPress sites and take the zip of the highest version installed, ready to install on the
+  sites the vendor does not reach
 - Elementor and Elementor Pro move together: Elementor never jumps to a new major version
   while Pro is left behind
+- **Readable errors**: no HTML entities, no download links with tokens, no progress lines —
+  just the sentence that matters, with a hint when the likely cause is a full disk
 
 **Security and renewals**
 - Vulnerability feed matched against the extensions actually installed, with severity and
@@ -46,10 +70,29 @@ Your server, your data, your branding.
 **Reports and notifications**
 - Email and Telegram messages per event, with **editable templates**, live preview and a
   test send
-- **Monthly PDF report**, global or one per folder, sent automatically to the address you set
+- **One summary per automatic cycle** on Telegram: one block per site with its folder, core and
+  major components first, long lists folded, and on top what needs a look — failures with
+  their reason, items waiting, homepages that changed. Long summaries are split between sites,
+  never inside one. By email: **one message per site** (result and folder in the subject, handy
+  for mail rules) or **one summary per cycle**
+- **Monthly PDF report**, global or one per folder, sent automatically on the day and at the
+  time you choose (hours and minutes)
+- **Site status** in every report: for each site CMS and version, PHP with its support state,
+  domain expiry, size and its growth over the last month, database, writable space and core
+  files, with the values that need attention in red
+- **Client reports**: every client receives each month the report of **their own sites only**,
+  at their own addresses — never yours, never Telegram — signed "Report by" your company.
+  Sites and clients are many-to-many: usually one site per client, but a **group** (for example
+  every site of an agency) gets one report for all its sites, with one address. Clients are
+  created from the sites (one per site, or one group for a whole folder), merged, deleted in
+  bulk; sites are added to or removed from a group, with **autocomplete** on groups, clients and
+  folders. The client reports have **their own settings** — automatic sending, day and time,
+  sections, texts and PDF layout — separate from your monthly report, with a live preview on
+  any client
 - **Detailed reports on demand** (PDF or CSV) for one site, a selection or everything, over
   any range of months, with the full history of every update
-- Statistics with daily, monthly and month-against-month views
+- Statistics with daily, monthly and month-against-month views, rankings of the most updated
+  sites and components
 
 **Administration**
 - Password sign-in with **TOTP** and **passkeys**
@@ -136,6 +179,10 @@ A site can also be added by hand: install the package, copy the token the connec
 paste it when adding the site in the panel. The sources live in `connectors/` and are neutral —
 no address, no key — so anyone can build their own; see `connectors/README.md`.
 
+Diagnostics, site size and *Take from a site* need **connector 2.19 or later on WordPress and
+1.30 or later on Joomla**. Until a site has run diagnostics, the *Diagnostics* box on its page
+says which connector it needs.
+
 ---
 
 ## What goes where
@@ -145,11 +192,14 @@ no address, no key — so anyone can build their own; see `connectors/README.md`
 | Logo, favicon, panel name | Settings → Branding |
 | Rename a folder | pencil next to the folder in the sidebar |
 | Zip of a licensed plugin to install everywhere | Settings → Packages |
+| Take the zip of a licensed plugin or theme from one of your sites | Settings → Packages → Take from a site |
 | After how many minutes a silent site is reported | Settings → Report a site as unreachable after |
 | Expiry thresholds, scan frequency, preview refresh, history retention | Settings |
 | Panel address and registration key for the connectors | Settings → Connectors |
+| One email per site or one summary per automatic cycle | Settings → Update report emails |
+| Writable space, PHP, permissions, core files, size history of a site | site page → Diagnostics, Site size |
 | Text, HTML and channels of every notification | Notifications |
-| Monthly report: day, recipient, content, layout | Monthly report |
+| Monthly report: day and time, recipient, content, layout | Monthly report |
 | Clients, their sites and addresses, automatic report to the client | Client reports |
 | Client reports: day, hour, sections, texts, PDF layout (one set for all clients) | Client reports → Settings |
 | Text of the email sent to clients with their report | Notifications → Monthly report to the client |
@@ -202,6 +252,12 @@ with them your history and settings.
 - **Updates fail on several sites at once** — it is almost always DNS or the filesystem, not the
   panel. `docker compose logs worker | grep "UPDATE FALLITO"` shows the real reason returned by
   each site.
+- **An update fails with `PCLZIP_ERR_BAD_FORMAT` or "not enough space"** — the hosting quota is
+  probably full, even if the server disk is not. On the site page, *Run diagnostics* writes real
+  data to the site and says how much space is actually writable.
+- **Updates time out on a cheap shared hosting** — put the brake on that server in
+  *Settings → Site servers*: fewer sites at a time, a rest after each site and a longer pause
+  between updates on the same site.
 - **No preview, or a blank rectangle where a video is** — the screenshot service needs Google
   Chrome for H.264 background videos: `docker compose logs shooter | grep pronto` should mention
   Chrome. Rebuild with `docker compose build shooter` if it fell back to Chromium.
