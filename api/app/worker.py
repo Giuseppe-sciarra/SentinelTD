@@ -1849,12 +1849,10 @@ async def monthly_report(ctx):
     la configurazione, genera il PDF del mese PRECEDENTE e lo invia. Il periodo gia'
     inviato viene memorizzato, quindi nessun doppione anche con riavvii o ore ripetute."""
     from . import report as rep
-    from .routers.reports import send_all
+    from .routers.reports import send_all, send_clients
     from .models import AppSetting
 
     cfg = await rep.get_config()
-    if not cfg.get("enabled", True):
-        return
     now = datetime.now()
     if now.day != int(cfg.get("send_day", 1)) or now.hour != int(cfg.get("send_hour", 8)):
         return
@@ -1875,7 +1873,10 @@ async def monthly_report(ctx):
                 if row.value == period:   # formato vecchio: periodo secco
                     sent_before = [rep.GLOBAL_KEY]
 
-    results = await send_all(period, only_pending=True, already=sent_before)
+    # il tuo report (se attivo) e quelli dei clienti con l'invio automatico attivo: stesso giorno e
+    # stessa ora. I clienti hanno il loro interruttore, indipendente da quello del tuo report.
+    results = await send_all(period, only_pending=True, already=sent_before) if cfg.get("enabled", True) else []
+    results += await send_clients(period, only_pending=True, already=sent_before)
     if not results:
         return
     ok_scopes = sent_before + [r["scope"] for r in results if r.get("sent")]

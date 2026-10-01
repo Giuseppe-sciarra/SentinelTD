@@ -40,6 +40,9 @@ function sentinel() {
     stats: { period: '', scope: '__all__', months: 12, data: null, trend: null, periods: [], scopes: [], mode: 'month', cmpA: '', cmpB: '', cmp: null, busy: false, hover: null, days: 30 },
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false },
+    cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
+           fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
+           open: {}, inSel: {}, ac: { field: null, idx: 0 } },
     sec2fa: { totp: false, passkeys: [], setup: null, code: '', msg: '', err: '' },
 
     // ---------- init ----------
@@ -161,7 +164,7 @@ function sentinel() {
       else if (p[0] === 'folder') { r.page = 'sites'; r.folder = decodeURIComponent(p[1] || ''); }
       else if (p[0] === 'site') { r.page = 'site'; r.siteId = parseInt(p[1]); r.tab = ['overview','ext','history'].includes(p[2]) ? p[2] : 'overview'; }
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
-      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'stats'].includes(p[0])) r.page = p[0];
+      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats'].includes(p[0])) r.page = p[0];
       this.route = r; this.sideOpen = false;
     },
     go(path) { location.hash = '#/' + path; },
@@ -177,6 +180,7 @@ function sentinel() {
       if (this.route.page === 'account') { await this.load2fa(); }
       if (this.route.page === 'notifications') { await this.loadNotif(); }
       if (this.route.page === 'reports') { await this.loadReports(); }
+      if (this.route.page === 'clients') { await this.loadClients(); }
       if (this.route.page === 'domain-expiries') { await this.loadPrefs(); await this.loadDomainExpiries(); }
       if (this.route.page === 'component-expiries') { await this.loadPrefs(); await this.loadComponentExpiries(); }
       window.scrollTo(0, 0);
@@ -1550,6 +1554,269 @@ function sentinel() {
     },
 
     // ---------- report mensile ----------
+    // ---------- report per cliente ----------
+    async loadClients() {
+      const [l, c, p] = await Promise.all([this.api('/api/clients'), this.api('/api/reports/config'), this.api('/api/reports/periods')]);
+      if (l.ok) this.cli.list = await l.json();
+      if (c.ok) { const d = await c.json(); this.cli.cfg = d.config; if (!this.cli.period) this.cli.period = d.suggested_period; }
+      if (p.ok) { this.cli.periods = await p.json(); if (!this.cli.periods.some(x => x.period === this.cli.period) && this.cli.periods.length) this.cli.period = this.cli.periods[0].period; }
+    },
+    get cliPeriodLabel() { const p = this.cli.periods.find(x => x.period === this.cli.period); return p ? p.label : this.cli.period; },
+    get cliSchedule() {
+      const c = this.cli.cfg; if (!c) return '';
+      return `Partono il giorno ${c.send_day} di ogni mese alle ${String(c.send_hour).padStart(2, '0')}:00, insieme al tuo report, con il mese precedente. Giorno e ora si cambiano in Report mensile.`;
+    },
+    get cliEnabledCount() { return this.cli.list.filter(c => c.enabled).length; },
+    async toggleClient(c, ev) {
+      const want = !c.enabled;
+      // accensione rifiutata o fallita: la casella cliccata va rimessa com'era, il dato non e' cambiato
+      const undo = () => { if (ev && ev.target) ev.target.checked = !!c.enabled; };
+      if (want && !c.email_list.length) { undo(); this.say(`${c.name}: aggiungi prima un indirizzo email`, 5000); return; }
+      if (want && !c.sites.length) { undo(); this.say(`${c.name}: associa prima almeno un sito`, 5000); return; }
+      const r = await this.api('/api/clients/' + c.id, { method: 'PUT', body: JSON.stringify({ enabled: want }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { Object.assign(c, d); this.say(want ? `Invio automatico attivo per ${c.name}` : `Invio automatico spento per ${c.name}`); }
+      else { undo(); this.say(d.detail || 'Non riuscito'); }
+    },
+    async previewClient(c) {
+      this.cli.busy = true; this.cli.err = ''; this.cli.htmlFor = c;
+      try {
+        const r = await this.api(`/api/clients/${c.id}/preview`, { method: 'POST', body: JSON.stringify({ period: this.cli.period }) });
+        if (r.ok) { this.cli.html = await r.text(); this.$nextTick(() => { const el = document.getElementById('cli-preview'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }); }
+        else { const d = await r.json().catch(() => ({})); this.cli.err = d.detail || 'Errore anteprima'; }
+      } finally { this.cli.busy = false; }
+    },
+    clientPdfUrl(c) { return `/api/clients/${c.id}/pdf?period=${encodeURIComponent(this.cli.period)}&k=${encodeURIComponent(this.imageToken)}`; },
+    async sendClientNow(c) {
+      if (!c.email_list.length) { this.say(`${c.name}: non ci sono indirizzi email`, 5000); return; }
+      if (!confirm(`Inviare ora a ${c.email_list.join(', ')} il report di ${this.cliPeriodLabel}?`)) return;
+      this.cli.sending = c.id;
+      try {
+        const r = await this.api(`/api/clients/${c.id}/send`, { method: 'POST', body: JSON.stringify({ period: this.cli.period }) });
+        const d = await r.json().catch(() => ({}));
+        this.say(r.ok ? `Report di ${c.name} inviato a ${(d.to || []).join(', ')}` : `${c.name}: ${d.detail || 'invio non riuscito'}`, 6000);
+      } finally { this.cli.sending = 0; }
+    },
+    openClient(c = null) {
+      this.cli.edit = c ? { id: c.id, name: c.name, emails: c.emails, enabled: c.enabled, site_ids: c.sites.map(x => x.id) }
+                        : { id: null, name: '', emails: '', enabled: false, site_ids: [] };
+      this.cli.q = ''; this.cli.err = ''; this.drawer = 'client';
+    },
+    get cliSiteChoices() {
+      const q = (this.cli.q || '').trim().toLowerCase();
+      const sel = (this.cli.edit && this.cli.edit.site_ids) || [];
+      return [...this.sites].filter(s => !q || (s.name || '').toLowerCase().includes(q) || (s.url || '').toLowerCase().includes(q) || (s.tags || '').toLowerCase().includes(q))
+        .sort((a, b) => (sel.includes(b.id) - sel.includes(a.id)) || (a.name || '').localeCompare(b.name || '', 'it'));
+    },
+    cliToggleSite(id) {
+      const s = this.cli.edit.site_ids;
+      this.cli.edit.site_ids = s.includes(id) ? s.filter(x => x !== id) : [...s, id];
+    },
+    async saveClient() {
+      const e = this.cli.edit; this.cli.err = '';
+      if (!e.name.trim()) { this.cli.err = 'Serve il nome del cliente'; return; }
+      const target = this.cliNewTarget;
+      if (target) {
+        // "Nuovo cliente" col nome di uno esistente: niente doppione, i siti si aggiungono a quello
+        const r = await this.api(`/api/clients/${target.id}/add-sites`, { method: 'POST', body: JSON.stringify({ site_ids: e.site_ids, emails: e.emails }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.cli.err = d.detail || 'Salvataggio non riuscito'; return; }
+        this.drawer = null; await this.loadClients();
+        this.say(`${d.added} ${this.pl(d.added, 'sito aggiunto', 'siti aggiunti')} a ${d.client.name}`, 5000);
+        return;
+      }
+      const r = await this.api(e.id ? '/api/clients/' + e.id : '/api/clients', { method: e.id ? 'PUT' : 'POST', body: JSON.stringify(e) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.cli.err = d.detail || 'Salvataggio non riuscito'; return; }
+      this.drawer = null; await this.loadClients(); this.say(`Cliente ${d.name} salvato`);
+    },
+    async deleteClient(c) {
+      if (!confirm(`Eliminare il cliente ${c.name}? I siti non vengono toccati.`)) return;
+      const r = await this.api('/api/clients/' + c.id, { method: 'DELETE' });
+      if (r.ok) { if (this.cli.htmlFor && this.cli.htmlFor.id === c.id) { this.cli.html = ''; this.cli.htmlFor = null; } await this.loadClients(); }
+      else this.say('Eliminazione non riuscita');
+    },
+    // ---- cartelle e gruppi di clienti ----
+    get cliFolders() {
+      return [...new Set(this.sites.flatMap(s => this.siteTags(s)))].sort((a, b) => a.localeCompare(b, 'it', { numeric: true }));
+    },
+    cliFolderSites(f) { return this.sites.filter(s => this.siteTags(s).some(t => t === f || t.startsWith(f + '/'))).map(s => s.id); },
+    cliFolderName(f) { return String(f || '').split('/').pop().replace(/^\s*\d+\s*[.)-]\s*/, '').trim() || f; },
+    // nella modifica: aggiunge tutta la cartella, oppure la toglie se c'e' gia' tutta
+    cliEditFolder(f) {
+      const ids = this.cliFolderSites(f), cur = this.cli.edit.site_ids;
+      this.cli.edit.site_ids = ids.every(id => cur.includes(id)) ? cur.filter(id => !ids.includes(id)) : [...new Set([...cur, ...ids])];
+    },
+    cliEditHasFolder(f) { const ids = this.cliFolderSites(f); return ids.length && ids.every(id => this.cli.edit.site_ids.includes(id)); },
+    // selezione dei clienti nella lista: unisci, elimina
+    cliToggleSel(c) { this.cli.sel = this.cli.sel.includes(c.id) ? this.cli.sel.filter(x => x !== c.id) : [...this.cli.sel, c.id]; },
+    cliSelectFolder(f) {
+      const ids = new Set(this.cliFolderSites(f));
+      const match = this.cli.list.filter(c => c.sites.length && c.sites.every(s => ids.has(s.id))).map(c => c.id);
+      this.cli.sel = match.every(id => this.cli.sel.includes(id)) ? this.cli.sel.filter(id => !match.includes(id)) : [...new Set([...this.cli.sel, ...match])];
+    },
+    cliSelFolderOn(f) {
+      const ids = new Set(this.cliFolderSites(f));
+      const match = this.cli.list.filter(c => c.sites.length && c.sites.every(s => ids.has(s.id))).map(c => c.id);
+      return match.length && match.every(id => this.cli.sel.includes(id));
+    },
+    cliExitSel() { this.cli.selMode = false; this.cli.sel = []; },
+    openMerge() {
+      const chosen = this.cli.list.filter(c => this.cli.sel.includes(c.id));
+      if (chosen.length < 2) return;
+      // nome proposto: la cartella comune a tutti i siti scelti (senza il numero davanti), altrimenti il primo cliente
+      const siteIds = new Set(chosen.flatMap(c => c.sites.map(s => s.id)));
+      const common = this.cliFolders.find(f => { const ids = new Set(this.cliFolderSites(f)); return [...siteIds].every(id => ids.has(id)); });
+      this.cli.merge = { name: common ? this.cliFolderName(common) : chosen[0].name,
+                         emails: [...new Set(chosen.flatMap(c => c.email_list))].join(', '), count: chosen.length, sites: siteIds.size };
+      this.cli.err = ''; this.drawer = 'clientmerge';
+    },
+    async mergeClients() {
+      this.cli.err = '';
+      const r = await this.api('/api/clients/merge', { method: 'POST', body: JSON.stringify({ ids: this.cli.sel, name: this.cli.merge.name, emails: this.cli.merge.emails }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.cli.err = d.detail || 'Unione non riuscita'; return; }
+      this.drawer = null; this.cliExitSel(); await this.loadClients();
+      this.say(`Clienti uniti in ${d.name}: ${d.sites.length} ${this.pl(d.sites.length, 'sito', 'siti')}, un solo report`, 6000);
+    },
+    // selezione rapida da fuori: tutti, solo i clienti con un sito, solo i gruppi
+    cliSelectKind(kind) {
+      const ids = this.cli.list.filter(c => kind === 'all' || (kind === 'group' ? c.sites.length > 1 : c.sites.length <= 1)).map(c => c.id);
+      this.cli.sel = ids.every(id => this.cli.sel.includes(id)) ? this.cli.sel.filter(id => !ids.includes(id)) : [...new Set([...this.cli.sel, ...ids])];
+    },
+    async bulkDeleteClients() {
+      const n = this.cli.sel.length; if (!n) return;
+      // i gruppi si dicono a parte: il pulsante della cartella prende anche il gruppo di quella cartella
+      const groups = this.cli.list.filter(c => this.cli.sel.includes(c.id) && c.sites.length > 1).map(c => c.name);
+      const extra = groups.length ? ` Tra questi ${groups.length === 1 ? 'c\'è il gruppo' : 'ci sono i gruppi'}: ${groups.join(', ')}.` : '';
+      if (!confirm(`Eliminare ${n} ${this.pl(n, 'cliente', 'clienti')}? I siti non vengono toccati.` + extra)) return;
+      const r = await this.api('/api/clients/bulk-delete', { method: 'POST', body: JSON.stringify({ ids: this.cli.sel }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { this.cliExitSel(); this.cli.html = ''; this.cli.htmlFor = null; await this.loadClients(); this.say(`${d.deleted} ${this.pl(d.deleted, 'cliente eliminato', 'clienti eliminati')}`); }
+      else this.say('Eliminazione non riuscita');
+    },
+    // ---- autocompletamento del nome: gruppi e clienti gia' creati, poi le cartelle ----
+    cliFindClient(name) {
+      const n = String(name || '').trim().toLowerCase();
+      return n ? this.cli.list.find(c => c.name.trim().toLowerCase() === n) || null : null;
+    },
+    // nome di un cliente esistente in "Crea dai siti" (modalita' gruppo) -> si aggiunge a quello
+    get cliFromTarget() { return this.cli.fromMode === 'group' ? this.cliFindClient(this.cli.fromName) : null; },
+    // nome di un cliente esistente in "Nuovo cliente" -> si aggiunge a quello invece di farne un doppione
+    get cliNewTarget() { return this.cli.edit && !this.cli.edit.id ? this.cliFindClient(this.cli.edit.name) : null; },
+    cliAcQuery(field) { return field === 'from' ? this.cli.fromName : ((this.cli.edit && this.cli.edit.name) || ''); },
+    cliAcItems(field) {
+      const q = String(this.cliAcQuery(field) || '').trim().toLowerCase();
+      const has = x => !q || x.toLowerCase().includes(q);
+      const clients = this.cli.list.filter(c => has(c.name))
+        .sort((a, b) => ((b.sites.length > 1) - (a.sites.length > 1)) || a.name.localeCompare(b.name, 'it'))
+        .map(c => ({ key: 'c' + c.id, kind: 'client', label: c.name, client: c,
+                     sub: c.sites.length > 1 ? `${c.sites.length} siti` : (c.sites.length ? '1 sito' : 'nessun sito') }));
+      const names = new Set(this.cli.list.map(c => c.name.trim().toLowerCase()));
+      const folders = this.cliFolders.map(f => ({ f, label: this.cliFolderName(f) }))
+        .filter(x => !names.has(x.label.toLowerCase()) && (has(x.label) || has(x.f)))
+        .map(x => ({ key: 'f' + x.f, kind: 'folder', label: x.label, folder: x.f, sub: `${x.f} · ${this.cliFolderSites(x.f).length} siti` }));
+      // il nome scritto identico a un cliente non va riproposto da solo
+      const items = [...clients, ...folders];
+      return items.length === 1 && items[0].kind === 'client' && items[0].label.trim().toLowerCase() === q ? [] : items.slice(0, 10);
+    },
+    cliAcOpen(field) { this.cli.ac = { field, idx: 0 }; },
+    cliAcMove(field, d) {
+      const n = this.cliAcItems(field).length; if (!n) return;
+      if (this.cli.ac.field !== field) { this.cli.ac = { field, idx: 0 }; return; }
+      this.cli.ac.idx = (this.cli.ac.idx + d + n) % n;
+    },
+    cliAcEnter(field) {
+      const items = this.cliAcItems(field);
+      if (this.cli.ac.field === field && items.length) this.cliAcChoose(field, items[Math.min(this.cli.ac.idx, items.length - 1)]);
+    },
+    cliAcChoose(field, it) {
+      const ids = it.kind === 'folder' ? this.cliFolderSites(it.folder) : [];
+      if (field === 'from') {
+        this.cli.fromName = it.label;
+        if (ids.length) this.cli.fromSel = [...new Set([...this.cli.fromSel, ...ids])];
+      } else if (this.cli.edit) {
+        this.cli.edit.name = it.label;
+        if (ids.length) this.cli.edit.site_ids = [...new Set([...this.cli.edit.site_ids, ...ids])];
+      }
+      this.cli.ac = { field: null, idx: 0 };
+    },
+    cliInTarget(s) { const t = this.cliFromTarget; return !!(t && t.sites.some(x => x.id === s.id)); },
+    // dal gruppo: "Aggiungi siti" apre Crea dai siti gia' puntato su quel gruppo
+    cliAddTo(c) {
+      this.openClientsFromSites();
+      this.cli.fromMode = 'group'; this.cli.fromName = c.name;
+    },
+    // ---- dentro un gruppo: righe dei siti, selezione e "togli dal gruppo" in blocco ----
+    cliInSel(c) { return this.cli.inSel[c.id] || []; },
+    cliInToggle(c, sid) {
+      const cur = this.cliInSel(c);
+      this.cli.inSel = { ...this.cli.inSel, [c.id]: cur.includes(sid) ? cur.filter(x => x !== sid) : [...cur, sid] };
+    },
+    cliInAll(c) { this.cli.inSel = { ...this.cli.inSel, [c.id]: c.sites.map(s => s.id) }; },
+    cliInNone(c) { this.cli.inSel = { ...this.cli.inSel, [c.id]: [] }; },
+    async cliRemoveSites(c) {
+      const out = this.cliInSel(c); if (!out.length) return;
+      const left = c.sites.filter(s => !out.includes(s.id)).map(s => s.id);
+      const msg = left.length
+        ? `Togliere ${out.length} ${this.pl(out.length, 'sito', 'siti')} da ${c.name}? Escono dal suo report; i siti non vengono toccati.`
+        : `Togliere tutti i siti da ${c.name}? Il cliente resta senza siti e il suo report non parte finché non ne aggiungi. I siti non vengono toccati.`;
+      if (!confirm(msg)) return;
+      const r = await this.api('/api/clients/' + c.id, { method: 'PUT', body: JSON.stringify({ site_ids: left }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.say(d.detail || 'Non riuscito'); return; }
+      Object.assign(c, d); this.cliInNone(c);
+      this.say(`${out.length} ${this.pl(out.length, 'sito tolto', 'siti tolti')} da ${c.name}`);
+    },
+    // un cliente per ogni sito che non ne ha ancora uno
+    get cliFreeSites() {
+      const taken = new Set(this.cli.list.flatMap(c => c.sites.map(s => s.id)));
+      const q = (this.cli.fromQ || '').trim().toLowerCase();
+      return this.sites.filter(s => !taken.has(s.id) && (!q || (s.name || '').toLowerCase().includes(q) || (s.tags || '').toLowerCase().includes(q)))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'it'));
+    },
+    openClientsFromSites() {
+      Object.assign(this.cli, { fromSel: [], fromQ: '', fromMode: 'each', fromName: '', fromEmails: '', err: '' });
+      this.drawer = 'clientsfrom';
+    },
+    // modalita' "gruppo": tutti i siti (anche quelli con un cliente singolo); "uno per sito": solo quelli senza cliente
+    get cliFromChoices() {
+      if (this.cli.fromMode !== 'group') return this.cliFreeSites;
+      const q = (this.cli.fromQ || '').trim().toLowerCase();
+      return this.sites.filter(s => !q || (s.name || '').toLowerCase().includes(q) || (s.tags || '').toLowerCase().includes(q))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'it'));
+    },
+    cliFromFolder(f) {
+      const avail = new Set(this.cliFromChoices.map(s => s.id));
+      const ids = this.cliFolderSites(f).filter(id => avail.has(id) || this.cli.fromMode === 'group');
+      const allIn = ids.length && ids.every(id => this.cli.fromSel.includes(id));
+      this.cli.fromSel = allIn ? this.cli.fromSel.filter(id => !ids.includes(id)) : [...new Set([...this.cli.fromSel, ...ids])];
+      if (!allIn && this.cli.fromMode === 'group' && !this.cli.fromName.trim()) this.cli.fromName = this.cliFolderName(f);
+    },
+    get cliFromNew() { return this.cli.fromSel.filter(id => !(this.cliFromTarget && this.cliFromTarget.sites.some(s => s.id === id))); },
+    async createClientsFromSites() {
+      if (!this.cli.fromSel.length) return;
+      const group = this.cli.fromMode === 'group';
+      if (group && !this.cli.fromName.trim()) { this.cli.err = 'Dai un nome al cliente'; return; }
+      const target = this.cliFromTarget;
+      if (target) {
+        // cliente/gruppo gia' creato: i siti si aggiungono, quelli gia' dentro restano
+        if (!this.cliFromNew.length) { this.cli.err = `I siti scelti sono già tutti in ${target.name}`; return; }
+        const r = await this.api(`/api/clients/${target.id}/add-sites`, { method: 'POST', body: JSON.stringify({ site_ids: this.cliFromNew, emails: this.cli.fromEmails }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.cli.err = d.detail || 'Non riuscito'; return; }
+        this.drawer = null; await this.loadClients();
+        this.say(`${d.added} ${this.pl(d.added, 'sito aggiunto', 'siti aggiunti')} a ${d.client.name}: ora ${d.client.sites.length} ${this.pl(d.client.sites.length, 'sito', 'siti')}, un solo report`, 6000);
+        return;
+      }
+      const body = { site_ids: this.cli.fromSel, mode: group ? 'group' : 'each', name: this.cli.fromName, emails: this.cli.fromEmails };
+      const r = await this.api('/api/clients/from-sites', { method: 'POST', body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.cli.err = d.detail || 'Non riuscito'; return; }
+      this.drawer = null; await this.loadClients();
+      if (group) this.say(`Cliente ${d.client.name} creato con ${d.client.sites.length} ${this.pl(d.client.sites.length, 'sito', 'siti')}: un solo report per tutti`, 6000);
+      else this.say(`${d.created} ${this.pl(d.created, 'cliente creato', 'clienti creati')}: aggiungi gli indirizzi email e accendi l'invio`, 6000);
+    },
     async loadReports() {
       const [c, p, sc] = await Promise.all([this.api('/api/reports/config'), this.api('/api/reports/periods'), this.api('/api/reports/scopes')]);
       if (c.ok) { const d = await c.json(); this.rep.cfg = d.config; this.rep.template = d.template; this.rep.defaultTemplate = d.default_template; if (!this.rep.period) this.rep.period = d.suggested_period; }

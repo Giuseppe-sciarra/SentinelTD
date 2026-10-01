@@ -115,6 +115,9 @@
         <a :class="route.page==='reports'?'on':''" href="#/reports">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
           <span class="txt">Report mensile</span></a>
+        <a :class="route.page==='clients'?'on':''" href="#/clients">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span class="txt">Report clienti</span></a>
         <a :class="route.page==='account'?'on':''" href="#/account">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
           <span class="txt">Account</span></a>
@@ -378,7 +381,7 @@
                       <div class="d"><span :class="statDeltaFail(stats.data.totals.failed,stats.data.prev_totals.failed).cls" x-text="statDeltaFail(stats.data.totals.failed,stats.data.prev_totals.failed).txt"></span></div></div>
                   </div>
 
-                  <div class="grid two" style="margin-top:14px">
+                  <div class="grid two stat-cols" style="margin-top:14px">
                     <div>
                       <h3>Siti più aggiornati — <span x-text="stats.data.period_label"></span></h3>
                       <template x-for="(s, si) in stats.data.top_sites" :key="'ts'+s.site_id">
@@ -881,6 +884,94 @@
         </template>
 
         <!-- ===== REPORT MENSILE ===== -->
+        <template x-if="route.page==='clients'">
+          <div>
+            <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+              <div style="flex:1;min-width:280px">
+                <h1 class="page-title">Report per cliente</h1>
+                <div class="page-sub">Ogni cliente riceve lo stesso report che arriva a te, con i soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti con peso e spazio.</div>
+              </div>
+              <div class="row"><button class="btn" :class="cli.selMode ? 'on' : ''" @click="cli.selMode ? cliExitSel() : (cli.selMode = true)" x-text="cli.selMode ? 'Fine selezione' : 'Seleziona'"></button><button class="btn" @click="openClientsFromSites()">Crea dai siti</button><button class="btn primary" @click="openClient()">Nuovo cliente</button></div>
+            </div>
+            <div class="card cli-bar">
+              <div class="small mut" style="flex:1;min-width:260px" x-text="cliSchedule"></div>
+              <span class="badge" :class="cliEnabledCount ? 'ok' : ''" x-text="cliEnabledCount + ' ' + pl(cliEnabledCount, 'cliente con invio attivo', 'clienti con invio attivo')"></span>
+              <div class="row" style="gap:8px"><span class="small mut">Mese per anteprima e invio</span>
+                <select class="input" style="width:auto" x-model="cli.period"><template x-for="p in cli.periods" :key="'cp'+p.period"><option :value="p.period" :selected="p.period===cli.period" x-text="p.label"></option></template></select></div>
+            </div>
+            <div class="card cli-selbar" x-show="cli.selMode">
+              <div class="row" style="flex-wrap:wrap;gap:10px">
+                <b x-text="cli.sel.length + ' ' + pl(cli.sel.length, 'cliente selezionato', 'clienti selezionati')"></b>
+                <div class="sp"></div>
+                <button class="btn sm primary" @click="openMerge()" :disabled="!!(cli.sel.length < 2)">Unisci in un cliente</button>
+                <button class="btn sm danger" @click="bulkDeleteClients()" :disabled="!!(!cli.sel.length)">Elimina</button>
+                <button class="btn sm ghost" @click="cli.sel = []" x-show="cli.sel.length">Deseleziona</button>
+              </div>
+              <div class="cli-folders">
+                <span class="small mut">Seleziona:</span>
+                <button class="chip-btn" @click="cliSelectKind('all')">Tutti</button>
+                <button class="chip-btn" @click="cliSelectKind('single')">Solo singoli</button>
+                <button class="chip-btn" @click="cliSelectKind('group')">Solo gruppi</button>
+              </div>
+              <div class="cli-folders" x-show="cliFolders.length">
+                <span class="small mut">Seleziona i clienti di una cartella:</span>
+                <template x-for="f in cliFolders" :key="'sf'+f"><button class="chip-btn" :class="cliSelFolderOn(f) ? 'on' : ''" @click="cliSelectFolder(f)" x-text="f" translate="no"></button></template>
+              </div>
+            </div>
+            <div class="cli-list">
+              <template x-for="c in cli.list" :key="'cl'+c.id">
+                <div class="cli-row" :class="c.enabled ? 'on' : ''">
+                  <label class="srv-sw" :title="c.enabled ? 'Invio automatico attivo' : 'Invio automatico spento'"><input type="checkbox" :checked="c.enabled" @change="toggleClient(c, $event)"><span></span></label>
+                  <div class="cli-main">
+                    <div class="cli-name"><input type="checkbox" class="cli-check" x-show="cli.selMode" :checked="cli.sel.includes(c.id)" @change="cliToggleSel(c)"><span x-text="c.name" translate="no"></span><span class="badge ok" x-show="c.enabled">invio attivo</span><span class="badge" x-show="c.sites.length > 1" x-text="'gruppo · ' + c.sites.length + ' siti'"></span></div>
+                    <div class="small" :class="c.email_list.length ? 'mut' : 'warn'"><span x-show="c.email_list.length" x-text="c.email_list.join(', ')" translate="no"></span><span x-show="!c.email_list.length">nessun indirizzo email: aggiungilo per poter inviare</span></div>
+                    <div class="chips" style="margin-top:8px" x-show="c.sites.length <= 1">
+                      <template x-for="s in c.sites" :key="'cs'+c.id+'-'+s.id"><span class="chip"><span x-text="s.name" translate="no"></span></span></template>
+                      <span class="small warn" x-show="!c.sites.length">nessun sito associato</span>
+                    </div>
+                    <!-- gruppo: i siti come righe, con selezione e "togli dal gruppo" in blocco -->
+                    <div x-show="c.sites.length > 1" style="margin-top:8px">
+                      <button class="srv-more" @click="cli.open = { ...cli.open, [c.id]: !cli.open[c.id] }" x-text="(cli.open[c.id] ? 'Nascondi i ' : 'Mostra i ') + c.sites.length + ' siti del gruppo'"></button>
+                      <div class="cli-in" x-show="cli.open[c.id]">
+                        <div class="cli-in-bar">
+                          <span class="small mut" x-text="cliInSel(c).length + ' ' + pl(cliInSel(c).length, 'selezionato', 'selezionati')"></span>
+                          <div class="sp"></div>
+                          <button class="btn sm ghost" @click="cliInAll(c)">Tutti</button>
+                          <button class="btn sm ghost" @click="cliInNone(c)" x-show="cliInSel(c).length">Nessuno</button>
+                          <button class="btn sm" @click="cliAddTo(c)">Aggiungi siti</button>
+                          <button class="btn sm danger" @click="cliRemoveSites(c)" :disabled="!!(!cliInSel(c).length)" x-text="'Togli dal gruppo' + (cliInSel(c).length ? ' (' + cliInSel(c).length + ')' : '')"></button>
+                        </div>
+                        <template x-for="s in c.sites" :key="'ci'+c.id+'-'+s.id">
+                          <label class="cli-pick-row" :class="cliInSel(c).includes(s.id) ? 'on' : ''">
+                            <input type="checkbox" :checked="cliInSel(c).includes(s.id)" @change="cliInToggle(c, s.id)">
+                            <span class="cms" :class="s.cms" x-text="s.cms==='wp'?'WP':'J'"></span>
+                            <span style="min-width:0"><b x-text="s.name" translate="no"></b><span class="small mut" style="display:block" x-text="(s.url||'').replace(/^https?:\/\//,'') + (s.tags ? ' · ' + s.tags : '')" translate="no"></span></span>
+                          </label>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="cli-actions">
+                    <button class="btn sm" @click="previewClient(c)" :disabled="!!(cli.busy)">Anteprima</button>
+                    <a class="btn sm" :href="clientPdfUrl(c)" target="_blank" rel="noopener">PDF</a>
+                    <button class="btn sm" @click="sendClientNow(c)" :disabled="!!(cli.sending)"><span class="spinner" x-show="cli.sending===c.id"></span> Invia ora</button>
+                    <button class="btn sm" @click="openClient(c)">Modifica</button>
+                    <button class="btn sm ghost" @click="deleteClient(c)" title="Elimina il cliente">✕</button>
+                  </div>
+                </div>
+              </template>
+              <div class="card empty" x-show="!cli.list.length" style="padding:40px 20px">Nessun cliente ancora. Crea un cliente per ogni sito con <b>Crea dai siti</b>, oppure un cliente con più siti con <b>Nuovo cliente</b>.</div>
+            </div>
+            <div class="msg err" x-show="cli.err && drawer !== 'client'" x-text="cli.err"></div>
+            <div class="card" id="cli-preview" style="margin-top:16px" x-show="cli.html">
+              <div class="row" style="flex-wrap:wrap"><h3 style="margin:0;flex:1">Anteprima — <span x-text="cli.htmlFor ? cli.htmlFor.name : ''" translate="no"></span> · <span x-text="cliPeriodLabel"></span></h3><span class="spinner" x-show="cli.busy"></span><button class="btn sm ghost" @click="openPreviewFull(cli.html)">⤢ A tutta pagina</button><button class="btn sm ghost" @click="cli.html = ''; cli.htmlFor = null">Chiudi</button></div>
+              <div style="margin-top:10px;border:1px solid var(--bd);border-radius:8px;overflow:hidden">
+                <iframe :srcdoc="cli.html" sandbox="allow-same-origin" style="width:100%;height:600px;border:0;background:#fff;display:block" @load="fitFrame($event.target, 400, 30000)"></iframe>
+              </div>
+            </div>
+          </div>
+        </template>
+
         <template x-if="route.page==='reports'">
           <div>
             <div class="row" style="flex-wrap:wrap;gap:10px">
@@ -943,6 +1034,7 @@
                   <label class="check" style="padding:4px 0"><input type="checkbox" x-model="rep.cfg.show_failed" @change="repTouch()"> Aggiornamenti non riusciti</label>
                   <label class="check" style="padding:4px 0"><input type="checkbox" x-model="rep.cfg.show_compare" @change="repTouch()"> Confronto col mese precedente</label>
                   <label class="check" style="padding:4px 0"><input type="checkbox" x-model="rep.cfg.show_security" @change="repTouch()"> Stato sicurezza</label>
+                  <label class="check" style="padding:4px 0"><input type="checkbox" x-model="rep.cfg.show_site_stats" @change="repTouch()"> Stato dei siti (versioni, PHP, dominio, peso, spazio, file del core)</label>
                   <label class="check" style="padding:4px 0"><input type="checkbox" x-model="rep.cfg.show_expiries" @change="repTouch()"> Scadenze in arrivo</label>
                   <div class="field" style="margin-top:10px" x-show="rep.cfg.show_expiries"><label>Orizzonte scadenze (giorni)</label><input class="input" type="number" min="7" max="365" x-model.number="rep.cfg.expiry_horizon_days" @change="repTouch()"></div>
                 </div>
@@ -1392,6 +1484,119 @@
       <div class="hint">Più cartelle separate da virgola. I siti possono stare in più cartelle.</div>
     </div>
     <div class="foot"><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" @click="saveTags()">Applica</button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: CLIENTE ===================== -->
+<template x-if="token&&drawer==='client'&&cli.edit">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer bulk" @keydown.escape.window="drawer=null">
+    <div class="head"><h2 x-text="cli.edit.id ? 'Modifica cliente' : 'Nuovo cliente'"></h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="field"><label>Nome del cliente</label>
+        <template x-if="!cli.edit.id">
+        <div class="ac-wrap" @click.outside="if (cli.ac.field==='new') cli.ac.field = null">
+          <input class="input" x-model="cli.edit.name" placeholder="Scrivi o scegli un gruppo, un cliente o una cartella" autocomplete="off" @focus="cliAcOpen('new')" @input="cliAcOpen('new')"
+            @keydown.down.prevent="cliAcMove('new', 1)" @keydown.up.prevent="cliAcMove('new', -1)" @keydown.enter.prevent="cliAcEnter('new')"
+            @keydown.escape="if (cli.ac.field) { cli.ac.field = null; $event.stopPropagation() }">
+          <div class="ac-list" x-show="cli.ac.field==='new' && cliAcItems('new').length">
+            <template x-for="(it, i) in cliAcItems('new')" :key="'acnew'+it.key">
+              <button type="button" class="ac-item" :class="i===cli.ac.idx ? 'on' : ''" @mousedown.prevent="cliAcChoose('new', it)" @mouseenter="cli.ac.idx = i">
+                <span class="ac-kind" :class="it.kind" x-text="it.kind==='folder' ? 'cartella' : (it.client.sites.length > 1 ? 'gruppo' : 'cliente')"></span>
+                <span class="ac-label" x-text="it.label" translate="no"></span><span class="small mut" x-text="it.sub" translate="no"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+        </template>
+        <template x-if="cli.edit.id"><input class="input" x-model="cli.edit.name" placeholder="Hotel Esempio srl"></template>
+        <div class="ac-note" x-show="cliNewTarget"><b x-text="cliNewTarget ? cliNewTarget.name : ''" translate="no"></b> esiste già: salvando, i siti scelti e gli indirizzi scritti vengono aggiunti a quel cliente.</div></div>
+      <div class="field"><label>Email per il report</label><input class="input" x-model="cli.edit.emails" placeholder="info@cliente.it, titolare@cliente.it"><div class="hint">Più indirizzi separati da virgola. Il report va solo a questi indirizzi, mai al tuo.</div></div>
+      <label class="check" style="padding:4px 0 12px"><input type="checkbox" x-model="cli.edit.enabled"> Invio automatico ogni mese</label>
+      <div class="field"><label>Siti del cliente · <span x-text="cli.edit.site_ids.length"></span> selezionati</label>
+        <div class="cli-folders" x-show="cliFolders.length" style="margin:0 0 8px"><span class="small mut">Cartella intera:</span>
+          <template x-for="f in cliFolders" :key="'ef'+f"><button class="chip-btn" :class="cliEditHasFolder(f) ? 'on' : ''" @click="cliEditFolder(f)" x-text="f" translate="no"></button></template></div>
+        <input class="input" x-model="cli.q" placeholder="Cerca per nome, indirizzo o cartella"></div>
+      <div class="cli-pick">
+        <template x-for="s in cliSiteChoices" :key="'pk'+s.id">
+          <label class="cli-pick-row" :class="cli.edit.site_ids.includes(s.id) ? 'on' : ''">
+            <input type="checkbox" :checked="cli.edit.site_ids.includes(s.id)" @change="cliToggleSite(s.id)">
+            <span class="cms" :class="s.cms" x-text="s.cms==='wp'?'WP':'J'"></span>
+            <span style="min-width:0"><b x-text="s.name" translate="no"></b><span class="small mut" style="display:block" x-text="(s.url||'').replace(/^https?:\/\//,'') + (s.tags ? ' · ' + s.tags : '')" translate="no"></span></span>
+          </label>
+        </template>
+      </div>
+      <div class="msg err" x-show="cli.err" x-text="cli.err"></div>
+    </div>
+    <div class="foot"><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" @click="saveClient()" x-text="cliNewTarget ? ('Aggiungi a ' + cliNewTarget.name) : 'Salva'"></button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: CLIENTI DAI SITI ===================== -->
+<template x-if="token&&drawer==='clientsfrom'">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer bulk" @keydown.escape.window="drawer=null">
+    <div class="head"><h2>Crea dai siti</h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="seg" style="margin-bottom:10px">
+        <button :class="cli.fromMode==='each' ? 'on' : ''" @click="cli.fromMode='each'; cli.fromSel=[]">Un cliente per ogni sito</button>
+        <button :class="cli.fromMode==='group' ? 'on' : ''" @click="cli.fromMode='group'; cli.fromSel=[]">Un cliente unico con tutti i siti scelti</button>
+      </div>
+      <div class="hint" style="margin-bottom:10px" x-show="cli.fromMode==='each'">Un cliente per ogni sito scelto, col nome del sito e l'invio spento. Poi aggiungi gli indirizzi email e accendi l'invio. Qui ci sono solo i siti che non hanno ancora un cliente.</div>
+      <div x-show="cli.fromMode==='group'">
+        <div class="hint" style="margin-bottom:10px">Un solo cliente, un solo indirizzo e un solo report per tutti i siti scelti, per esempio tutta la cartella di un'agenzia. I siti possono avere anche il loro cliente singolo: arrivano sia il report del sito sia quello del gruppo.</div>
+        <div class="field"><label>Nome del cliente</label>
+        <div class="ac-wrap" @click.outside="if (cli.ac.field==='from') cli.ac.field = null">
+          <input class="input" x-model="cli.fromName" placeholder="Scrivi o scegli un gruppo, un cliente o una cartella" autocomplete="off" @focus="cliAcOpen('from')" @input="cliAcOpen('from')"
+            @keydown.down.prevent="cliAcMove('from', 1)" @keydown.up.prevent="cliAcMove('from', -1)" @keydown.enter.prevent="cliAcEnter('from')"
+            @keydown.escape="if (cli.ac.field) { cli.ac.field = null; $event.stopPropagation() }">
+          <div class="ac-list" x-show="cli.ac.field==='from' && cliAcItems('from').length">
+            <template x-for="(it, i) in cliAcItems('from')" :key="'acfrom'+it.key">
+              <button type="button" class="ac-item" :class="i===cli.ac.idx ? 'on' : ''" @mousedown.prevent="cliAcChoose('from', it)" @mouseenter="cli.ac.idx = i">
+                <span class="ac-kind" :class="it.kind" x-text="it.kind==='folder' ? 'cartella' : (it.client.sites.length > 1 ? 'gruppo' : 'cliente')"></span>
+                <span class="ac-label" x-text="it.label" translate="no"></span><span class="small mut" x-text="it.sub" translate="no"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+        <div class="ac-note" x-show="cliFromTarget"><b x-text="cliFromTarget ? cliFromTarget.name : ''" translate="no"></b> esiste già: i siti scelti vengono aggiunti a questo cliente, quelli già dentro restano.</div></div>
+        <div class="field"><label x-text="cliFromTarget ? 'Email da aggiungere (facoltativo)' : 'Email per il report'"></label><input class="input" x-model="cli.fromEmails" placeholder="info@cliente.it">
+          <div class="hint" x-show="cliFromTarget && cliFromTarget.email_list.length"><span>Ha già:</span> <span x-text="cliFromTarget ? cliFromTarget.email_list.join(', ') : ''" translate="no"></span></div></div>
+      </div>
+      <div class="cli-folders" x-show="cliFolders.length" style="margin:0 0 8px"><span class="small mut">Scegli una cartella intera:</span>
+        <template x-for="f in cliFolders" :key="'ff'+f"><button class="chip-btn" @click="cliFromFolder(f)" x-text="f" translate="no"></button></template></div>
+      <div class="row" style="gap:8px;margin-bottom:8px"><input class="input" x-model="cli.fromQ" placeholder="Cerca per nome o cartella"><button class="btn sm" @click="cli.fromSel = [...new Set([...cli.fromSel, ...cliFromChoices.map(s => s.id)])]">Tutti</button><button class="btn sm ghost" @click="cli.fromSel = []">Nessuno</button></div>
+      <div class="cli-pick">
+        <template x-for="s in cliFromChoices" :key="'fs'+s.id">
+          <label class="cli-pick-row" :class="cliInTarget(s) ? 'in' : (cli.fromSel.includes(s.id) ? 'on' : '')">
+            <input type="checkbox" :checked="cliInTarget(s) || cli.fromSel.includes(s.id)" :disabled="cliInTarget(s)" @change="cli.fromSel = cli.fromSel.includes(s.id) ? cli.fromSel.filter(x => x !== s.id) : [...cli.fromSel, s.id]">
+            <span class="cms" :class="s.cms" x-text="s.cms==='wp'?'WP':'J'"></span>
+            <span style="min-width:0"><b x-text="s.name" translate="no"></b> <span class="badge" x-show="cliInTarget(s)">già dentro</span><span class="small mut" style="display:block" x-text="(s.url||'').replace(/^https?:\/\//,'') + (s.tags ? ' · ' + s.tags : '')" translate="no"></span></span>
+          </label>
+        </template>
+        <div class="empty" x-show="!cliFromChoices.length" x-text="cli.fromMode==='group' ? 'Nessun sito trovato.' : 'Tutti i siti hanno già un cliente.'"></div>
+      </div>
+      <div class="msg err" x-show="cli.err" x-text="cli.err"></div>
+    </div>
+    <div class="foot"><button class="btn" @click="drawer=null">Annulla</button>
+      <button class="btn primary" @click="createClientsFromSites()" :disabled="!!(cliFromTarget ? !cliFromNew.length : !cli.fromSel.length)"
+        x-text="cliFromTarget ? ('Aggiungi ' + cliFromNew.length + ' ' + pl(cliFromNew.length, 'sito', 'siti') + ' a ' + cliFromTarget.name)
+              : (cli.fromMode==='group' ? ('Crea il cliente con ' + cli.fromSel.length + ' ' + pl(cli.fromSel.length, 'sito', 'siti')) : ('Crea ' + cli.fromSel.length + ' ' + pl(cli.fromSel.length, 'cliente', 'clienti')))"></button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: UNISCI CLIENTI ===================== -->
+<template x-if="token&&drawer==='clientmerge'">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer" @keydown.escape.window="drawer=null">
+    <div class="head"><h2>Unisci in un cliente</h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="hint" style="margin-bottom:12px" x-text="cli.merge.count + ' clienti diventano uno solo, con ' + cli.merge.sites + ' ' + pl(cli.merge.sites, 'sito', 'siti') + ' e un solo report che li raggruppa tutti. Gli altri clienti vengono eliminati; i siti non vengono toccati.'"></div>
+      <div class="field"><label>Nome del cliente</label><input class="input" x-model="cli.merge.name"></div>
+      <div class="field"><label>Email per il report</label><input class="input" x-model="cli.merge.emails" placeholder="info@cliente.it"><div class="hint">Sono già uniti gli indirizzi dei clienti scelti: togli quelli che non servono.</div></div>
+      <div class="msg err" x-show="cli.err" x-text="cli.err"></div>
+    </div>
+    <div class="foot"><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" @click="mergeClients()">Unisci</button></div>
   </div></div>
 </template>
 

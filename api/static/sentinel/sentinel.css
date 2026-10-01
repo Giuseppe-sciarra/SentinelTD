@@ -1020,3 +1020,50 @@ body.sb-dragging, body.sb-dragging * { cursor: col-resize !important; user-selec
 @media (max-width: 640px) {
   .srv-controls { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Report per cliente */
+.cli-bar { margin-top: 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.cli-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.cli-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 16px; align-items: start;
+           padding: 16px 18px; border: 1px solid var(--bd); border-radius: 12px; background: var(--panel); }
+.cli-row.on { border-color: rgba(61, 220, 151, .35); }
+.cli-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+.cli-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.cli-row .chip { background: var(--panel-2); border: 1px solid var(--bd); }
+.small.warn { color: var(--warn); }
+.cli-pick { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; max-height: 52vh; overflow: auto; }
+.cli-pick-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 9px 12px;
+                border-bottom: 1px solid var(--bd); cursor: pointer; }
+.cli-pick-row:last-child { border-bottom: 0; }
+.cli-pick-row.on { background: rgba(124, 92, 255, .10); }
+@media (max-width: 900px) {
+  .cli-row { grid-template-columns: 42px minmax(0, 1fr); }
+  .cli-actions { grid-column: 2; justify-content: flex-start; }
+}
+.cli-row .srv-sw input:checked + span { background: var(--ok); }
+/* Statistiche: le due classifiche larghe uguali (con 1.4fr 1fr i nomi dei componenti si tagliavano) */
+.grid.two.stat-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 960px) { .grid.two.stat-cols { grid-template-columns: 1fr; } }
+/* Report clienti: selezione, cartelle, gruppi */
+.cli-selbar { margin-top: 16px; border-color: var(--acc); }
+.cli-folders { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chip-btn { background: var(--panel-2); border: 1px solid var(--bd); color: var(--txt-2); border-radius: 6px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+.chip-btn:hover { border-color: var(--acc); color: var(--txt); }
+.chip-btn.on { background: rgba(124, 92, 255, .16); border-color: var(--acc); color: var(--txt); }
+.cli-check { width: 16px; height: 16px; margin: 0 2px 0 0; }
+.cli-in { margin-top: 8px; border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; }
+.cli-in-bar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--bd); }
+.cli-in .cli-pick-row { padding: 7px 12px; }
+/* autocompletamento del nome cliente/gruppo */
+.ac-wrap { position: relative; }
+.ac-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); max-height: 320px; overflow: auto;
+           background: var(--panel); border: 1px solid var(--bd-2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.35); padding: 4px; }
+.ac-item { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px; align-items: center; width: 100%; text-align: left;
+           background: none; border: 0; border-radius: 7px; padding: 7px 9px; color: var(--txt); cursor: pointer; }
+.ac-item.on { background: rgba(124, 92, 255, .16); }
+.ac-item .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-label { font-weight: 600; white-space: nowrap; }
+.ac-kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 5px; background: var(--panel-2); color: var(--txt-2); border: 1px solid var(--bd); }
+.ac-kind.folder { color: var(--mut); }
+.ac-note { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: rgba(61, 220, 151, .08); border: 1px solid rgba(61, 220, 151, .3); font-size: 12.5px; color: var(--txt-2); }
+.cli-pick-row.in { opacity: .65; cursor: default; }

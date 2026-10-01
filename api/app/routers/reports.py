@@ -211,6 +211,8 @@ async def send_report_for(period: str, scope: str = "") -> dict:
     from ..email import send_report as smtp_send
 
     scope = scope or rep.GLOBAL_KEY
+    if rep.is_client_scope(scope):
+        return await send_client_report(period, scope)
     cfg = await rep.get_config()
     html, blob, filename = await rep.build(period, scope)
     data = await rep.gather(period, cfg, scope)
@@ -294,3 +296,78 @@ async def detail_report(payload: dict = Body(...), s: AsyncSession = Depends(get
                         headers={"Content-Disposition": f'attachment; filename="{base}.html"'})
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{base}.pdf"'})
+
+
+# --------------------------------------------------------------------------
+# REPORT PER CLIENTE
+# --------------------------------------------------------------------------
+def client_emails(raw: str) -> list[str]:
+    import re
+    out = []
+    for x in re.split(r"[,;\s]+", raw or ""):
+        x = x.strip()
+        if x and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", x) and x.lower() not in [o.lower() for o in out]:
+            out.append(x)
+    return out
+
+
+async def send_client_report(period: str, scope: str) -> dict:
+    """Report del mese di UN cliente, inviato ai suoi indirizzi con l'email "Report mensile al
+    cliente" (modificabile in Notifiche). Mai su Telegram, mai all'indirizzo dell'agenzia."""
+    from ..db import SessionLocal
+    from ..email import send_report as smtp_send
+    from ..models import Client, ClientSite, Site
+    from ..notify import default_config as notif_default, get_config as notif_config, render as notif_render
+
+    cid = rep.client_id_of(scope)
+    async with SessionLocal() as s:
+        cl = await s.get(Client, cid)
+        site_rows = (await s.execute(select(Site).join(ClientSite, ClientSite.site_id == Site.id)
+                                     .where(ClientSite.client_id == cid).order_by(Site.name))).scalars().all() if cl else []
+    base = {"period": period, "scope": scope, "scope_label": cl.name if cl else f"cliente {cid}", "client_id": cid}
+    if not cl:
+        return {**base, "sent": False, "error": "cliente non trovato"}
+    emails = client_emails(cl.emails)
+    # senza indirizzi la funzione di invio userebbe REPORT_TO (l'agenzia): ci si ferma prima
+    if not emails:
+        return {**base, "sent": False, "error": "il cliente non ha indirizzi email"}
+    if not site_rows:
+        return {**base, "sent": False, "error": "il cliente non ha siti associati"}
+    ncfg = await notif_config("client_report")
+    if not ncfg.get("enabled", True):
+        return {**base, "sent": False, "error": "l'email al cliente è disattivata in Notifiche"}
+
+    cfg = await rep.get_config()
+    html, blob, filename = await rep.build(period, scope)
+    data = await rep.gather(period, cfg, scope)
+    names = ", ".join((x.url or "").replace("https://", "").replace("http://", "").rstrip("/") for x in site_rows)
+    ctx = {"client_name": cl.name, "period_label": data["period_label"], "company": cfg.get("company", ""),
+           "sites_total": len(site_rows), "sites_names": names, "total_updates": data["total_updates"],
+           "sites_touched": data["sites_touched"], "attachment": filename}
+    r = notif_render("client_report", ncfg, ctx)
+    if r["error"]:
+        r = notif_render("client_report", notif_default("client_report"), ctx)
+    mime = "application/pdf" if filename.endswith(".pdf") else "text/html"
+    try:
+        await smtp_send(r["subject"], r["body_email"], attachments=[(filename, mime, blob or html.encode("utf-8"))],
+                        to=", ".join(emails))
+    except Exception as ex:  # noqa: BLE001
+        return {**base, "sent": False, "error": str(ex)[:200]}
+    return {**base, "sent": True, "to": emails, "filename": filename, "pdf": blob is not None,
+            "updates": data["total_updates"], "sites": data["sites_touched"]}
+
+
+async def send_clients(period: str, only_pending: bool = False, already: list[str] | None = None) -> list[dict]:
+    """Report di tutti i clienti con l'invio automatico attivo."""
+    from ..db import SessionLocal
+    from ..models import Client
+    done = {x.lower() for x in (already or [])}
+    async with SessionLocal() as s:
+        clients = (await s.execute(select(Client).where(Client.enabled == True).order_by(Client.name))).scalars().all()  # noqa: E712
+    out = []
+    for cl in clients:
+        key = f"{rep.CLIENT_PREFIX}{cl.id}"
+        if only_pending and key.lower() in done:
+            continue
+        out.append(await send_client_report(period, key))
+    return out

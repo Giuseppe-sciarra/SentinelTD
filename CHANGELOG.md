@@ -1,5 +1,83 @@
 # Changelog
 
+## 2.11.4
+
+### Added
+- Client reports — **autocomplete** on the client name in *Create from sites* (group mode) and
+  in *New client*: existing groups first, then single clients, then folders (a folder also
+  picks all its sites). Arrow keys and Enter choose; Esc closes only the menu
+- **Add sites to an existing client/group**: when the name is the one of a client that already
+  exists, the chosen sites are added to it instead of creating a duplicate (sites already in
+  are shown as *already in* and locked; typed addresses are added to the existing ones). The
+  button says what will happen, e.g. *Add 3 sites to Flash Factory*. New endpoint
+  `POST /api/clients/{id}/add-sites`
+- *Add sites* button inside a group, which opens *Create from sites* already pointed at it
+
+## 2.11.3
+
+### Changed
+- Client reports: the PDF footer says only *Report di Tastiere Digitali* (the company set in
+  Monthly report), without the "generated automatically by Sentinel TD", the generation time
+  and the Sentinel version. Your own reports keep the full footer. A saved copy of the previous
+  default layout gets the new footer automatically
+
+## 2.11.2
+
+### Added
+- Client reports — **inside a group**: the group's sites are shown as rows (*Show the N sites
+  of the group*), each with a checkbox, plus *All / None / Remove from group (N)*. Removed sites
+  leave the group's report; the sites themselves are untouched. Removing every site asks for
+  an explicit confirmation (the group stays, without sites, and its report won't go out)
+- **From outside**, in the selection bar: *All*, *Singles only*, *Groups only*. Bulk delete now
+  names the groups among the selected clients in its confirmation — a folder button also
+  selects that folder's group, not only the single clients
+
+## 2.11.1
+
+### Added
+- Client reports — **groups**: *Create from sites* can now make *one single client with all
+  the chosen sites* (name and address of the group, one report grouping every site), besides
+  one client per site. In group mode every site can be chosen, including sites that already
+  have their own client, so both the single-site report and the group report are sent
+- **Select** on the client list: select clients one by one or a whole folder at once, then
+  **Merge into one client** (sites and addresses of all of them, one report; the others are
+  deleted, the sites are untouched) or **Delete** them
+- Folder buttons in *Create from sites* and in the client editor: a whole folder in one click,
+  a second click takes it out again. The name of the folder, without its leading number, is
+  proposed as the client name
+
+### Changed
+- Statistics: the *most updated sites* and *most updated components* columns are now the same
+  width (with 1.4fr / 1fr the component names on the right were cut)
+
+## 2.11.0
+
+### Added
+- **Client reports** (new *Client reports* page). A client receives every month the same
+  report you get, limited to their own sites, at the same day and hour as yours, to their own
+  addresses only. Sites and clients are many-to-many (usually one site, one client). Every
+  client has its own *automatic sending* switch, independent from your report's; it cannot
+  be turned on without an address and at least one site. Per client: preview, PDF, send now,
+  edit, delete. *Create from sites* makes one client per site that has none yet, with
+  sending off, ready for the addresses
+- New notification *Monthly report to the client*: subject and text written for the client,
+  editable in Notifications; email only, never Telegram, never your address (a client with no
+  address is stopped before sending — an empty recipient would fall back to `REPORT_TO`)
+- **Site status** section in every report, yours included (*Monthly report → Site status*,
+  on by default): for each site CMS and version, PHP with support state, domain expiry,
+  size with its growth over about a month and the database, writable space from the latest
+  diagnostics, core file check. Saved copies of the previous default layout get it
+  automatically; customised layouts stay as they are
+
+### Fixed
+- Reports limited to a folder counted the security vulnerabilities of every site; they are
+  now counted on the report's sites only
+- A report with no sites in its perimeter included every site's updates (`or not allowed`):
+  the filter is now strict. It never happened with folders, but a client without sites would
+  have received the other clients' data
+- Client reports leave out the agency's licences (global expiries)
+- Summary boxes in the PDF had a box inside each box (`.kpi div` matched the inner blocks too)
+
 ## 2.10.0
 
 ### Added

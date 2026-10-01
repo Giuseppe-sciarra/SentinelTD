@@ -327,3 +327,23 @@ class SiteSize(Base):
     core: Mapped[int] = mapped_column(BigInteger, default=0)
     db: Mapped[int] = mapped_column(BigInteger, default=0)
     complete: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Client(Base):
+    """Cliente che riceve il report mensile dei suoi siti.
+
+    Di norma un sito ha un cliente, ma i legami sono molti-a-molti: un cliente con piu' siti,
+    o un sito seguito da piu' clienti (es. l'agenzia e il proprietario).
+    """
+    __tablename__ = "clients"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(190))
+    emails: Mapped[str] = mapped_column(Text, default="")        # piu' indirizzi separati da virgola
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # invio automatico mensile
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientSite(Base):
+    __tablename__ = "client_sites"
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), primary_key=True, index=True)

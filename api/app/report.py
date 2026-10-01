@@ -10,6 +10,7 @@ librerie di sistema) il report viene comunque prodotto e allegato in HTML, cosi'
 la funzione degrada invece di rompersi.
 """
 import base64
+import hashlib
 import json
 import logging
 import mimetypes
@@ -18,10 +19,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jinja2 import Environment, BaseLoader, TemplateError
-from sqlalchemy import select, func, text
+from sqlalchemy import bindparam, select, func, text
 
 from .db import SessionLocal
-from .models import AppSetting, UpdateMonthly, Site, SiteExpiry
+from .models import AppSetting, UpdateMonthly, Site, SiteExpiry, SiteSize, Client, ClientSite
 from .config import settings
 
 from .i18n import t, template as localize_template
@@ -51,6 +52,7 @@ DEFAULTS = {
     "show_security": True,       # stato vulnerabilita'
     "show_expiries": True,       # scadenze domini/licenze in arrivo
     "show_compare": True,        # confronto col mese precedente + andamento
+    "show_site_stats": True,     # stato dei siti: versioni, PHP, dominio, peso, spazio, file del core
     "expiry_horizon_days": 60,
     # Report da produrre/inviare ogni mese. Ogni voce: {key, enabled}
     # key = "__all__" (tutti i siti) oppure il nome esatto di una cartella/tag.
@@ -59,6 +61,24 @@ DEFAULTS = {
 }
 
 GLOBAL_KEY = "__all__"
+CLIENT_PREFIX = "client:"        # perimetro "cliente": client:<id>
+
+
+def is_client_scope(scope: str) -> bool:
+    return bool(scope) and scope.startswith(CLIENT_PREFIX)
+
+
+def client_id_of(scope: str) -> int:
+    try:
+        return int(scope[len(CLIENT_PREFIX):])
+    except (TypeError, ValueError):
+        return 0
+
+
+# Impronte dei modelli predefiniti delle versioni precedenti: una copia salvata IDENTICA non e'
+# una personalizzazione, e' il vecchio default rimasto nel database -> si usa quello nuovo
+# (che ha in piu' la sezione "Stato dei siti").
+_LEGACY_TEMPLATE_HASHES = {"e6a0d240b2555349529d2f6f3ca8c34be80f1018bd7990e69407850013c87381", "1815888d7299da0ab27e1ffcfcf59aefb419fbbda23a4a76e9f26e3c8b0f38e3"}
 
 # ---------------------------------------------------------------- template
 DEFAULT_TEMPLATE = """<!doctype html>
@@ -75,7 +95,7 @@ DEFAULT_TEMPLATE = """<!doctype html>
   h2 { font-size: 13px; margin: 20px 0 8px; color: #1f2933; border-left: 3px solid #1f6feb; padding-left: 8px; }
   .intro { color: #444; margin-bottom: 14px; }
   .kpi { display: flex; gap: 10px; margin-bottom: 6px; }
-  .kpi div { flex: 1; border: 1px solid #e1e4e8; border-radius: 6px; padding: 10px 12px; }
+  .kpi > div { flex: 1; border: 1px solid #e1e4e8; border-radius: 6px; padding: 10px 12px; }
   .kpi .v { font-size: 20px; font-weight: 700; color: #1f6feb; }
   .kpi .k { font-size: 9.5px; color: #6a737d; text-transform: uppercase; letter-spacing: .04em; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
@@ -95,6 +115,9 @@ DEFAULT_TEMPLATE = """<!doctype html>
   .trend .tbar.cur { background: #1f6feb; }
   .trend .tl { font-size: 9px; color: #6a737d; margin-top: 3px; text-transform: capitalize; }
   .foot { margin-top: 22px; padding-top: 10px; border-top: 1px solid #e1e4e8; color: #8a949e; font-size: 9.5px; }
+  .st td { font-size: 10px; }
+  .st tr { page-break-inside: avoid; }
+  .sm { font-size: 9px; margin-top: 1px; }
 </style></head><body>
 
 <div class="head">
@@ -188,6 +211,26 @@ DEFAULT_TEMPLATE = """<!doctype html>
 {% endif %}
 {% endif %}
 
+{% if cfg.show_site_stats and site_stats %}
+<h2>Stato dei siti</h2>
+<table class="st">
+  <thead><tr><th>Sito</th><th>Versioni</th><th>Dominio</th><th>Peso</th><th>Spazio libero</th><th>File del core</th></tr></thead>
+  <tbody>
+  {% for x in site_stats %}
+    <tr>
+      <td><b>{{ x.name }}</b><div class="sm mut">{{ x.url }}</div></td>
+      <td>{{ x.cms_label }} {{ x.core or '' }}<div class="sm{% if x.php_state == 'fuori supporto' %} ko{% else %} mut{% endif %}">PHP {{ x.php or '—' }}{% if x.php_state %} · {{ x.php_state }}{% endif %}</div></td>
+      <td>{% if x.domain_date %}{{ x.domain_date }}<div class="sm{% if x.domain_days is not none and x.domain_days < 30 %} ko{% else %} mut{% endif %}">{% if x.domain_days is not none and x.domain_days < 0 %}scaduto da {{ -x.domain_days }} giorni{% else %}tra {{ x.domain_days }} giorni{% endif %}</div>{% else %}<span class="mut">—</span>{% endif %}</td>
+      <td>{% if x.size %}{{ x.size }}<div class="sm mut">{% if x.growth %}{{ x.growth }} in {{ x.growth_days }} giorni{% endif %}{% if x.db %}{% if x.growth %} · {% endif %}database {{ x.db }}{% endif %}</div>{% else %}<span class="mut">—</span>{% endif %}</td>
+      <td>{% if x.space %}<span class="{% if x.space_low %}ko{% endif %}">{{ x.space }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+      <td>{% if x.core_files %}<span class="{% if x.core_issues %}ko{% endif %}">{{ x.core_files }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="mut">Peso: file e database del sito. Spazio libero: quanto si riesce davvero a scrivere sul sito, misurato con l'ultima diagnostica.</div>
+{% endif %}
+
 {% if cfg.show_expiries and (domains or licenses) %}
 <h2>Scadenze nei prossimi {{ cfg.expiry_horizon_days }} giorni</h2>
 {% if domains %}
@@ -204,7 +247,7 @@ DEFAULT_TEMPLATE = """<!doctype html>
 {% endif %}
 {% endif %}
 
-<div class="foot">{{ cfg.footer }} &middot; generato il {{ generated_at }}{% if app_version %} &middot; Sentinel TD v{{ app_version }}{% endif %}</div>
+<div class="foot">{% if is_client %}{% if cfg.company %}Report di {{ cfg.company }}{% endif %}{% else %}{{ cfg.footer }} &middot; generato il {{ generated_at }}{% if app_version %} &middot; Sentinel TD v{{ app_version }}{% endif %}{% endif %}</div>
 </body></html>
 """
 
@@ -220,7 +263,8 @@ def normalize(data: dict | None) -> dict:
     for k in ("company", "title", "intro", "footer", "recipients"):
         if k in src and isinstance(src[k], str):
             out[k] = src[k].strip()[:2000]
-    for k in ("enabled", "show_summary", "show_sites", "show_top", "show_failed", "show_security", "show_expiries", "show_compare"):
+    for k in ("enabled", "show_summary", "show_sites", "show_top", "show_failed", "show_security", "show_expiries", "show_compare",
+              "show_site_stats"):
         if k in src:
             out[k] = bool(src[k])
     try:
@@ -261,9 +305,13 @@ def scope_label(key: str) -> str:
     return "Tutti i siti" if (not key or key == GLOBAL_KEY) else key
 
 
-def scope_slug(key: str) -> str:
+def scope_slug(key: str, label: str = "") -> str:
     if not key or key == GLOBAL_KEY:
         return "globale"
+    if is_client_scope(key):
+        import re as _re
+        base = _re.sub(r"[^a-z0-9]+", "-", (label or "").lower()).strip("-")
+        return "cliente-" + (base or str(client_id_of(key)))
     import re as _re
     s = _re.sub(r"[^a-z0-9]+", "-", key.lower()).strip("-")
     return s or "cartella"
@@ -302,6 +350,8 @@ async def get_template() -> str:
         async with SessionLocal() as s:
             row = await s.get(AppSetting, TEMPLATE_KEY)
             if row and row.value.strip():
+                if hashlib.sha256(row.value.strip().encode()).hexdigest() in _LEGACY_TEMPLATE_HASHES:
+                    return localize_template(DEFAULT_TEMPLATE)
                 return row.value
     except Exception:  # noqa: BLE001
         pass
@@ -389,15 +439,107 @@ async def _logo_data_uri() -> str:
 
 
 # ---------------------------------------------------------------- dati
+# ---------------------------------------------------------------- stato dei siti
+_PHP_EOL = {"8.1": ("2023-11-25", "2025-12-31"), "8.2": ("2024-12-31", "2026-12-31"), "8.3": ("2025-12-31", "2027-12-31"),
+            "8.4": ("2026-12-31", "2028-12-31"), "8.5": ("2027-12-31", "2029-12-31")}
+
+
+def _php_state(v: str) -> str:
+    """Stessa regola del pannello: '' (supportata), 'solo sicurezza', 'fuori supporto'."""
+    import re as _re
+    m = _re.match(r"\s*(\d+)\.(\d+)", v or "")
+    if not m:
+        return ""
+    major, minor = int(m.group(1)), int(m.group(2))
+    if major < 8 or (major == 8 and minor == 0):
+        return "fuori supporto"
+    d = _PHP_EOL.get(f"{major}.{minor}")
+    if not d:
+        return ""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if today > d[1]:
+        return "fuori supporto"
+    if today > d[0]:
+        return "solo sicurezza"
+    return ""
+
+
+def _fmt_bytes(b) -> str:
+    b = float(b or 0)
+    if b >= 1073741824:
+        return f"{b / 1073741824:.2f} GB".replace(".", ",")
+    if b >= 1048576:
+        return f"{b / 1048576:.1f} MB".replace(".", ",")
+    return f"{max(0, round(b / 1024))} KB"
+
+
+async def _site_stats(s, sites: list) -> list[dict]:
+    """Una riga per sito: versioni, PHP, dominio, peso e crescita, spazio scrivibile, file del core."""
+    if not sites:
+        return []
+    ids = [x.id for x in sites]
+    since = (datetime.now() - timedelta(days=45)).date()
+    hist: dict[int, list] = {}
+    for r in (await s.execute(select(SiteSize).where(SiteSize.site_id.in_(ids), SiteSize.day >= since)
+                              .order_by(SiteSize.day))).scalars().all():
+        hist.setdefault(r.site_id, []).append(r)
+    now = datetime.now(timezone.utc)
+    out = []
+    for x in sorted(sites, key=lambda z: (z.name or "").lower()):
+        diag = x.diag or {}
+        rows = hist.get(x.id) or []
+        last = rows[-1] if rows else None
+        size, growth, growth_days, db = "", "", 0, ""
+        if last:
+            size, db = _fmt_bytes(last.total), _fmt_bytes(last.db)
+            # crescita: rispetto al valore di circa un mese fa (il piu' recente con almeno 30 giorni),
+            # oppure al piu' vecchio disponibile; i giorni scritti sono quelli veri
+            older = [r for r in rows if (last.day - r.day).days >= 30]
+            ref = older[-1] if older else rows[0]
+            if ref is not last:
+                d = int(last.total) - int(ref.total)
+                growth = ("+" if d >= 0 else "−") + _fmt_bytes(abs(d)) if abs(d) >= 1048576 else "stabile"
+                growth_days = (last.day - ref.day).days
+        elif (diag.get("sizes") or {}).get("total"):
+            size, db = _fmt_bytes(diag["sizes"]["total"]), _fmt_bytes(diag["sizes"].get("db"))
+        sp = diag.get("space") or {}
+        space = ""
+        if sp:
+            space = (f"almeno {sp.get('tested_mb')} MB" if sp.get("ok") else f"solo {sp.get('written_mb')} MB").replace(".", ",")
+        core = diag.get("core") or {}
+        core_txt = {"ok": "integri", "issues": "da controllare"}.get(core.get("status"), "")
+        dexp = getattr(x, "domain_expires_at", None)
+        out.append({
+            "name": x.name, "url": (x.url or "").replace("https://", "").replace("http://", "").rstrip("/"),
+            "cms_label": "WordPress" if x.cms == "wp" else "Joomla", "core": x.core_current or "",
+            "php": x.php_version or "", "php_state": _php_state(x.php_version or ""),
+            "domain": getattr(x, "domain_name", "") or "",
+            "domain_date": dexp.strftime("%d/%m/%Y") if dexp else "",
+            "domain_days": (dexp - now).days if dexp else None,
+            "size": size, "growth": growth, "growth_days": growth_days, "db": db,
+            "space": space, "space_low": bool(sp) and not sp.get("ok"),
+            "core_files": core_txt, "core_issues": core.get("status") == "issues",
+        })
+    return out
+
+
 async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
     cfg = cfg or await get_config()
     horizon = int(cfg.get("expiry_horizon_days", 60))
+    client = is_client_scope(scope)
     only = "" if (not scope or scope == GLOBAL_KEY) else scope.strip().lower()
+    label = scope_label(scope)
 
     async with SessionLocal() as s:
         sites_rows = (await s.execute(select(Site))).scalars().all()
         by_id = {x.id: x for x in sites_rows}
-        if only:
+        if client:
+            # perimetro cliente: i siti associati al cliente, e il suo nome nell'intestazione
+            cl = await s.get(Client, client_id_of(scope))
+            label = cl.name if cl else "Cliente"
+            allowed = set((await s.execute(select(ClientSite.site_id).where(
+                ClientSite.client_id == client_id_of(scope)))).scalars().all())
+        elif only:
             allowed = {x.id for x in sites_rows
                        if any(t.strip().lower() == only or t.strip().lower().startswith(only + "/")
                               for t in (x.tags or "").split(","))}
@@ -407,7 +549,9 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
         rows = (await s.execute(
             select(UpdateMonthly).where(UpdateMonthly.period == period).order_by(UpdateMonthly.site_name, UpdateMonthly.ext_name)
         )).scalars().all()
-        rows = [r for r in rows if r.site_id in allowed or not allowed]
+        # filtro rigido: prima con un perimetro vuoto ("or not allowed") passavano TUTTI i siti,
+        # e nel report di un cliente senza siti sarebbero finiti i dati degli altri clienti
+        rows = [r for r in rows if r.site_id in allowed]
 
         # --- per sito ---
         sites: dict[int, dict] = {}
@@ -449,12 +593,14 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
         # --- sicurezza (stato attuale) ---
         security = {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}
         try:
-            res = (await s.execute(text("""
+            # contate sui soli siti del perimetro (prima: su tutti, anche nel report di una cartella)
+            q = text("""
                 SELECT v.severity, count(*) FROM vuln_matches m
                 JOIN vulnerabilities v ON v.id = m.vulnerability_id
-                WHERE m.is_vulnerable = true AND m.resolved_at IS NULL
+                WHERE m.is_vulnerable = true AND m.resolved_at IS NULL AND m.site_id IN :ids
                 GROUP BY v.severity
-            """))).all()
+            """).bindparams(bindparam("ids", expanding=True))
+            res = (await s.execute(q, {"ids": sorted(allowed)})).all() if allowed else []
             for sev, n in res:
                 security["total"] += n
                 if (sev or "").lower() in security:
@@ -478,14 +624,16 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
                 domains.append({"name": nm, "date": d.strftime("%d/%m/%Y"), "days": (d - now).days})
         domains.sort(key=lambda d: d["days"])
 
-        lic_rows = (await s.execute(
-            select(SiteExpiry).where(SiteExpiry.expires_at <= limit).order_by(SiteExpiry.expires_at)
-        )).scalars().all()
+        lic_q = select(SiteExpiry).where(SiteExpiry.expires_at <= limit).order_by(SiteExpiry.expires_at)
+        if client:
+            # le licenze sono dell'agenzia (scadenze globali): al cliente solo quelle legate ai suoi siti
+            lic_q = lic_q.where(SiteExpiry.site_id.in_(sorted(allowed) or [0]))
+        lic_rows = (await s.execute(lic_q)).scalars().all()
         licenses = [{"name": x.name, "provider": x.provider, "date": x.expires_at.strftime("%d/%m/%Y"),
                      "days": (x.expires_at - now).days} for x in lic_rows]
 
         # --- confronto col mese precedente + andamento ultimi 6 mesi ---
-        perimeter = allowed if only else None
+        perimeter = allowed if only else None   # per un cliente "only" e' "client:<id>", quindi i suoi siti
         prev = await month_stats(s, shift_period(period, -1), perimeter)
         trend = []
         for i in range(5, -1, -1):
@@ -494,6 +642,8 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
         for t in trend:
             t["h"] = max(2, round(t["updates"] * 46 / top_trend))   # altezza barra nel PDF (px)
             t["current"] = t["period"] == period
+
+        site_stats = await _site_stats(s, [x for x in sites_rows if x.id in allowed]) if cfg.get("show_site_stats", True) else []
 
     total_updates = sum(e["total"] for e in site_list)
     cur_stats = {"updates": total_updates, "failed": sum(f["count"] for f in failed_items),
@@ -506,8 +656,10 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
         "period": period,
         "period_label": period_label(period),
         "scope": scope or GLOBAL_KEY,
-        "scope_label": scope_label(scope),
+        "scope_label": label,
         "is_global": not only,
+        "is_client": client,
+        "site_stats": site_stats,
         "generated_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
         "total_updates": total_updates,
         "total_failed": sum(f["count"] for f in failed_items),
@@ -556,5 +708,10 @@ async def build(period: str, scope: str = "") -> tuple[str, bytes | None, str]:
     cfg = await get_config()
     html = await render_html(period, cfg=cfg, scope=scope)
     pdf = html_to_pdf(html)
-    base = f"report-{period}-{scope_slug(scope)}"
+    label = scope_label(scope)
+    if is_client_scope(scope):
+        async with SessionLocal() as s:
+            cl = await s.get(Client, client_id_of(scope))
+            label = cl.name if cl else ""
+    base = f"report-{period}-{scope_slug(scope, label)}"
     return html, pdf, (f"{base}.pdf" if pdf else f"{base}.html")

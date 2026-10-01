@@ -129,6 +129,28 @@ EVENTS: dict[str, dict[str, Any]] = {
         "email": """<p>🟢 <b>{{ site_name }}</b> di nuovo raggiungibile<br><a href="{{ site_url }}">{{ site_url }}</a></p>""",
         "telegram": "🟢 <b>{{ site_name }}</b> di nuovo raggiungibile\n{{ site_url }}",
     },
+    "client_report": {
+        "label": "Report mensile al cliente",
+        "desc": "Email al cliente con il PDF del report dei suoi siti allegato. Solo email, mai Telegram.",
+        "channels": {"email": True, "telegram": False},
+        "vars": {
+            "client_name": "Nome del cliente", "period_label": "Mese del report (es. settembre 2026)",
+            "company": "Ragione sociale nel report", "sites_total": "Siti del cliente",
+            "sites_names": "Nomi dei siti del cliente", "total_updates": "Aggiornamenti applicati nel mese",
+            "sites_touched": "Siti aggiornati nel mese", "attachment": "Nome del file allegato", "date": "Data e ora di generazione",
+        },
+        "subject": "Report manutenzione {{ period_label }} — {{ client_name }}",
+        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px;line-height:1.55">
+  <p>Gentile {{ client_name }},</p>
+  <p>in allegato trova il report delle attività di manutenzione svolte nel mese di <b>{{ period_label }}</b>
+  {% if sites_total == 1 %}sul sito {{ sites_names }}{% else %}sui suoi {{ sites_total }} siti ({{ sites_names }}){% endif %}.</p>
+  <p>{% if total_updates %}Nel periodo abbiamo applicato <b>{{ total_updates }}</b> aggiornamenti{% if sites_total > 1 %} su {{ sites_touched }} siti{% endif %}, tra componenti, temi e sistema.{% else %}Nel periodo non è stato necessario applicare aggiornamenti.{% endif %}
+  Nel report trova anche lo stato dei siti: versioni, scadenza del dominio, spazio occupato e sicurezza.</p>
+  <p>Per qualsiasi domanda restiamo a disposizione.</p>
+  <p>Cordiali saluti,<br>{{ company }}</p>
+</div>""",
+        "telegram": "",
+    },
     "monthly_report": {
         "label": "Report mensile",
         "desc": "Email di fine mese con il PDF del report allegato.",
@@ -243,6 +265,9 @@ SAMPLE: dict[str, dict[str, Any]] = {
                       "failed_lines": "• Sito D: ACF 6.8.7→6.8.8"},
     "site_offline": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "reason": "HTTP 503", "attempts": 3, "window_min": 12},
     "site_online": {"site_name": "Sito di prova", "site_url": "https://esempio.it"},
+    "client_report": {"client_name": "Hotel Esempio", "period_label": "settembre 2026", "company": "Tastiere Digitali",
+                      "sites_total": 1, "sites_names": "hotelesempio.it", "total_updates": 14, "sites_touched": 1,
+                      "attachment": "report-2026-09-cliente-hotel-esempio.pdf"},
     "monthly_report": {"period_label": "Agosto 2026", "company": "Tastiere Digitali", "total_updates": 128,
                        "total_failed": 2, "sites_touched": 31, "sites_total": 42, "distinct_items": 24,
                        "top_lines": "Più aggiornati: WooCommerce (14), YOOtheme (11), Akeeba Backup (9)",
@@ -696,7 +721,7 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
     for k in (
         "site_name", "site_url", "item", "reason", "ext_name", "ext_version", "cve_id", "title", "url",
         "ok_lines", "failed_lines", "version_fixed", "kind", "platform", "provider", "expires_on", "notes",
-        "period_label", "scope_label", "top_lines", "folder",
+        "period_label", "scope_label", "top_lines", "folder", "client_name", "sites_names",
     ):
         if k in out and isinstance(out[k], str):
             out[k] = _esc(out[k])
