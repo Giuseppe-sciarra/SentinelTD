@@ -101,6 +101,9 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   dei componenti più aggiornati
 
 **Amministrazione**
+- **Il pannello si aggiorna da solo**: pallini, etichette e la pagina del sito aperto seguono lo
+  stato reale entro pochi secondi, senza ricaricare. Ogni 6 secondi il browser chiede un'impronta
+  del parco di una riga (un `304` vuoto se nulla è cambiato) e scarica la lista solo quando serve
 - Accesso con password, **TOTP** e **passkey**
 - Personalizzazione: il tuo logo e la tua favicon nel pannello, nei PDF e nelle email
 - Interfaccia in **italiano, inglese, francese e tedesco**, connettori compresi

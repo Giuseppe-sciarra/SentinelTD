@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.13.0
+
+### Added
+- **The panel updates itself** without reloading and without weight. Before, the site list was
+  downloaded in full every 60 seconds whether or not anything had changed, and the site page
+  never refreshed on its own. Now every 6 seconds (only while the tab is visible) the browser
+  asks `GET /api/changes` for a one-line fingerprint of the fleet — last check, pending
+  updates, sites not ok, diagnostics — computed with a single aggregate query; with
+  `If-None-Match` the answer is an empty `304` when nothing changed. The list is downloaded
+  only when the fingerprint changes, and the open site page (with `?site=ID`) only when that
+  site changed, keeping what you are looking at. A full reload every 10 minutes remains as a
+  safety net; coming back to the tab checks at once
+
 ## 2.12.3
 
 ### Fixed

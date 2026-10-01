@@ -73,7 +73,40 @@ function sentinel() {
         if (e.key === 'ArrowLeft') { e.preventDefault(); this.shiftStatMonth(-1); }
         if (e.key === 'ArrowRight') { e.preventDefault(); this.shiftStatMonth(1); }
       });
-      setInterval(() => { if (this.token && !document.hidden) this.load(true); }, 60000);
+      // Pannello che si aggiorna da solo, senza pesare: ogni 6 secondi chiede a /api/changes
+      // l'impronta dello stato (una riga; 304 vuoto se nulla e' cambiato) e ricarica la lista
+      // solo quando cambia davvero; la pagina del sito aperto si rinfresca solo se e' cambiato
+      // lui. Fermo quando la scheda e' nascosta, riparte appena torna visibile. La ricarica
+      // completa ogni 10 minuti resta come rete di sicurezza.
+      this._rev = { all: '', site: '', sid: '', etag: '' };
+      setInterval(() => { if (this.token && !document.hidden) this.watchChanges(); }, 6000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && this.token) this.watchChanges(); });
+      setInterval(() => { if (this.token && !document.hidden) this.load(true); }, 10 * 60 * 1000);
+    },
+    async watchChanges() {
+      if (this._watching) return;
+      this._watching = true;
+      try {
+        const sid = (this.route.page === 'site' && this.detail) ? String(this.detail.id) : '';
+        const r = await fetch('/api/changes' + (sid ? '?site=' + sid : ''),
+                              { headers: { ...this.h(), 'If-None-Match': this._rev.etag || '' } });
+        if (r.status === 304) { this._rev.sid = sid; return; }
+        if (!r.ok) return;
+        const d = await r.json();
+        const prev = this._rev;
+        this._rev = { all: d.rev, site: d.site, sid, etag: r.headers.get('ETag') || '' };
+        if (!prev.all) return;                                   // prima impronta: niente da fare
+        if (d.rev !== prev.all) await this.load(true);           // qualcosa e' cambiato nel parco
+        if (sid && sid === prev.sid && d.site !== prev.site) await this.refreshDetail(this.detail.id);
+      } catch (e) { /* rete assente: si riprova al giro dopo */ } finally { this._watching = false; }
+    },
+    // aggiorna la pagina del sito senza toccare quello che stai guardando (riquadri aperti, grafico)
+    async refreshDetail(id) {
+      if (!this.detail || this.detail.id !== id) return;
+      const r = await this.api(`/api/sites/${id}`);
+      if (r.ok && this.detail && this.detail.id === id) this.detail = await r.json();
+      const h = await this.api(`/api/history?site_id=${id}&days=7`);
+      if (h.ok && this.detail && this.detail.id === id) this.siteHistory = await h.json();
     },
     h(extra = {}) { return { 'Authorization': 'Bearer ' + this.token, 'Content-Type': 'application/json', 'X-UI-Language': (window.I18n && I18n.locale) || 'it', ...extra }; },
     hp() { return { 'Authorization': 'Bearer ' + this.pendingToken, 'Content-Type': 'application/json' }; },

@@ -95,6 +95,9 @@ Your server, your data, your branding.
   sites and components
 
 **Administration**
+- **The panel updates itself**: dots, badges and the open site page follow the real state within
+  a few seconds, without reloading. Every 6 seconds the browser asks for a one-line fingerprint
+  of the fleet (an empty `304` when nothing changed) and downloads the list only when it did
 - Password sign-in with **TOTP** and **passkeys**
 - Branding: your logo and favicon in the panel, in the PDFs and in the emails
 - Interface in **Italian, English, French and German**, connectors included

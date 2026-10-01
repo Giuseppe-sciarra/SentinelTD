@@ -6,7 +6,7 @@ from slowapi.errors import RateLimitExceeded
 from .db import engine, run_migrations
 from . import models  # noqa: F401  (registra i modelli)
 from .rate_limit import limiter
-from .routers import sites, auth, media, install, security, connectors, agent, history, notifications, expiries, branding, preferences, reports, stats, packages, clients
+from .routers import sites, auth, media, install, security, connectors, agent, history, notifications, expiries, branding, preferences, reports, stats, packages, clients, changes
 from .auth import require_auth
 from .version import __version__, APP_NAME, VENDOR, VENDOR_URL, AUTHOR
 
@@ -53,6 +53,7 @@ app.include_router(branding.router)       # logo/favicon configurabili
 app.include_router(preferences.router)      # impostazioni operative UI (no segreti)
 app.include_router(packages.router)         # zip di plugin/temi a licenza
 app.include_router(clients.router)          # clienti e report per cliente
+app.include_router(changes.router)          # impronta dello stato per il pannello che si aggiorna da solo
 
 
 @app.get("/api/version", dependencies=[Depends(require_auth)])
