@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.12.3
+
+### Fixed
+- A WordPress site with pending updates could suddenly show as *ok* with nothing to update,
+  and lose the pause of its failed items. When the forced refresh (before and after every
+  update attempt) asked wordpress.org and the request failed — outside cron WordPress gives
+  it only 3 seconds, easily exceeded on a slow hosting — WordPress left its update cache
+  empty and silent, the connector reported zero updates and the panel believed it: counts
+  zeroed, core update gone, and the pause dropped because the target version had vanished.
+  The passive hourly checks then kept reading the same empty cache until a manual *Check*
+  (forced again) found the updates, without their pause, so the next cycle retried them at
+  once and notified the failure again.
+  - Connector WordPress **2.19.2**: the forced refresh runs with cron timings (30 s instead
+    of 3) and the status reply says whether the update cache was really there
+    (`updates_known`, `core.known`)
+  - Panel: when the cache was missing, the counts, pending updates and pauses of the last
+    successful check are kept (an item whose installed version meanwhile reached the expected
+    one is cleared), the site page says *Updates not verified* with the time, and the log
+    records it. Older connectors behave as before
+
 ## 2.12.2
 
 ### Added

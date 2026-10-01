@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.19.1
+ * Version: 2.19.2
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -526,10 +526,32 @@ function tdpanop_status($req = null)
         delete_site_transient('update_plugins');
         delete_site_transient('update_themes');
         delete_site_transient('update_core');
-        wp_version_check();
-        wp_update_plugins();
-        wp_update_themes();
+        // Con i tempi del cron: fuori dal cron WordPress da' a wordpress.org appena 3 secondi,
+        // e su un hosting lento la richiesta scade in silenzio lasciando la cache VUOTA ->
+        // "zero aggiornamenti" falso. In contesto cron il tempo e' 30 secondi.
+        $cron_filter = function () {
+            return true;
+        };
+        add_filter('wp_doing_cron', $cron_filter, 999);
+        try {
+            wp_version_check();
+            wp_update_plugins();
+            wp_update_themes();
+        } finally {
+            remove_filter('wp_doing_cron', $cron_filter, 999);
+        }
     }
+
+    // La cache degli aggiornamenti c'e' davvero? Se un ricalcolo e' fallito (wordpress.org
+    // non raggiunto, timeout, memoria) o un object cache l'ha sfrattata, i transient
+    // MANCANO: non e' "zero aggiornamenti", e' "non lo so". Lo si dichiara al pannello, che
+    // tiene i dati dell'ultimo controllo riuscito invece di azzerare tutto.
+    $t_up = get_site_transient('update_plugins');
+    $t_ut = get_site_transient('update_themes');
+    $t_uc = get_site_transient('update_core');
+    $plugins_known = is_object($t_up) && isset($t_up->last_checked);
+    $themes_known  = is_object($t_ut) && isset($t_ut->last_checked);
+    $core_known    = is_object($t_uc) && isset($t_uc->last_checked);
 
     $core_cur = get_bloginfo('version');
     $core_latest = $core_cur;
@@ -668,9 +690,13 @@ function tdpanop_status($req = null)
 
     return new WP_REST_Response([
         'cms'  => 'wp',
-        'core' => ['current' => $core_cur, 'latest' => $core_latest, 'update' => $core_update],
+        'core' => ['current' => $core_cur, 'latest' => $core_latest, 'update' => $core_update, 'known' => $core_known],
         'php'  => PHP_VERSION,
         'extensions' => $extensions,
+        // false = la cache degli aggiornamenti mancava: i flag "update" qui sopra sono zeri
+        // non verificati, il pannello tiene quelli dell'ultimo controllo riuscito
+        'updates_known' => ['plugin' => $plugins_known, 'theme' => $themes_known, 'core' => $core_known],
+        'refreshed' => $forceRefresh,
     ], 200);
 }
 

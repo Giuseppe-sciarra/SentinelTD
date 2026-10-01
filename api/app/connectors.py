@@ -15,6 +15,7 @@ Contratto JSON atteso (uguale per WP e Joomla):
 Vengono restituite TUTTE le estensioni installate (update true/false); i contatori
 per categoria li calcola qui il backend.
 """
+import logging
 import time
 import re
 from urllib.parse import quote
@@ -23,6 +24,8 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Site, Extension
+
+log = logging.getLogger("sentinel.connectors")
 
 
 # Package "vendor" che NON pubblicano gli update sul canale del CMS (li rileva vendor_scan
@@ -151,9 +154,28 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         core = data.get("core", {})
         exts = data.get("extensions", []) or []
 
+        # Il connettore WP (dalla 2.19.2) dice se la cache degli aggiornamenti c'era davvero.
+        # Se mancava (ricalcolo fallito: wordpress.org non raggiunto, timeout, object cache),
+        # i suoi "update: false" sono zeri NON verificati: si tengono i dati dell'ultimo
+        # controllo riuscito, pause dei fallimenti comprese, invece di azzerare tutto e far
+        # risultare "ok" un sito con aggiornamenti in sospeso. I connettori vecchi non mandano
+        # il campo e vengono trattati come prima (tutto verificato).
+        known = data.get("updates_known")
+        if isinstance(known, dict):
+            known_cat = {"plugin": bool(known.get("plugin", True)), "theme": bool(known.get("theme", True))}
+            known_cat["other"] = known_cat["plugin"] and known_cat["theme"]
+            core_known = bool(core.get("known", True))
+        else:
+            known_cat = {"plugin": True, "theme": True, "other": True}
+            core_known = True
+        unverified = not (core_known and all(known_cat.values()))
+
         site.core_current = str(core.get("current", ""))
-        site.core_latest = str(core.get("latest", core.get("current", "")))
-        site.core_update = bool(core.get("update", False))
+        if core_known:
+            site.core_latest = str(core.get("latest", core.get("current", "")))
+            site.core_update = bool(core.get("update", False))
+        elif site.core_update and site.core_latest and not _vgt(site.core_latest, site.core_current or "0"):
+            site.core_update = False   # nel frattempo e' stato aggiornato a mano
         site.php_version = str(data.get("php", ""))
 
         # snapshot completo estensioni: cancella e reinserisci TUTTE.
@@ -166,6 +188,8 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             for p in prev
             if p.update_failed_at is not None
         }
+        # stato "da aggiornare" dell'ultimo controllo riuscito, per le categorie non verificate
+        last_known = {(p.type, p.slug): (bool(p.update_available), p.new_version or "") for p in prev}
         # preserva lo stato "vendor" (Balbooa) rilevato da vendor_scan: il connettore non lo
         # riporta (non e' sul canale del CMS), ma va tenuto attraverso il refresh finche' e'
         # piu' recente dell'installato -> cosi' resta pending e la card mostra il giallo.
@@ -210,6 +234,13 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
                     is_upd = True
                     enew = vnew
 
+            if not known_cat.get(cat, True) and not is_upd and (etype, eslug) in last_known:
+                # categoria non verificata: vale l'ultimo controllo riuscito, a meno che nel
+                # frattempo la versione installata abbia raggiunto quella attesa
+                prev_upd, prev_new = last_known[(etype, eslug)]
+                if prev_upd and prev_new and _vgt(prev_new, ecur or "0"):
+                    is_upd, enew = True, prev_new
+
             tot[cat] += 1
             if is_upd:
                 upd[cat] += 1
@@ -237,6 +268,10 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         site.tot_themes, site.upd_themes = tot["theme"], upd["theme"]
         site.tot_other, site.upd_other = tot["other"], upd["other"]
         site.updates_count = upd["plugin"] + upd["theme"] + upd["other"] + (1 if site.core_update else 0)
+        site.updates_unverified_at = datetime.now(timezone.utc) if unverified else None
+        if unverified:
+            log.warning("Site '%s' (id=%s): aggiornamenti non verificabili (cache WP mancante%s): tenuti i dati dell'ultimo controllo riuscito",
+                        site.name, site.id, ", dopo un ricalcolo forzato" if force else "")
         site.status = "ok"
         site.error = ""
         site.last_checked = datetime.now(timezone.utc)

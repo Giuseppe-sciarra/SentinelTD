@@ -1993,5 +1993,7 @@
   "Ripristinare il layout PDF predefinito per i clienti?": "Standard-PDF-Layout für Kunden wiederherstellen?",
   "Modifiche non salvate": "Ungespeicherte Änderungen",
   "✓ Salvate alle {0}": "✓ Gespeichert um {0}",
-  "Orario": "Uhrzeit"
+  "Orario": "Uhrzeit",
+  "Aggiornamenti non verificati:": "Updates nicht geprüft:",
+  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "die Website konnte sie nicht neu berechnen (WordPress-Update-Cache fehlt). Hier gilt die letzte erfolgreiche Prüfung; Jetzt prüfen versucht es erneut."
 }

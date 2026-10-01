@@ -84,6 +84,7 @@ class SiteDetailOut(SiteOut):
     # diagnostica dal connettore (spazio, cartelle, peso, verifica del core)
     diag: dict | None = None
     diag_at: datetime | None = None
+    updates_unverified_at: datetime | None = None
 
 
 class LoginIn(BaseModel):

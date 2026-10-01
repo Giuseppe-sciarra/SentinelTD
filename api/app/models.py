@@ -37,6 +37,9 @@ class Site(Base):
     # diagnostica dal connettore: spazio davvero scrivibile, cartelle, peso, verifica del core
     diag_json: Mapped[str] = mapped_column(Text, default="")
     diag_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ultimo controllo in cui il sito NON ha potuto verificare gli aggiornamenti (cache di
+    # WordPress mancante): i conteggi sono quelli dell'ultimo controllo riuscito
+    updates_unverified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @property
     def diag(self) -> dict | None:

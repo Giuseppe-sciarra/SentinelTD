@@ -1993,5 +1993,7 @@
   "Ripristinare il layout PDF predefinito per i clienti?": "Ripristinare il layout PDF predefinito per i clienti?",
   "Modifiche non salvate": "Modifiche non salvate",
   "✓ Salvate alle {0}": "✓ Salvate alle {0}",
-  "Orario": "Orario"
+  "Orario": "Orario",
+  "Aggiornamenti non verificati:": "Aggiornamenti non verificati:",
+  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova."
 }

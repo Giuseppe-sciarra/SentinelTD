@@ -1993,5 +1993,7 @@
   "Ripristinare il layout PDF predefinito per i clienti?": "Restore the default PDF layout for clients?",
   "Modifiche non salvate": "Unsaved changes",
   "✓ Salvate alle {0}": "✓ Saved at {0}",
-  "Orario": "Time"
+  "Orario": "Time",
+  "Aggiornamenti non verificati:": "Updates not verified:",
+  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "the site could not recompute them (WordPress update cache missing). The last successful check applies here; Check now tries again."
 }
