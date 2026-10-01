@@ -1837,5 +1837,7 @@
   "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre.": "Mettez le frein aux serveurs qui ne tiennent pas la charge, par exemple les hébergements mutualisés des clients. Ceux sans frein travaillent comme toujours.",
   "anche": "aussi",
   "{0} server · {1} siti": "{0} serveurs · {1} sites",
-  "{0} server · {1} sito": "{0} serveur · {1} site"
+  "{0} server · {1} sito": "{0} serveur · {1} site",
+  "Pausa tra un aggiornamento e l'altro dello stesso sito": "Pause entre deux mises à jour du même site",
+  "Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, aspetta tra un aggiornamento e l'altro dello stesso sito, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio.": "Par défaut, Sentinel travaille sur tous les serveurs comme toujours. Sur les serveurs fragiles vous pouvez mettre le frein : il y travaille sur peu de sites à la fois, attend entre deux mises à jour du même site, et après un site où il a installé ou mis à jour quelque chose il laisse le serveur se reposer. Le serveur d'un site est l'adresse IP de son domaine."
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.10.0
+
+### Added
+- *Settings → Site servers*: **pause between updates on the same site** for braked servers
+  (default 5 s, as the fixed pause used so far; 0–300 s). On servers without the brake the
+  fixed pause stays as before
+
+## 2.9.9
+
+### Changed
+- The content area uses almost the whole available width — 2.5% margin on each side, about
+  95% of the space next to the sidebar — instead of stopping at 1500 px and leaving an empty
+  band on the right of wide screens. Small screens keep their 16 px padding
+
 ## 2.9.8
 
 ### Changed

@@ -1171,7 +1171,15 @@ async def update_site(ctx, site_id: int, manual: bool = False):
         await redis.enqueue_job("update_site", site_id, manual, _defer_by=wait)
         return
 
-    outcome = {"text": "", "parts": [], "worked": False}
+    outcome = {"text": "", "parts": [], "worked": False, "item_pause": settings.AUTOUPDATE_PAUSE_SECONDS}
+    if slot != "free":
+        # server col freno: anche tra un aggiornamento e l'altro dello stesso sito si aspetta
+        # quanto impostato (Impostazioni -> Server dei siti), invece della pausa fissa
+        try:
+            outcome["item_pause"] = int((await get_operational_settings()).get(
+                "server_item_pause_seconds", settings.AUTOUPDATE_PAUSE_SECONDS))
+        except Exception:  # noqa: BLE001
+            pass
     if manual:
         await _set_upd_status(redis, site_id, "running", "aggiornamento in corso")
     try:
@@ -1187,6 +1195,7 @@ async def update_site(ctx, site_id: int, manual: bool = False):
 
 
 async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
+    item_pause = max(0, int(outcome.get("item_pause", settings.AUTOUPDATE_PAUSE_SECONDS)))
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
         if not site or not site.enabled:
@@ -1374,7 +1383,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                     ext.update_manual = True
                 results.append({"name": name, "from": current, "to": res["new"] or (ext.new_version if ext is not None else ""),
                                 "ok": False, "manual": True, "error": res.get("error") or ""})
-                await asyncio.sleep(settings.AUTOUPDATE_PAUSE_SECONDS)
+                await asyncio.sleep(item_pause)
                 continue
 
             # NIENTE DA FARE: solo quando il CONNETTORE lo dichiara esplicitamente (noop).
@@ -1407,7 +1416,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                     "name": f"{name} — già aggiornato, nessuna installazione necessaria",
                     "from": ver, "to": ver, "ok": True, "error": "",
                 })
-                await asyncio.sleep(settings.AUTOUPDATE_PAUSE_SECONDS)
+                await asyncio.sleep(item_pause)
                 continue
 
             if res["ok"] and res["new"]:
@@ -1446,7 +1455,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             elif res["new"]:
                 log.info("UPDATE OK '%s' (id=%s): %s  %s -> %s",
                          site.name, site.id, name, current, res["new"])
-            await asyncio.sleep(settings.AUTOUPDATE_PAUSE_SECONDS)
+            await asyncio.sleep(item_pause)
 
         for (e, _t, sl, nm, cur) in held:
             pro_slug = COUPLED_PAIRS.get(sl, "")

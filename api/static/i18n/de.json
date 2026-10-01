@@ -1837,5 +1837,7 @@
   "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre.": "Setzen Sie die Bremse bei Servern, die nicht mithalten, zum Beispiel bei Shared Hosting von Kunden. Die ohne Bremse arbeiten wie immer.",
   "anche": "auch",
   "{0} server · {1} siti": "{0} Server · {1} Websites",
-  "{0} server · {1} sito": "{0} Server · {1} Website"
+  "{0} server · {1} sito": "{0} Server · {1} Website",
+  "Pausa tra un aggiornamento e l'altro dello stesso sito": "Pause zwischen Updates derselben Website",
+  "Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, aspetta tra un aggiornamento e l'altro dello stesso sito, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio.": "Standardmäßig arbeitet Sentinel auf allen Servern wie immer. Bei schwachen Servern können Sie die Bremse setzen: Dort bearbeitet es nur wenige Websites gleichzeitig, wartet zwischen Updates derselben Website und lässt den Server nach einer Website, auf der etwas installiert oder aktualisiert wurde, ruhen. Der Server einer Website ist die IP-Adresse ihrer Domain."
 }

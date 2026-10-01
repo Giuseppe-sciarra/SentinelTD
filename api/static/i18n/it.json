@@ -1837,5 +1837,7 @@
   "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre.": "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre.",
   "anche": "anche",
   "{0} server · {1} siti": "{0} server · {1} siti",
-  "{0} server · {1} sito": "{0} server · {1} sito"
+  "{0} server · {1} sito": "{0} server · {1} sito",
+  "Pausa tra un aggiornamento e l'altro dello stesso sito": "Pausa tra un aggiornamento e l'altro dello stesso sito",
+  "Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, aspetta tra un aggiornamento e l'altro dello stesso sito, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio.": "Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, aspetta tra un aggiornamento e l'altro dello stesso sito, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio."
 }

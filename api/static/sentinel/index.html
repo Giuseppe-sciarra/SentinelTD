@@ -1284,11 +1284,12 @@
               <div class="srv-top">
                 <div class="srv-intro">
                   <div class="srv-intro-title">Il freno per gli hosting deboli</div>
-                  <div class="small mut">Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio.</div>
+                  <div class="small mut">Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, aspetta tra un aggiornamento e l'altro dello stesso sito, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio.</div>
                 </div>
                 <div class="srv-controls">
                   <div class="field"><label>Siti in contemporanea su un server con il freno</label><select class="input" x-model.number="prefs.server_parallel"><template x-for="n in [1,2,3,4]" :key="'sp'+n"><option :value="n" :selected="prefs.server_parallel===n" x-text="n"></option></template></select></div>
                   <div class="field"><label>Riposo di un server con il freno dopo un sito aggiornato</label><div class="input-suffix"><input class="input" type="number" min="0" max="600" x-model.number="prefs.server_pause_seconds"><span>secondi</span></div></div>
+                  <div class="field"><label>Pausa tra un aggiornamento e l'altro dello stesso sito</label><div class="input-suffix"><input class="input" type="number" min="0" max="300" x-model.number="prefs.server_item_pause_seconds"><span>secondi</span></div></div>
                   <div class="srv-save"><button class="btn primary" @click="savePrefs()" :disabled="!!(prefs.busy)">Salva</button><span class="small" :class="prefs.err ? 'err' : 'mut'" x-text="prefs.err || prefs.msg"></span></div>
                 </div>
               </div>

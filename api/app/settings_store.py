@@ -21,6 +21,7 @@ DEFAULTS = {
     "email_report_mode": "site",    # "site" = un'email per ogni sito; "cycle" = un riepilogo unico per ciclo
     "server_parallel": 1,           # siti in contemporanea sullo stesso server
     "server_pause_seconds": 30,     # riposo del server dopo un sito dove si e' installato/aggiornato qualcosa
+    "server_item_pause_seconds": 5, # pausa tra un aggiornamento e l'altro sullo stesso sito (server col freno)
     "server_limited": [],           # server (IP) con il freno; di base nessuno, si lavora come sempre
 }
 
@@ -50,6 +51,7 @@ def normalize(data: dict | None) -> dict:
         ("offline_alert_minutes", 0, 120),
         ("server_parallel", 1, 4),
         ("server_pause_seconds", 0, 600),
+        ("server_item_pause_seconds", 0, 300),
     ):
         try:
             out[key] = max(lo, min(hi, int(src.get(key, out[key]))))

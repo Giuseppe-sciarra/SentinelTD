@@ -1837,5 +1837,7 @@
   "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre.": "Put the brake on servers that cannot cope, for example clients' shared hosting. Those without the brake work as always.",
   "anche": "also",
   "{0} server · {1} siti": "{0} servers · {1} sites",
-  "{0} server · {1} sito": "{0} server · {1} site"
+  "{0} server · {1} sito": "{0} server · {1} site",
+  "Pausa tra un aggiornamento e l'altro dello stesso sito": "Pause between updates on the same site",
+  "Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, aspetta tra un aggiornamento e l'altro dello stesso sito, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio.": "By default Sentinel works on every server as always. On weak servers you can put the brake on: there it works on a few sites at a time, waits between updates on the same site, and after a site where it installed or updated something it lets the server rest. A site's server is the IP address of its domain."
 }
