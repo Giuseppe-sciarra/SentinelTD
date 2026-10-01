@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.18.3
+ * Version: 2.19.1
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -449,6 +449,16 @@ add_action('rest_api_init', function () {
         'callback' => 'tdpanop_uninstall',
         'permission_callback' => 'tdpanop_auth',
     ]);
+    register_rest_route('tdpanopticon/v1', '/diagnostics', [
+        'methods'  => 'GET',
+        'callback' => 'tdpanop_diagnostics',
+        'permission_callback' => 'tdpanop_auth',
+    ]);
+    register_rest_route('tdpanopticon/v1', '/package', [
+        'methods'  => 'GET',
+        'callback' => 'tdpanop_package_export',
+        'permission_callback' => 'tdpanop_auth',
+    ]);
 });
 
 function tdpanop_auth(WP_REST_Request $req)
@@ -703,6 +713,22 @@ function tdpanop_update(WP_REST_Request $req)
     // Dati di aggiornamento pronti SENZA distruggere quelli buoni (vedi la funzione).
     tdpanop_prepare_update_data($type, $slug, false);
 
+    // Spazio: prima di un aggiornamento grosso si prova a scrivere quanto serve davvero.
+    // Senza spazio WordPress scarica uno zip troncato e fallisce dopo, con un errore che
+    // non dice niente (PCLZIP_ERR_BAD_FORMAT). Il core si controlla nel suo ramo, sotto.
+    if ($type === 'plugin' || $type === 'theme') {
+        $needMb = tdpanop_required_space_mb($type, $slug);
+        if ($needMb > 0) {
+            $chk = tdpanop_space_check($needMb);
+            if (!$chk['ok']) {
+                return new WP_REST_Response(['ok' => false, 'reason' => 'no_space', 'need_mb' => $needMb,
+                    'writable_mb' => $chk['written_mb'],
+                    'error' => sprintf('spazio insufficiente sul sito: per questo aggiornamento servono circa %d MB, se ne riescono a scrivere solo %s MB. Aggiornamento non tentato',
+                                       $needMb, tdpanop_mb($chk['written_mb']))], 200);
+            }
+        }
+    }
+
     $skin = new Automatic_Upgrader_Skin();
     $res  = null;
     $verBefore = '';
@@ -863,6 +889,15 @@ function tdpanop_update(WP_REST_Request $req)
             $verBefore = get_bloginfo('version');
             $expected  = !empty($updates[0]->current) ? (string) $updates[0]->current : '';
 
+            // core: zip da circa 30 MB + copia estratta da circa 90 MB, tutto insieme
+            $chk = tdpanop_space_check(150);
+            if (!$chk['ok']) {
+                return new WP_REST_Response(['ok' => false, 'reason' => 'no_space', 'need_mb' => 150,
+                    'writable_mb' => $chk['written_mb'], 'current' => $verBefore, 'new' => $expected,
+                    'error' => sprintf('spazio insufficiente sul sito: per aggiornare WordPress servono circa 150 MB, se ne riescono a scrivere solo %s MB. Aggiornamento non tentato',
+                                       tdpanop_mb($chk['written_mb']))], 200);
+            }
+
             $up  = new Core_Upgrader($skin);
             $res = $up->upgrade($updates[0]);
 
@@ -915,15 +950,23 @@ function tdpanop_update(WP_REST_Request $req)
         }
         if ($err !== null) {
             // errore reale: riportato com'e', con il suo codice per capire cosa e' successo
+            $emsg = trim(wp_strip_all_tags($err->get_error_message())) . ' [' . $err->get_error_code() . ']';
+            $why  = tdpanop_space_explanation($emsg . ' ' . tdpanop_skin_reason($skin));
+            if ($why !== '') {
+                return new WP_REST_Response(['ok' => false, 'reason' => 'no_space', 'current' => $verBefore,
+                    'new' => $expected, 'error' => $why], 200);
+            }
             return new WP_REST_Response(['ok' => false, 'current' => $verBefore, 'new' => $expected,
-                'error' => trim(wp_strip_all_tags($err->get_error_message())) . ' [' . $err->get_error_code() . ']'
-                         . ($lic !== '' ? ' (' . $lic . ')' : '')], 200);
+                'error' => $emsg . ($lic !== '' ? ' (' . $lic . ')' : '')], 200);
         }
     }
 
     // errore esplicito dall'upgrader
     if (is_wp_error($res)) {
-        return new WP_REST_Response(['ok' => false, 'error' => $res->get_error_message(), 'current' => $verBefore], 200);
+        $emsg = trim(wp_strip_all_tags($res->get_error_message())) . ' [' . $res->get_error_code() . ']';
+        $why  = tdpanop_space_explanation($emsg . ' ' . tdpanop_skin_reason($skin), $type === 'core' ? 150 : 100);
+        return new WP_REST_Response(['ok' => false, 'error' => $why !== '' ? $why : $emsg, 'current' => $verBefore]
+            + ($why !== '' ? ['reason' => 'no_space'] : []), 200);
     }
 
     // SUCCESSO solo se la versione è davvero cambiata (ed è salita a quella attesa, se nota)
@@ -951,6 +994,11 @@ function tdpanop_update(WP_REST_Request $req)
     }
     if ($reason === '') {
         $reason = 'versione non cambiata (' . ($verBefore ?: '?') . ' → attesa ' . ($expected ?: '?') . '): update non applicato (licenza/credenziali?)';
+    }
+    $why = tdpanop_space_explanation($reason, $type === 'core' ? 150 : 100);
+    if ($why !== '') {
+        return new WP_REST_Response(['ok' => false, 'reason' => 'no_space', 'error' => $why, 'new' => $expected,
+            'current' => $verBefore], 200);
     }
 
     return new WP_REST_Response(['ok' => false, 'error' => $reason, 'new' => $expected, 'current' => $verBefore], 200);
@@ -1405,6 +1453,500 @@ function tdpanop_uninstall(WP_REST_Request $req)
     } catch (\Throwable $e) {
         return new WP_REST_Response(['ok' => false, 'error' => $e->getMessage()], 200);
     }
+}
+
+/* ---------------------------------------------------------------------------
+ * DIAGNOSTICA (2.19.0)
+ * Spazio davvero scrivibile, cartelle, peso del sito, verifica dei file del core.
+ * GET /diagnostics?space=MB&sizes=0|1&core=0|1
+ * ------------------------------------------------------------------------- */
+
+/** MB con la virgola, per i messaggi */
+function tdpanop_mb($v): string
+{
+    return number_format((float) $v, 1, ',', '.');
+}
+
+/**
+ * Prova di scrittura vera: scrive fino a $mb MB in un file nella cartella indicata e lo
+ * cancella. Il test "spazio libero" di WordPress misura il disco dell'intero server, non la
+ * quota del sito. Caso reale: 72 GB liberi sul disco, 1,6 MB scrivibili sulla quota, e tutti
+ * gli aggiornamenti grossi rotti con zip troncati (PCLZIP_ERR_BAD_FORMAT).
+ */
+function tdpanop_space_probe(string $dir, int $mb): array
+{
+    $mb  = max(1, min(400, $mb));
+    $out = ['dir' => $dir, 'tested_mb' => $mb, 'written_mb' => 0.0, 'ok' => false, 'error' => '', 'seconds' => 0.0];
+    if ($dir === '' || !is_dir($dir) || !wp_is_writable($dir)) {
+        $out['error'] = 'cartella non scrivibile';
+        return $out;
+    }
+    $t0   = microtime(true);
+    $file = trailingslashit($dir) . 'tdpanop-space-' . wp_generate_password(10, false) . '.tmp';
+    $fh   = @fopen($file, 'wb');
+    if (!$fh) {
+        $out['error'] = 'impossibile creare un file di prova';
+        return $out;
+    }
+    // dati casuali: un file di zeri su un disco compresso (ZFS, btrfs) quasi non occupa
+    // spazio e la prova direbbe "c'e' posto" anche a quota piena
+    try {
+        $chunk = random_bytes(1048576);
+    } catch (\Throwable $e) {
+        $chunk = '';
+        while (strlen($chunk) < 1048576) {
+            $chunk .= md5(uniqid((string) mt_rand(), true), true);
+        }
+        $chunk = substr($chunk, 0, 1048576);
+    }
+    $len     = strlen($chunk);
+    $written = 0;
+    $failed  = false;
+    for ($i = 0; $i < $mb; $i++) {
+        $w = @fwrite($fh, $chunk);
+        if ($w === false || $w < $len) {
+            $written += max(0, (int) $w);
+            $failed = true;
+            break;
+        }
+        $written += $w;
+        // ogni 16 MB si forza la scrittura: certe quote rifiutano solo al momento del flush
+        if ($i % 16 === 15 && !@fflush($fh)) {
+            $failed = true;
+            break;
+        }
+    }
+    if (!@fflush($fh)) {
+        $failed = true;
+    }
+    if (!@fclose($fh)) {
+        $failed = true;
+    }
+    clearstatcache(true, $file);
+    $size = (int) @filesize($file);
+    @unlink($file);
+    $real = min($written, $size);
+    $out['written_mb'] = round($real / 1048576, 1);
+    $out['ok']         = !$failed && $real >= $mb * $len;
+    $out['seconds']    = round(microtime(true) - $t0, 2);
+    if (!$out['ok'] && $out['error'] === '') {
+        $out['error'] = 'scrittura interrotta';
+    }
+    return $out;
+}
+
+/**
+ * Spazio per gli aggiornamenti: si prova la cartella temporanea (dove WordPress scarica)
+ * e, se sta su un altro disco, anche wp-content (dove estrae). Un esito positivo resta
+ * valido 15 minuti, cosi' una fila di aggiornamenti non riscrive centinaia di MB ogni volta.
+ */
+function tdpanop_space_check(int $mb): array
+{
+    $cached = (float) get_transient('tdpanop_space_ok');
+    if ($cached >= $mb) {
+        return ['ok' => true, 'tested_mb' => $mb, 'written_mb' => $cached, 'cached' => true, 'probes' => []];
+    }
+    $tmp     = untrailingslashit(get_temp_dir());
+    $content = untrailingslashit(WP_CONTENT_DIR);
+    $dirs    = [$tmp];
+    $st1     = @stat($tmp);
+    $st2     = @stat($content);
+    if (!$st1 || !$st2 || $st1['dev'] !== $st2['dev']) {
+        $dirs[] = $content;
+    }
+    $probes = [];
+    $ok     = true;
+    $min    = null;
+    foreach ($dirs as $d) {
+        $p        = tdpanop_space_probe($d, $mb);
+        $probes[] = $p;
+        if (!$p['ok']) {
+            $ok = false;
+        }
+        $min = ($min === null) ? $p['written_mb'] : min($min, $p['written_mb']);
+    }
+    if ($ok) {
+        set_transient('tdpanop_space_ok', $mb, 15 * MINUTE_IN_SECONDS);
+    } else {
+        delete_transient('tdpanop_space_ok');
+    }
+    return ['ok' => $ok, 'tested_mb' => $mb, 'written_mb' => (float) $min, 'cached' => false, 'probes' => $probes];
+}
+
+/**
+ * Spazio necessario per aggiornare un plugin o un tema, in MB (0 = non controllare).
+ * La dimensione si chiede solo ai file pubblici di wordpress.org: ai server dei prodotti a
+ * licenza non si fanno richieste in piu', i loro link di download sono a scadenza.
+ */
+function tdpanop_required_space_mb(string $type, string $slug): int
+{
+    $pkg = '';
+    if ($type === 'plugin') {
+        $file = tdpanop_plugin_file_by_slug($slug);
+        $upd  = get_site_transient('update_plugins');
+        if ($file !== '' && $upd && !empty($upd->response[$file]->package)) {
+            $pkg = (string) $upd->response[$file]->package;
+        }
+    } elseif ($type === 'theme') {
+        $upd = get_site_transient('update_themes');
+        if ($upd && !empty($upd->response[$slug]['package'])) {
+            $pkg = (string) $upd->response[$slug]['package'];
+        }
+    }
+    if ($pkg === '' || stripos((string) wp_parse_url($pkg, PHP_URL_HOST), 'downloads.wordpress.org') === false) {
+        return 0;
+    }
+    $h = wp_remote_head($pkg, ['timeout' => 10, 'redirection' => 3]);
+    if (is_wp_error($h)) {
+        return 0;
+    }
+    $len = (int) wp_remote_retrieve_header($h, 'content-length');
+    if ($len < 5 * 1048576) {
+        return 0;   // pacchetti piccoli: nessun controllo
+    }
+    // zip + contenuto estratto (circa tre volte lo zip) + margine
+    return (int) min(400, ceil($len * 4 / 1048576) + 10);
+}
+
+/** L'errore di WordPress puo' dipendere dallo spazio? (zip troncato, copia fallita…) */
+function tdpanop_is_space_error(string $text): bool
+{
+    return (bool) preg_match('/PCLZIP_ERR_BAD_FORMAT|incompatible_archive|copy_failed|disk_full|download_failed|Could not copy file|Impossibile copiare|non pu(o|ò) essere installato|could not be installed|not enough space|spazio su disco/iu', $text);
+}
+
+/**
+ * Dopo un aggiornamento fallito: se l'errore e' di quelli che lo spazio esaurito produce,
+ * si verifica davvero quanto si riesce a scrivere. Stringa vuota se lo spazio c'e'.
+ */
+function tdpanop_space_explanation(string $original, int $need = 100): string
+{
+    if (!tdpanop_is_space_error($original)) {
+        return '';
+    }
+    delete_transient('tdpanop_space_ok');
+    $c = tdpanop_space_check($need);
+    if ($c['ok']) {
+        return '';
+    }
+    return sprintf(
+        'spazio del sito esaurito: si riescono a scrivere solo %s MB, per aggiornare ne servono circa %d. Errore di WordPress: %s',
+        tdpanop_mb($c['written_mb']), $need, $original
+    );
+}
+
+/** Dimensione del database del sito (solo le tabelle col suo prefisso). */
+function tdpanop_db_size(): int
+{
+    global $wpdb;
+    $like = $wpdb->esc_like($wpdb->base_prefix) . '%';
+    $v = $wpdb->get_var($wpdb->prepare(
+        'SELECT SUM(data_length + index_length) FROM information_schema.TABLES WHERE table_schema = %s AND table_name LIKE %s',
+        DB_NAME, $like
+    ));
+    if ($v === null) {
+        $v    = 0;
+        $rows = $wpdb->get_results($wpdb->prepare('SHOW TABLE STATUS LIKE %s', $like), ARRAY_A);
+        foreach ((array) $rows as $r) {
+            $v += (int) ($r['Data_length'] ?? 0) + (int) ($r['Index_length'] ?? 0);
+        }
+    }
+    return (int) $v;
+}
+
+/**
+ * Peso del sito in un solo passaggio sui file, diviso per parti. Si ferma dopo $budget
+ * secondi (siti con centinaia di migliaia di file): in quel caso complete = false.
+ */
+function tdpanop_sizes(float $budget = 25.0): array
+{
+    $t0      = microtime(true);
+    $norm    = function ($p) {
+        return untrailingslashit(wp_normalize_path((string) $p));
+    };
+    $abs     = $norm(ABSPATH);
+    $content = $norm(WP_CONTENT_DIR);
+    $up      = wp_upload_dir(null, false);
+    $uploads = $norm($up['basedir'] ?? '');
+    $plugins = $norm(WP_PLUGIN_DIR);
+    $mu      = $norm(defined('WPMU_PLUGIN_DIR') ? WPMU_PLUGIN_DIR : $content . '/mu-plugins');
+    $themes  = $norm(get_theme_root());
+    $b       = ['uploads' => 0, 'plugins' => 0, 'themes' => 0, 'content_other' => 0, 'core' => 0];
+    $roots   = [$abs];
+    foreach ([$content, $uploads] as $d) {
+        if ($d !== '' && strpos($d . '/', $abs . '/') !== 0) {
+            $roots[] = $d;
+        }
+    }
+    $bucket = function ($path) use ($uploads, $plugins, $mu, $themes, $content) {
+        if ($uploads !== '' && strpos($path, $uploads . '/') === 0) {
+            return 'uploads';
+        }
+        if (strpos($path, $plugins . '/') === 0 || strpos($path, $mu . '/') === 0) {
+            return 'plugins';
+        }
+        if (strpos($path, $themes . '/') === 0) {
+            return 'themes';
+        }
+        if (strpos($path, $content . '/') === 0) {
+            return 'content_other';
+        }
+        return 'core';
+    };
+    $complete = true;
+    $files    = 0;
+    foreach (array_unique($roots) as $root) {
+        try {
+            $it = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::LEAVES_ONLY,
+                RecursiveIteratorIterator::CATCH_GET_CHILD
+            );
+            foreach ($it as $f) {
+                if (++$files % 500 === 0 && (microtime(true) - $t0) > $budget) {
+                    $complete = false;
+                    break 2;
+                }
+                try {
+                    if (!$f->isFile()) {
+                        continue;
+                    }
+                    $sz = (int) $f->getSize();
+                } catch (\Throwable $e) {
+                    continue;
+                }
+                $b[$bucket(wp_normalize_path($f->getPathname()))] += $sz;
+            }
+        } catch (\Throwable $e) {
+            $complete = false;
+        }
+    }
+    $b['db']          = tdpanop_db_size();
+    $b['files_total'] = $b['uploads'] + $b['plugins'] + $b['themes'] + $b['content_other'] + $b['core'];
+    $b['total']       = $b['files_total'] + $b['db'];
+    $b['complete']    = $complete;
+    $b['files']       = $files;
+    $b['seconds']     = round(microtime(true) - $t0, 2);
+    return $b;
+}
+
+/**
+ * Verifica dei file del core con le impronte ufficiali di wordpress.org (come
+ * "wp core verify-checksums"): file modificati, mancanti, e file in piu' dentro wp-admin e
+ * wp-includes (resti di vecchie versioni dopo un aggiornamento via FTP, o file estranei).
+ */
+function tdpanop_core_integrity(): array
+{
+    require_once ABSPATH . 'wp-admin/includes/update.php';
+    global $wp_local_package;
+    $version = get_bloginfo('version');
+    $locale  = (isset($wp_local_package) && $wp_local_package) ? (string) $wp_local_package : 'en_US';
+    $sums    = get_core_checksums($version, $locale);
+    if ((!is_array($sums) || !$sums) && $locale !== 'en_US') {
+        $sums = get_core_checksums($version, 'en_US');
+    }
+    if (!is_array($sums) || !$sums) {
+        return ['status' => 'unavailable', 'version' => $version,
+                'error' => 'impronte ufficiali non disponibili per questa versione'];
+    }
+    $modified = [];
+    $missing  = [];
+    $checked  = 0;
+    foreach ($sums as $file => $md5) {
+        if (strpos($file, 'wp-content/') === 0) {
+            continue;   // temi e plugin predefiniti: non sono core
+        }
+        $path = ABSPATH . $file;
+        if (!is_file($path)) {
+            $missing[] = $file;
+            continue;
+        }
+        $checked++;
+        if (md5_file($path) !== $md5) {
+            $modified[] = $file;
+        }
+    }
+    $extra = [];
+    foreach (['wp-admin', 'wp-includes'] as $d) {
+        $base = ABSPATH . $d;
+        if (!is_dir($base)) {
+            continue;
+        }
+        try {
+            $it = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::LEAVES_ONLY,
+                RecursiveIteratorIterator::CATCH_GET_CHILD
+            );
+            foreach ($it as $f) {
+                if (!$f->isFile()) {
+                    continue;
+                }
+                $rel = ltrim(str_replace('\\', '/', substr($f->getPathname(), strlen(ABSPATH))), '/');
+                if (!isset($sums[$rel])) {
+                    $extra[] = $rel;
+                }
+            }
+        } catch (\Throwable $e) {
+            // cartella non leggibile: si va avanti con quello che si e' visto
+        }
+    }
+    sort($modified);
+    sort($missing);
+    sort($extra);
+    return [
+        'status'         => ($modified || $missing || $extra) ? 'issues' : 'ok',
+        'version'        => $version,
+        'locale'         => $locale,
+        'checked'        => $checked,
+        'modified_count' => count($modified),
+        'missing_count'  => count($missing),
+        'extra_count'    => count($extra),
+        'modified'       => array_slice($modified, 0, 100),
+        'missing'        => array_slice($missing, 0, 100),
+        'extra'          => array_slice($extra, 0, 100),
+    ];
+}
+
+function tdpanop_diagnostics(WP_REST_Request $req)
+{
+    // il tempo massimo del sito si legge PRIMA di alzarlo per la diagnostica stessa
+    // (2.19.0 lo leggeva dopo e mostrava il proprio 180 invece del valore vero)
+    $maxExec = (int) ini_get('max_execution_time');
+    @set_time_limit(180);
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+    $space     = (int) $req->get_param('space');
+    $wantSizes = $req->get_param('sizes') === null ? true : (bool) (int) $req->get_param('sizes');
+    $wantCore  = $req->get_param('core') === null ? true : (bool) (int) $req->get_param('core');
+    $tmp       = get_temp_dir();
+    $upg       = WP_CONTENT_DIR . '/upgrade';
+
+    $out = [
+        'diagnostics'        => 1,
+        'cms'                => 'wp',
+        'php'                => PHP_VERSION,
+        'memory_limit'       => (string) ini_get('memory_limit'),
+        'wp_memory_limit'    => defined('WP_MEMORY_LIMIT') ? (string) WP_MEMORY_LIMIT : '',
+        'max_execution_time' => $maxExec,
+        'zip'                => class_exists('ZipArchive'),
+        'fs_method'          => function_exists('get_filesystem_method') ? (string) get_filesystem_method() : '',
+        'temp_dir'           => $tmp,
+        'temp_custom'        => defined('WP_TEMP_DIR'),
+        'temp_writable'      => wp_is_writable($tmp),
+        'content_writable'   => wp_is_writable(WP_CONTENT_DIR),
+        'upgrade_writable'   => is_dir($upg) ? wp_is_writable($upg) : wp_is_writable(WP_CONTENT_DIR),
+        'file_mods_allowed'  => !(defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS),
+        'disk_free'          => function_exists('disk_free_space') ? (float) @disk_free_space(WP_CONTENT_DIR) : null,
+    ];
+    if ($space > 0) {
+        delete_transient('tdpanop_space_ok');
+        $out['space'] = tdpanop_space_check(min(400, $space));
+    }
+    if ($wantSizes) {
+        $out['sizes'] = tdpanop_sizes();
+    }
+    if ($wantCore) {
+        $out['core'] = tdpanop_core_integrity();
+    }
+    return new WP_REST_Response($out, 200);
+}
+
+/* ---------------------------------------------------------------------------
+ * PACCHETTO DA UN SITO (2.19.0)
+ * GET /package?type=plugin|theme&slug=...  ->  zip del plugin o tema installato.
+ * Serve ai prodotti a licenza (Elementor Pro…): dove l'aggiornamento e' riuscito, Sentinel
+ * prende da qui lo zip e lo installa sui siti a cui il produttore non lo consegna.
+ * ------------------------------------------------------------------------- */
+function tdpanop_package_export(WP_REST_Request $req)
+{
+    @set_time_limit(300);
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+    $type = sanitize_key((string) $req->get_param('type'));
+    $slug = sanitize_text_field((string) $req->get_param('slug'));
+    if (!class_exists('ZipArchive')) {
+        return new WP_REST_Response(['ok' => false, 'error' => 'modulo zip di PHP assente su questo sito: impossibile creare il pacchetto'], 200);
+    }
+
+    $src    = '';
+    $root   = '';
+    $single = false;
+    $ver    = '';
+    if ($type === 'plugin') {
+        $file = tdpanop_plugin_file_by_slug($slug);
+        if ($file === '') {
+            return new WP_REST_Response(['ok' => false, 'error' => 'plugin non trovato: ' . $slug], 200);
+        }
+        $plugins = get_plugins();
+        $ver     = isset($plugins[$file]['Version']) ? (string) $plugins[$file]['Version'] : '';
+        $dir     = dirname($file);
+        if ($dir === '.' || $dir === '') {
+            $src    = WP_PLUGIN_DIR . '/' . $file;
+            $root   = basename($file);
+            $single = true;
+        } else {
+            $src  = WP_PLUGIN_DIR . '/' . $dir;
+            $root = $dir;
+        }
+    } elseif ($type === 'theme') {
+        $th = wp_get_theme($slug);
+        if (!$th->exists()) {
+            return new WP_REST_Response(['ok' => false, 'error' => 'tema non trovato: ' . $slug], 200);
+        }
+        $src  = $th->get_stylesheet_directory();
+        $root = $th->get_stylesheet();
+        $ver  = (string) $th->get('Version');
+    } else {
+        return new WP_REST_Response(['ok' => false, 'error' => 'type non valido'], 200);
+    }
+
+    $tmp = wp_tempnam($root . '.zip');
+    $zip = new ZipArchive();
+    if ($zip->open($tmp, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        @unlink($tmp);
+        return new WP_REST_Response(['ok' => false, 'error' => 'impossibile creare lo zip nella cartella temporanea'], 200);
+    }
+    if ($single) {
+        $zip->addFile($src, $root);
+    } else {
+        $base = untrailingslashit(wp_normalize_path($src));
+        $it   = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY,
+            RecursiveIteratorIterator::CATCH_GET_CHILD
+        );
+        foreach ($it as $f) {
+            if (!$f->isFile()) {
+                continue;
+            }
+            $path = wp_normalize_path($f->getPathname());
+            $zip->addFile($path, $root . '/' . ltrim(substr($path, strlen($base)), '/'));
+        }
+    }
+    if ($zip->close() !== true) {
+        @unlink($tmp);
+        return new WP_REST_Response(['ok' => false, 'error' => 'zip non completato (spazio esaurito nella cartella temporanea?)'], 200);
+    }
+    clearstatcache(true, $tmp);
+    $size = (int) @filesize($tmp);
+    if ($size <= 0) {
+        @unlink($tmp);
+        return new WP_REST_Response(['ok' => false, 'error' => 'zip vuoto'], 200);
+    }
+
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    nocache_headers();
+    header('Content-Type: application/zip');
+    header('Content-Length: ' . $size);
+    header('Content-Disposition: attachment; filename="' . sanitize_file_name($root . '-' . $ver) . '.zip"');
+    header('X-Sentinel-Version: ' . $ver);
+    readfile($tmp);
+    @unlink($tmp);
+    exit;
 }
 
 /* Autologin one-time (60s). Link verso la home per non urtare login custom. */

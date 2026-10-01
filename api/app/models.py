@@ -1,5 +1,6 @@
-from datetime import datetime
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text, func
+import json
+from datetime import date, datetime
+from sqlalchemy import String, Integer, BigInteger, Boolean, Date, DateTime, ForeignKey, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -33,6 +34,17 @@ class Site(Base):
     offline_notified: Mapped[bool] = mapped_column(Boolean, default=False)
     # primo errore dell'episodio in corso: l'avviso parte solo dopo N minuti di errori continui
     offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # diagnostica dal connettore: spazio davvero scrivibile, cartelle, peso, verifica del core
+    diag_json: Mapped[str] = mapped_column(Text, default="")
+    diag_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def diag(self) -> dict | None:
+        try:
+            return json.loads(self.diag_json) if self.diag_json else None
+        except Exception:  # noqa: BLE001
+            return None
+
     # silenzia gli avvisi del singolo sito senza interrompere monitoraggio/update
     notifications_silenced: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -297,3 +309,21 @@ class Package(Base):
     filename: Mapped[str] = mapped_column(String(300), default="")
     size: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SiteSize(Base):
+    """Peso del sito nel tempo: una riga al giorno (uploads, plugin, temi, database, totale)."""
+    __tablename__ = "site_sizes"
+    __table_args__ = (UniqueConstraint("site_id", "day", name="uq_site_sizes_site_day"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    total: Mapped[int] = mapped_column(BigInteger, default=0)
+    files_total: Mapped[int] = mapped_column(BigInteger, default=0)
+    uploads: Mapped[int] = mapped_column(BigInteger, default=0)
+    plugins: Mapped[int] = mapped_column(BigInteger, default=0)
+    themes: Mapped[int] = mapped_column(BigInteger, default=0)
+    content_other: Mapped[int] = mapped_column(BigInteger, default=0)
+    core: Mapped[int] = mapped_column(BigInteger, default=0)
+    db: Mapped[int] = mapped_column(BigInteger, default=0)
+    complete: Mapped[bool] = mapped_column(Boolean, default=True)

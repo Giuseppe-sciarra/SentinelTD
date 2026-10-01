@@ -572,7 +572,7 @@
             </div>
 
             <template x-if="route.tab==='overview'">
-              <div class="grid two site-tab">
+              <div class="site-tab"><div class="grid two">
                 <div class="card">
                   <h3>Stato</h3>
                   <div class="msg err" x-show="isOff(detail)" x-text="'Offline: '+(detail.error||detail.status)"></div>
@@ -615,6 +615,72 @@
                   </div>
                 </div>
                 </div>
+              </div>
+              <div class="grid two" style="margin-top:16px">
+                <div class="card">
+                  <div class="row" style="align-items:center;margin-bottom:10px">
+                    <h3 style="margin:0;flex:1">Diagnostica</h3>
+                    <span class="small mut" x-show="detail.diag && detail.diag.at" x-text="ago(detail.diag && detail.diag.at)"></span>
+                    <button class="btn sm" @click="runDiag(detail)" :disabled="!!(diagBusy[detail.id])"><span class="spinner" x-show="diagBusy[detail.id]"></span> Esegui diagnostica</button>
+                  </div>
+                  <div class="msg err" x-show="detail.diag && detail.diag.error" x-text="detail.diag && detail.diag.error"></div>
+                  <div class="empty" x-show="!detail.diag || !detail.diag.php">Nessuna diagnostica ancora. Premi Esegui diagnostica: serve il connettore WordPress 2.19.0 o Joomla 1.30.0.</div>
+                  <template x-if="detail.diag && detail.diag.php">
+                    <div class="kv">
+                      <div class="k">Spazio scrivibile</div>
+                      <div><span class="badge" :class="diagSpace(detail).cls" x-text="diagSpace(detail).text"></span> <span class="small mut" x-show="detail.diag.space_at" x-text="'prova ' + ago(detail.diag.space_at)"></span><div class="small mut" x-show="!detail.diag.space">si misura con Esegui diagnostica, scrivendo e cancellando 150 MB</div></div>
+                      <div class="k">Cartella temporanea</div>
+                      <div><span class="mono small" x-text="detail.diag.temp_dir" translate="no"></span> <span class="badge" :class="detail.diag.temp_writable ? 'ok' : 'err'" x-text="detail.diag.temp_writable ? 'scrivibile' : 'non scrivibile'"></span></div>
+                      <div class="k">Cartelle del sito</div>
+                      <div><span class="badge" :class="detail.diag.content_writable ? 'ok' : 'err'" x-text="detail.diag.content_writable ? 'scrivibili' : 'non scrivibili'"></span> <span class="badge err" x-show="detail.diag.file_mods_allowed === false">modifiche ai file bloccate</span></div>
+                      <div class="k">PHP</div>
+                      <div><span class="mono" x-text="detail.diag.php"></span> · memoria <span class="mono" x-text="detail.diag.memory_limit"></span> · tempo massimo <span class="mono" x-text="(detail.diag.max_execution_time || 0) + 's'"></span></div>
+                      <div class="k">Modulo zip</div>
+                      <div><span class="badge" :class="detail.diag.zip ? 'ok' : 'warn'" x-text="detail.diag.zip ? 'presente' : 'assente'"></span></div>
+                      <div class="k">File del core</div>
+                      <div>
+                        <span class="badge ok" x-show="detail.diag.core && detail.diag.core.status === 'ok'" x-text="'integri · ' + ((detail.diag.core && detail.diag.core.checked) || 0) + ' file verificati'"></span>
+                        <span class="mut" x-show="detail.diag.core && detail.diag.core.status === 'unsupported'">non disponibile per Joomla</span>
+                        <span class="mut" x-show="detail.diag.core && detail.diag.core.status === 'unavailable'">impronte ufficiali non disponibili per questa versione</span>
+                        <template x-if="detail.diag.core && detail.diag.core.status === 'issues'">
+                          <div>
+                            <span class="badge warn" x-text="coreSummary(detail.diag.core)"></span>
+                            <button class="btn sm ghost" @click="coreOpen = !coreOpen" x-text="coreOpen ? 'Nascondi' : 'Mostra i file'"></button>
+                            <div x-show="coreOpen" style="margin-top:6px">
+                              <div class="small mono" style="max-height:220px;overflow:auto">
+                                <template x-for="f in coreFiles(detail.diag.core)" :key="f.k + f.f"><div><span x-text="f.f" translate="no"></span> <span class="mut" x-text="'— ' + f.k"></span></div></template>
+                              </div>
+                              <div class="small mut" style="margin-top:6px">Modificati o mancanti: da controllare subito. In più: resti di versioni precedenti, per esempio dopo un aggiornamento via FTP, oppure file estranei.</div>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+                <div class="card">
+                  <div class="row" style="align-items:center;margin-bottom:10px">
+                    <h3 style="margin:0;flex:1">Peso del sito</h3>
+                    <b x-show="sizeNow(detail)" x-text="sizeNow(detail) ? fmtBytes(sizeNow(detail).total) : ''"></b>
+                  </div>
+                  <div class="empty" x-show="!sizeNow(detail)">Nessun dato ancora: si raccoglie ogni notte, oppure con Esegui diagnostica.</div>
+                  <template x-if="sizeNow(detail)">
+                    <div>
+                      <svg x-show="siteSizes.length > 1" viewBox="0 0 300 64" preserveAspectRatio="none" style="width:100%;height:64px;display:block"><path :d="sizeArea(300, 64)" fill="var(--acc)" fill-opacity=".14"></path><path :d="sizePath(300, 64)" fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke"></path></svg>
+                      <div class="small mut" x-show="siteSizes.length > 1" x-text="sizeTrend()" style="margin-bottom:10px"></div>
+                      <div class="kv">
+                        <div class="k">Media caricati</div><div x-text="fmtBytes(sizeNow(detail).uploads)"></div>
+                        <div class="k">Plugin ed estensioni</div><div x-text="fmtBytes(sizeNow(detail).plugins)"></div>
+                        <div class="k">Temi e template</div><div x-text="fmtBytes(sizeNow(detail).themes)"></div>
+                        <div class="k">Altri contenuti</div><div x-text="fmtBytes(sizeNow(detail).content_other)"></div>
+                        <div class="k">Sistema e altri file</div><div x-text="fmtBytes(sizeNow(detail).core)"></div>
+                        <div class="k">Database</div><div x-text="fmtBytes(sizeNow(detail).db)"></div>
+                      </div>
+                      <div class="small mut" style="margin-top:8px" x-show="sizeNow(detail).complete === false">Conteggio interrotto dopo 25 secondi: il sito ha moltissimi file, il totale è parziale.</div>
+                    </div>
+                  </template>
+                </div>
+              </div>
               </div>
             </template>
 
@@ -1191,9 +1257,66 @@
                   <div class="row" style="margin-top:10px">
                     <label class="btn sm"><span x-text="pkg.busy ? 'Caricamento…' : 'Carica uno zip'"></span><input type="file" accept=".zip" style="display:none" @change="uploadPackage($event)" :disabled="!!(pkg.busy)"></label>
                   </div>
+                  <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
+                    <div style="margin-bottom:4px"><b>Prendi da un sito</b></div>
+                    <div class="small mut" style="margin-bottom:8px">Per i prodotti a licenza: Sentinel prende lo zip dal sito WordPress che ha la versione più recente, e poi lo installa sui siti a cui il produttore non lo consegna. Serve il connettore 2.19.0 sul sito da cui si prende.</div>
+                    <input class="input" placeholder="Cerca un plugin o un tema, es. Elementor Pro" x-model="pkg.q" @input.debounce.400ms="searchCandidates()">
+                    <template x-for="c in pkg.cands" :key="'hc' + c.kind + c.slug">
+                      <div class="row" style="padding:8px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap">
+                        <span class="cms wp" x-text="c.kind === 'theme' ? 'TEMA' : 'PLUGIN'"></span>
+                        <div style="flex:1;min-width:160px">
+                          <div><b x-text="c.name" translate="no"></b> <span class="mono small" x-text="c.version"></span></div>
+                          <div class="small mut">dal sito <span x-text="c.site_name" translate="no"></span> · <span x-text="c.sites + ' ' + pl(c.sites, 'sito ce l\'ha', 'siti ce l\'hanno')"></span></div>
+                        </div>
+                        <button class="btn sm" :disabled="!!(pkg.hbusy)" @click="harvest(c)"><span class="spinner" x-show="pkg.hbusy === c.kind + c.slug"></span> Prendi</button>
+                      </div>
+                    </template>
+                    <div class="small mut" style="padding-top:8px" x-show="pkg.q.trim().length >= 2 && !pkg.cands.length && !pkg.searching">Nessun plugin o tema trovato sui siti WordPress.</div>
+                  </div>
                   <div class="msg ok" x-show="pkg.msg" x-text="pkg.msg"></div><div class="msg err" x-show="pkg.err" x-text="pkg.err"></div>
                 </div>
                 <div class="card" style="margin-top:16px"><h3>Notifiche</h3><div class="row"><div class="small mut" style="flex:1">Testi, HTML, anteprime e canali si modificano nella pagina <a href="#/notifications">Notifiche</a>. SMTP e token Telegram restano nel file <span class="mono">.env</span>.</div><button class="btn sm" @click="telegramTest()">Test Telegram</button></div></div>
+              </div>
+            </div>
+            <!-- SERVER DEI SITI: sezione a tutta larghezza, sotto le due colonne -->
+            <div class="sec-sep"><span>Server dei siti</span></div>
+            <div class="card srv-section">
+              <div class="srv-top">
+                <div class="srv-intro">
+                  <div class="srv-intro-title">Il freno per gli hosting deboli</div>
+                  <div class="small mut">Di base Sentinel lavora su tutti i server come sempre. Sui server deboli puoi mettere il freno: lì lavora su pochi siti alla volta, e dopo un sito dove ha installato o aggiornato qualcosa lascia riposare il server. Il server di un sito è l'indirizzo IP del suo dominio.</div>
+                </div>
+                <div class="srv-controls">
+                  <div class="field"><label>Siti in contemporanea su un server con il freno</label><select class="input" x-model.number="prefs.server_parallel"><template x-for="n in [1,2,3,4]" :key="'sp'+n"><option :value="n" :selected="prefs.server_parallel===n" x-text="n"></option></template></select></div>
+                  <div class="field"><label>Riposo di un server con il freno dopo un sito aggiornato</label><div class="input-suffix"><input class="input" type="number" min="0" max="600" x-model.number="prefs.server_pause_seconds"><span>secondi</span></div></div>
+                  <div class="srv-save"><button class="btn primary" @click="savePrefs()" :disabled="!!(prefs.busy)">Salva</button><span class="small" :class="prefs.err ? 'err' : 'mut'" x-text="prefs.err || prefs.msg"></span></div>
+                </div>
+              </div>
+              <div class="srv-subhead"><b>Server rilevati</b><span class="small mut">Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre.</span></div>
+              <div class="small mut" x-show="serversLoading">Rilevamento dei server…</div>
+              <div class="srv-groups">
+                <template x-for="g in serverGroups()" :key="'sg'+g.folder">
+                  <div class="srv-group">
+                    <div class="srv-group-head">
+                      <span class="srv-group-name"><span x-show="g.folder" x-text="g.folder" translate="no"></span><span x-show="!g.folder">Senza cartella</span></span>
+                      <span class="small mut" x-text="g.servers.length + ' ' + pl(g.servers.length, 'server', 'server') + ' · ' + g.sites + ' ' + pl(g.sites, 'sito', 'siti')"></span>
+                    </div>
+                    <template x-for="sv in g.servers" :key="'sv'+sv.server">
+                      <div class="srv-row" :class="isLimited(sv.server) ? 'on' : ''">
+                        <label class="srv-sw" :title="isLimited(sv.server) ? 'Freno attivo' : 'Senza freno'"><input type="checkbox" :checked="isLimited(sv.server)" @change="toggleLimited(sv.server)"><span></span></label>
+                        <span class="mono srv-ip" x-text="sv.server" translate="no"></span>
+                        <div class="srv-mid">
+                          <span class="srv-host" x-text="sv.host || '—'" translate="no"></span>
+                          <span class="srv-also" x-show="srvOthers(sv, g.folder).length"><span>anche</span> <span translate="no" x-text="srvOthers(sv, g.folder).map(f => (f.name || '—') + ' (' + f.count + ')').join(', ')"></span></span>
+                        </div>
+                        <span class="badge warn srv-badge" x-show="isLimited(sv.server)">con il freno</span>
+                        <span class="srv-num"><b x-text="sv.sites"></b> <span x-text="pl(sv.sites, 'sito', 'siti')"></span></span>
+                        <button class="srv-more" @click="srvOpen[sv.server] = !srvOpen[sv.server]" x-text="srvOpen[sv.server] ? 'Nascondi i siti' : 'Mostra i siti'"></button>
+                        <div class="srv-names" x-show="srvOpen[sv.server]" x-text="sv.names.join(' · ')" translate="no"></div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -1517,14 +1640,17 @@
             <span class="sp"></span>
             <span class="badge ok" x-show="instOutCount('ok')" x-text="instOutCount('ok')+' '+pl(instOutCount('ok'),'riuscito','riusciti')"></span>
             <span class="badge err" x-show="instOutCount('err')" x-text="instOutCount('err')+' '+pl(instOutCount('err'),'fallito','falliti')"></span>
-            <span class="badge" x-show="instOutCount('skip')" x-text="instOutCount('skip')+' '+pl(instOutCount('skip'),'saltato','saltati')"></span>
+            <span class="badge" x-show="instOutCount('skip') && !inst.progress" x-text="instOutCount('skip')+' '+pl(instOutCount('skip'),'saltato','saltati')"></span>
+            <span class="badge warn" x-show="inst.progress && !inst.progress.finished" x-text="inst.progress ? (inst.progress.done + ' di ' + inst.progress.total + ' completati') : ''"></span>
+            <span class="badge warn" x-show="inst.progress && inst.progress.retrying" x-text="inst.progress ? (inst.progress.retrying + ' ' + pl(inst.progress.retrying, 'in nuovo tentativo', 'in nuovo tentativo')) : ''"></span>
           </div>
+          <div class="small mut" style="margin:-4px 0 10px" x-show="inst.progress && !inst.progress.finished">L'installazione continua anche se cambi pagina o chiudi il browser.</div>
           <div class="bk-out">
             <template x-for="(o,i) in inst.out" :key="i">
-              <div class="bk-out-row" :class="o.skipped?'skip':(o.ok?'ok':'err')">
-                <span class="dot" :class="o.skipped?'mut':(o.ok?'ok':'err')"></span>
+              <div class="bk-out-row" :class="(o.skipped || (o.state && o.state !== 'done')) ? 'skip' : (o.ok ? 'ok' : 'err')">
+                <span class="dot" :class="(o.skipped || (o.state && o.state !== 'done')) ? 'mut' : (o.ok ? 'ok' : 'err')"></span>
                 <b x-text="o.site||o.site_name||o.name||''" translate="no"></b>
-                <span x-text="o.message||o.error||(o.ok?'ok':'errore')"></span>
+                <span x-text="instRowText(o)"></span>
               </div>
             </template>
           </div>

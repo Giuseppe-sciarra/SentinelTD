@@ -17,15 +17,15 @@ function sentinel() {
 
     // ---------- data ----------
     sites: [], loading: false, busy: {}, toast: '', toastTimer: null,
-    detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [],
+    detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [], siteSizes: [], diagBusy: {}, coreOpen: false,
     sec: { summary: null, items: [], loading: false, sev: '' },
     conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false },
-    pkg: { list: [], msg: '', err: '', busy: false },
+    pkg: { list: [], msg: '', err: '', busy: false, q: '', cands: [], searching: false, hbusy: '' }, servers: [], serversLoading: false, srvOpen: {},
     brand: { logo_url: '/static/logo.png', favicon_url: '/static/favicon.png', custom_logo: false, custom_favicon: false, busy: false },
     exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, dSort: 'folder' },
     expiryForm: { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 }, expiryEdit: false, expiryErr: '',
     prefsLoaded: false,
-    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, offline_alert_minutes: 5, email_report_mode: 'site', busy: false, msg: '', err: '' },
+    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_limited: [], busy: false, msg: '', err: '' },
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
@@ -33,7 +33,7 @@ function sentinel() {
     selMode: false, selIds: [],
     drawer: null,      // 'site' | 'install' | 'tags' | null
     form: {}, formErr: '', confirm: null,
-    inst: { mode: 'install', cms: 'wp', kind: 'plugin', activate: true, file: null, q: '', results: [], searched: false, rmItems: [], sel: [], busy: false, out: [], openKeys: [] },
+    inst: { mode: 'install', cms: 'wp', kind: 'plugin', activate: true, file: null, q: '', results: [], searched: false, rmItems: [], sel: [], busy: false, out: [], openKeys: [], job: '', progress: null },
     tagsForm: { add: '', remove: '' },
     account: { username: '', oldPw: '', newPw: '', msg: '', err: '' },
     notif: { events: [], cur: null, edit: null, preview: null, msg: '', err: '', busy: false, tab: 'email', previewTab: 'email', source: false },
@@ -56,6 +56,8 @@ function sentinel() {
       if (this.token) {
         await this.refreshImageToken();
         this.loadMeta();
+        // installazione in blocco ancora in corso (pagina ricaricata): si riprende a seguirla
+        try { const j = localStorage.getItem('inst-job'); if (j) this.pollInstall(j); } catch (e) { }
         await this.load();
       }
       setInterval(() => { if (this.token) this.refreshImageToken(); }, 7 * 60 * 1000);
@@ -196,6 +198,80 @@ function sentinel() {
       if (r.ok) this.detail = await r.json();
       const h = await this.api(`/api/history?site_id=${id}&days=7`);
       if (h.ok) this.siteHistory = await h.json();
+      this.coreOpen = false;
+      await this.loadSizes(id);
+    },
+    async loadSizes(id) {
+      this.siteSizes = [];
+      try { const z = await this.api(`/api/sites/${id}/sizes?days=365`); if (z.ok) this.siteSizes = await z.json(); } catch (e) { }
+    },
+
+    // ---------- diagnostica del sito ----------
+    // Gira nel worker (puo' superare il minuto): si avvia e si controlla diag_at finche' cambia.
+    async runDiag(d) {
+      if (this.diagBusy[d.id]) return;
+      this.diagBusy[d.id] = true;
+      this.say(`Diagnostica di ${d.name} in corso…`);
+      try {
+        const since = d.diag_at || '';
+        const r = await this.api(`/api/sites/${d.id}/diagnostics?space=150`, { method: 'POST' });
+        if (!r.ok) { this.say(`Diagnostica di ${d.name} non avviata`); return; }
+        for (let i = 0; i < 80; i++) {          // fino a 4 minuti
+          await new Promise(res => setTimeout(res, 3000));
+          const x = await this.api(`/api/sites/${d.id}`);
+          if (!x.ok) continue;
+          const nd = await x.json();
+          if ((nd.diag_at || '') !== since) {
+            if (this.detail && this.detail.id === d.id) { this.detail = nd; await this.loadSizes(d.id); }
+            this.say(nd.diag && nd.diag.error ? `Diagnostica di ${d.name}: ${nd.diag.error}` : `Diagnostica di ${d.name} completata`, 5000);
+            return;
+          }
+        }
+        this.say(`La diagnostica di ${d.name} sta impiegando molto: ricarica la pagina tra qualche minuto`, 5000);
+      } finally { this.diagBusy[d.id] = false; }
+    },
+    fmtBytes(b) {
+      b = Number(b) || 0;
+      if (b >= 1073741824) return (b / 1073741824).toFixed(2).replace('.', ',') + ' GB';
+      if (b >= 1048576) return (b / 1048576).toFixed(1).replace('.', ',') + ' MB';
+      return Math.max(0, Math.round(b / 1024)) + ' KB';
+    },
+    diagSpace(d) {
+      const sp = d && d.diag && d.diag.space;
+      if (!sp) return { cls: '', text: 'non misurato' };
+      const n = v => String(v).replace('.', ',');
+      if (sp.ok) return { cls: 'ok', text: `almeno ${n(sp.tested_mb)} MB` };
+      return { cls: 'err', text: `solo ${n(sp.written_mb)} MB` };
+    },
+    coreSummary(c) {
+      const parts = [];
+      if (c.modified_count) parts.push(`${c.modified_count} ${this.pl(c.modified_count, 'modificato', 'modificati')}`);
+      if (c.missing_count) parts.push(`${c.missing_count} ${this.pl(c.missing_count, 'mancante', 'mancanti')}`);
+      if (c.extra_count) parts.push(`${c.extra_count} in più`);
+      return parts.join(' · ');
+    },
+    coreFiles(c) {
+      return [...(c.modified || []).map(f => ({ f, k: 'modificato' })), ...(c.missing || []).map(f => ({ f, k: 'mancante' })),
+              ...(c.extra || []).map(f => ({ f, k: 'in più' }))];
+    },
+    sizeNow(d) { return (d && d.diag && d.diag.sizes && d.diag.sizes.total) ? d.diag.sizes : null; },
+    _sizePts(w, h) {
+      const v = this.siteSizes.map(r => r.total);
+      if (v.length < 2) return [];
+      const lo = Math.min(...v), hi = Math.max(...v), span = (hi - lo) || 1, pad = 6;
+      return v.map((y, i) => [(i / (v.length - 1)) * w, hi === lo ? h / 2 : pad + (1 - (y - lo) / span) * (h - 2 * pad)]);
+    },
+    sizePath(w, h) { return this._sizePts(w, h).map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' '); },
+    sizeArea(w, h) { const p = this.sizePath(w, h); return p ? `${p} L${w} ${h} L0 ${h} Z` : ''; },
+    sizeTrend() {
+      const a = this.siteSizes;
+      if (a.length < 2) return '';
+      const last = a[a.length - 1], lastDay = new Date(last.day);
+      const ref = a.find(r => (lastDay - new Date(r.day)) / 86400000 <= 30) || a[0];
+      const days = Math.max(1, Math.round((lastDay - new Date(ref.day)) / 86400000));
+      const delta = last.total - ref.total;
+      if (Math.abs(delta) < 1048576) return `stabile negli ultimi ${days} ${this.pl(days, 'giorno', 'giorni')}`;
+      return `${delta > 0 ? '+' : '−'}${this.fmtBytes(Math.abs(delta))} negli ultimi ${days} ${this.pl(days, 'giorno', 'giorni')}`;
     },
     async loadHistory() {
       const [a, b] = await Promise.all([this.api('/api/history?days=7&limit=200'), this.api('/api/history/summary?days=7')]);
@@ -319,16 +395,39 @@ function sentinel() {
       } finally { this.busy[s.id] = false; }
     },
     async checkAll() { this.say('Check di tutti i siti in corso…'); for (const s of this.sites) { try { const r = await this.api(`/api/sites/${s.id}/refresh`, { method: 'POST' }); if (r.ok) Object.assign(s, await r.json()); } catch (e) { } } this.say('Check completato'); },
+    // Aggiorna su un sito: si segue l'aggiornamento e alla fine si dice com'e' andata.
+    // Prima il pannello scriveva "accodato" anche quando non partiva niente.
     async updateNow(s) {
       if (!confirm(`Aggiornare tutto su "${s.name}" adesso?`)) return;
       const r = await this.api('/api/sites/bulk/update-selected', { method: 'POST', body: JSON.stringify({ ids: [s.id] }) });
-      this.say(r.ok ? 'Aggiornamento accodato: ' + s.name : 'Errore nell\'accodare');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.say('Errore nell\'accodare'); return; }
+      if (!d.queued) { this.say(`${s.name} non è stato aggiornato: il sito è disattivato in Sentinel`, 6000); return; }
+      this.say(`Aggiornamento di ${s.name} in corso…`, 6000);
+      const started = Date.now();
+      for (let i = 0; i < 225; i++) {          // fino a 15 minuti
+        await new Promise(res => setTimeout(res, 4000));
+        const x = await this.api(`/api/sites/${s.id}/update-status`).catch(() => null);
+        if (!x || !x.ok) continue;
+        const st = await x.json();
+        if (st.state === 'done' && st.at && new Date(st.at).getTime() >= started - 5000) {
+          // ogni pezzo dell'esito tradotto a parte: il traduttore della pagina non traduce i pezzi in mezzo a una frase
+          const T = x => (window.I18n && I18n.t) ? I18n.t(x) : x;
+          this.say(`${s.name}: ${((st.parts && st.parts.length) ? st.parts : [st.text]).map(T).join(', ')}`, 8000);
+          await this.load(true);
+          if (this.detail && this.detail.id === s.id) await this.loadDetail(s.id);
+          return;
+        }
+      }
     },
     async updateSelected() {
       if (!this.selIds.length) return;
       if (!confirm(`Aggiornare ${this.selIds.length} siti adesso?`)) return;
       const r = await this.api('/api/sites/bulk/update-selected', { method: 'POST', body: JSON.stringify({ ids: this.selIds }) });
-      this.say(r.ok ? `Aggiornamento accodato su ${this.selIds.length} siti` : 'Errore'); this.exitSel();
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) this.say('Errore');
+      else this.say(`Aggiornamento accodato su ${d.queued} siti` + ((d.skipped || []).length ? ` · non aggiornati perché disattivati: ${d.skipped.join(', ')}` : ''), 6000);
+      this.exitSel();
     },
     async updateAll() {
       if (!confirm('Aggiornare TUTTI i siti con update pendenti adesso?')) return;
@@ -490,7 +589,40 @@ function sentinel() {
       return `Rimuoverai ${k} ${this.pl(k, 'estensione', 'estensioni')} da ${n} ${this.pl(n, 'sito', 'siti')}`;
     },
     instOutCount(kind) {
-      return this.inst.out.filter(o => kind === 'skip' ? o.skipped : (kind === 'ok' ? (o.ok && !o.skipped) : (!o.ok && !o.skipped))).length;
+      const pending = o => o.state && o.state !== 'done';
+      return this.inst.out.filter(o => kind === 'skip' ? (o.skipped || pending(o))
+        : (kind === 'ok' ? (o.ok && !o.skipped && !pending(o)) : (!o.ok && !o.skipped && !pending(o)))).length;
+    },
+    instRowText(o) {
+      if (o.state === 'queued') return 'in coda';
+      if (o.state === 'waiting') return 'in attesa: sullo stesso server sta lavorando un altro sito';
+      if (o.state === 'running') return 'installazione in corso…';
+      if (o.state === 'retry') return 'nuovo tentativo tra un minuto · ' + (o.error || '');
+      return o.message || o.error || (o.ok ? ('installato' + (o.new ? ' · ' + o.new : '')) : 'errore');
+    },
+    async pollInstall(job) {
+      this.inst.job = job; this.inst.busy = true;
+      try { localStorage.setItem('inst-job', job); } catch (e) { }
+      try {
+        for (let i = 0; i < 1200; i++) {           // fino a un'ora
+          const r = await this.api('/api/install/jobs/' + job).catch(() => null);
+          if (r && r.status === 404) break;
+          if (r && r.ok) {
+            const d = await r.json();
+            this.inst.progress = d;
+            this.inst.out = d.results;
+            if (d.finished) {
+              this.say(`Installazione conclusa: ${d.ok} ${this.pl(d.ok, 'riuscita', 'riuscite')}, ${d.failed} ${this.pl(d.failed, 'fallita', 'fallite')}`, 6000);
+              await this.load(true);
+              break;
+            }
+          }
+          await new Promise(res => setTimeout(res, 3000));
+        }
+      } finally {
+        this.inst.busy = false; this.inst.job = '';
+        try { localStorage.removeItem('inst-job'); } catch (e) { }
+      }
     },
     instIsOpen(r) { return this.inst.openKeys.includes(r.type + '|' + r.slug); },
     instToggleOpen(r) { const k = r.type + '|' + r.slug; this.inst.openKeys = this.inst.openKeys.includes(k) ? this.inst.openKeys.filter(x => x !== k) : [...this.inst.openKeys, k]; },
@@ -500,9 +632,12 @@ function sentinel() {
       try {
         const fd = new FormData(); fd.append('package', this.inst.file); fd.append('cms', this.inst.cms); fd.append('kind', this.inst.kind); fd.append('activate', this.inst.activate ? 'true' : 'false'); fd.append('site_ids', this.inst.sel.join(','));
         const r = await fetch('/api/install', { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.token }, body: fd });
-        const d = await r.json().catch(() => ({})); this.inst.out = d.results || d.items || [{ ok: r.ok, message: d.detail || (r.ok ? 'ok' : 'errore') }];
-        await this.load(true);
-      } finally { this.inst.busy = false; }
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.job) { this.inst.out = [{ ok: false, message: d.detail || 'errore' }]; this.inst.busy = false; return; }
+        // in sottofondo: la pagina legge l'avanzamento, e si puo' anche cambiare pagina
+        this.say(`Installazione avviata su ${d.total} ${this.pl(d.total, 'sito', 'siti')}`);
+        this.pollInstall(d.job);
+      } catch (e) { this.inst.busy = false; }
     },
     async runRemove() {
       if (!this.inst.rmItems.length) { this.say('Seleziona cosa rimuovere'); return; }
@@ -738,6 +873,28 @@ function sentinel() {
       const d = await r.json();
       this.prefs = { ...this.prefs, ...d, domain_alert_text: (d.domain_alert_days||[30,14,7]).join(', '), component_alert_text: (d.component_alert_days||[30,14,7]).join(', '), msg: '', err: '', busy: false };
       this.prefsLoaded = true;
+      this.loadServers();
+    },
+    async loadServers() {
+      this.serversLoading = true;
+      try { const r = await this.api('/api/preferences/servers'); if (r.ok) this.servers = await r.json(); } catch (e) { }
+      finally { this.serversLoading = false; }
+    },
+    // Server raggruppati per cartella cliente: ogni server va sotto la cartella dove ha piu' siti
+    serverGroups() {
+      const groups = {};
+      for (const sv of this.servers) {
+        const main = (sv.folders && sv.folders.length) ? sv.folders[0].name : '';
+        (groups[main] = groups[main] || { folder: main, servers: [], sites: 0 });
+        groups[main].servers.push(sv); groups[main].sites += sv.sites;
+      }
+      return Object.values(groups).sort((a, b) => (a.folder === '') - (b.folder === '') || a.folder.localeCompare(b.folder, 'it', { numeric: true }));
+    },
+    srvOthers(sv, folder) { return (sv.folders || []).filter(f => f.name !== folder); },
+    isLimited(ip) { return (this.prefs.server_limited || []).includes(ip); },
+    toggleLimited(ip) {
+      const cur = this.prefs.server_limited || [];
+      this.prefs.server_limited = cur.includes(ip) ? cur.filter(x => x !== ip) : [...cur, ip];
     },
     parseAlertDays(v) { return [...new Set(String(v||'').split(/[,;\s]+/).map(x=>parseInt(x,10)).filter(x=>Number.isFinite(x)&&x>0&&x<=3650))].sort((a,b)=>b-a); },
     async savePrefs() {
@@ -750,8 +907,10 @@ function sentinel() {
         // (era successo con screenshot_every_hours: il valore non partiva e tornava al default).
         const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'expiry_warning_days',
                           'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days',
-                          'domain_decision_days', 'domain_alert_norenew', 'offline_alert_minutes'];
-        const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site' };
+                          'domain_decision_days', 'domain_alert_norenew', 'offline_alert_minutes',
+                          'server_parallel', 'server_pause_seconds'];
+        const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
+                       server_limited: this.prefs.server_limited || [] };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
           if (Number.isFinite(v)) body[k] = v;
@@ -832,6 +991,24 @@ function sentinel() {
       } finally { this.pkg.busy = false; }
     },
     fmtSize(b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; },
+    async searchCandidates() {
+      const q = (this.pkg.q || '').trim();
+      if (q.length < 2) { this.pkg.cands = []; return; }
+      this.pkg.searching = true;
+      try { const r = await this.api('/api/packages/candidates?q=' + encodeURIComponent(q)); this.pkg.cands = r.ok ? await r.json() : []; }
+      finally { this.pkg.searching = false; }
+    },
+    async harvest(c) {
+      this.pkg.hbusy = c.kind + c.slug; this.pkg.err = ''; this.pkg.msg = '';
+      try {
+        const r = await this.api('/api/packages/harvest', { method: 'POST', body: JSON.stringify({ site_id: c.site_id, kind: c.kind, slug: c.slug }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) {
+          this.pkg.msg = `${d.name} ${d.version} preso da ${d.from_site}` + (d.pending_sites ? ` · da installare su ${d.pending_sites} ${this.pl(d.pending_sites, 'sito', 'siti')}` : '');
+          await this.loadPackages();
+        } else this.pkg.err = d.detail || 'Pacchetto non ottenuto';
+      } finally { this.pkg.hbusy = ''; }
+    },
     async uploadConn(kind, ev) {
       const f = ev.target.files && ev.target.files[0]; if (!f) return; this.conn.busy = true; this.conn.err = ''; this.conn.msg = '';
       try { const fd = new FormData(); fd.append('package', f); const r = await fetch('/api/connectors/' + kind, { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.token }, body: fd }); if (r.ok) { this.conn.msg = 'Connettore caricato'; await this.loadConn(); } else this.conn.err = (await r.json().catch(() => ({}))).detail || 'Upload fallito'; }

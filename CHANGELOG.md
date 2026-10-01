@@ -1,5 +1,147 @@
 # Changelog
 
+## 2.9.8
+
+### Changed
+- *Settings → Site servers*: servers grouped by client folder, one full-width row per IP.
+  Each folder has a header with its number of servers and sites; each server goes under the
+  folder where it hosts most sites, with a short "also …" note for the others. A row holds
+  the Brake switch, the IP, the server name, the number of sites and *Show the sites*;
+  braked rows are highlighted
+
+### Fixed
+- The brake switch used the class `.sw`, which already belonged to the colour squares of the
+  Statistics legend: since 2.9.6 the squares picked up a 2 px shift and a pointer cursor from
+  the switch. The switch is now `.srv-sw` and the legend is back as before
+
+## 2.9.7
+
+### Changed
+- *Settings → Site servers* moved out of the right column into its own full-width section
+  under the two columns, opened by a labelled divider: explanation and settings (sites at
+  the same time, rest, Save) on one row, then the server cards in a responsive grid (up to
+  four per row), larger. Opening the site list of a card no longer stretches the others in
+  the same row
+
+## 2.9.6
+
+### Changed
+- *Settings → Site servers* laid out as one card per server: a **Brake** switch, the IP with
+  the server name from reverse DNS (often the hosting provider), the folders of its sites
+  with their counts (so a client's servers are recognisable at a glance), the number of
+  sites, and the site names behind *Show the sites*. Braked servers are highlighted.
+  Reverse DNS lookups run in parallel, time out after 3 s and are cached for a day
+
+## 2.9.5
+
+### Changed
+- The server brake is now **opt-in**: by default every server works as before, with no
+  limit and no rest, and the brake (limited sites at the same time, rest after an updated
+  site) applies only to the servers ticked in *Settings → Site servers*. The 2.9.4 list of
+  servers without limit is not converted, since the default is now the opposite. The
+  background bulk install and its automatic retry still apply to every site
+
+## 2.9.4
+
+### Added
+- **One site at a time per server.** A site's server is the IP address of its domain; on the
+  same server Sentinel works on a limited number of sites at once (default 1), while
+  different servers keep working in parallel. A job that finds its server busy goes back to
+  the queue after a few seconds instead of holding a worker slot. Applies to updates and to
+  bulk installs
+- **Server rest**: after a site where something was installed or updated, its server rests
+  for a configurable time (default 30 s). Empty checks (nothing to update) do not trigger it,
+  so the hourly cycle does not get longer for nothing
+- *Settings → Site servers*: sites at the same time per server, rest time, and the list of
+  detected servers with how many sites each one hosts. Servers that cope well can be set
+  to *no limit* — typically your own, where a reverse proxy puts many sites on one IP
+
+### Changed
+- **Bulk install runs in the background.** It used to run entirely inside the browser
+  request, one site after another, and the page stayed busy until the last site was done
+  (tens of minutes with 30 sites). Now every site is a worker job, the page shows the
+  progress (queued, waiting for the server, installing, retrying, done) and picks it up again
+  after a reload; the install goes on even if the browser is closed
+- Bulk install: timeouts and server errors (5xx, dropped connection) are retried once after
+  a minute — on weak servers they are almost always temporary. Other errors (token,
+  connector, zip) are reported as they are
+
+## 2.9.3 — connectors WordPress 2.19.1, Joomla 1.30.1
+
+### Fixed
+- Diagnostics showed the connector's own time limit (180 s, raised for the diagnostics run)
+  instead of the site's `max_execution_time`: it was read after raising it. It is now read
+  before. Only that line of the diagnostics changes; no hurry to roll the connectors out
+
+## 2.9.2
+
+### Fixed
+- Site page layout broken on sites with failed updates in their history: an error saved
+  before 2.9.0 still contained the whole vendor download link with its token, a very long
+  string without spaces, and the grid columns (`1.4fr 1fr` with no minimum) grew to fit it —
+  one column took the whole page and the page scrolled sideways. Columns can no longer be
+  widened by their content (`minmax(0, …)`), long text in the timeline and in the key/value
+  lists wraps, and the history endpoint cleans old errors too, as new ones already are
+
+## 2.9.1
+
+### Fixed
+- *Update* on a site could stop without a word while the panel said "queued": the site had
+  automatic updates switched off (the button respected that switch and queued nothing), the
+  items were paused after a failed attempt (the pause applied to the button too), or the site
+  did not answer the initial check (written only in the log). *Update* on a site and *Update
+  selected* are explicit requests: they now try right away, also with automatic updates off
+  and without the pause, and only sites disabled in Sentinel are left out. *Install now* in
+  Packages behaves the same way
+- After *Update* the panel follows the update and shows how it went: *2 updated, 1 failed*,
+  *nothing to update*, *the site does not respond: reason*. The outcome is stored in pieces
+  and translated piece by piece, so it reads correctly in every language
+
+### Changed
+- *Update*, *Update selected* and *Update all* no longer send their own Telegram summary:
+  what they update goes into the summary of the next hourly cycle, so Telegram gets only the
+  periodic, complete summaries. With the automatic cycle switched off they still send their
+  own, otherwise nothing would ever arrive
+
+## 2.9.0 — connectors WordPress 2.19.0, Joomla 1.30.0
+
+### Added
+- **Site diagnostics** on the site page: space that can really be written (measured by
+  writing and deleting 150 MB, because the free-space figure of the server disk says nothing
+  about the account quota — on a real site 72 GB were free on the disk and 1.6 MB on the
+  quota), temporary folder, folder permissions, PHP, memory, zip module. *Run diagnostics*
+  works in the background and the page shows the result when it is ready, so no proxy can
+  cut the request
+- **Site size over time**: uploads, plugins, themes, other content, system files and
+  database, with a chart and the growth of the last 30 days. Collected every night at 03:40
+  (no write test at night) and kept for two years
+- **Core file check** (WordPress): every core file compared with the official wordpress.org
+  checksums — modified, missing, and extra files in wp-admin and wp-includes (leftovers after
+  an FTP update, or foreign files). A notification arrives only when the result changes
+- **Take a package from a site** (*Settings → Packages*): search a plugin or theme, Sentinel
+  takes the zip from the WordPress site with the highest version and stores it as a package,
+  ready to install on the sites the vendor does not deliver it to (Elementor Pro and other
+  licensed products)
+- WordPress connector: before a large update (core, or packages above 5 MB from
+  wordpress.org) it checks that the needed space can really be written; without it the update
+  is not attempted and the message says how much is needed and how much is available. After
+  an update fails with the errors a full quota produces (PCLZIP_ERR_BAD_FORMAT, copy failed,
+  download failed) it measures the space and says so plainly
+
+### Changed
+- **Failed updates: one message per site**, listing every item that failed with its reason
+  underneath, instead of one message per item
+- **Readable errors** everywhere (reports, Telegram, email, history): no more `&#8217;` and
+  `&#8230;` (WordPress sends them already encoded and they were encoded again), no full
+  download links with the vendor tokens, no installer progress lines — only the sentence that
+  matters, with a hint when the cause is usually a full quota
+
+### Fixed
+- Telegram cycle summaries could arrive twice. The cycle counters stayed in Redis after the
+  summary was sent, so any other summary queued in the meantime (hourly cycle, *Update all*,
+  *Update* on a single site) sent the same content again. The summary now takes and clears
+  the counters in a single Redis transaction, and only one summary runs at a time
+
 ## 2.8.2
 
 ### Added

@@ -17,6 +17,7 @@ per categoria li calcola qui il backend.
 """
 import time
 import re
+from urllib.parse import quote
 import httpx
 from datetime import datetime, timezone
 from sqlalchemy import delete, select
@@ -247,3 +248,95 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         site.status = "error"
         site.error = str(ex)[:480]
         site.last_checked = datetime.now(timezone.utc)
+
+# --------------------------------------------------------------------------
+# Diagnostica e pacchetti (connettore WordPress 2.19.0 / Joomla 1.30.0)
+# --------------------------------------------------------------------------
+class ConnectorTooOld(RuntimeError):
+    """Il connettore del sito non ha ancora la funzione richiesta."""
+
+
+def _auth_headers(site: Site, accept: str = "application/json") -> dict:
+    return {
+        "Authorization": f"Bearer {site.token}",
+        "X-Sentinel-Token": site.token,
+        "Accept": accept,
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
+
+def _rest_no_route(r: httpx.Response) -> bool:
+    try:
+        return r.status_code == 404 and (r.json() or {}).get("code") == "rest_no_route"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _wp_get(client: httpx.AsyncClient, site: Site, path: str, qs: str, headers: dict) -> httpx.Response:
+    """GET verso il connettore WP provando entrambe le forme dell'indirizzo REST."""
+    r = await client.get(wp_rest_url(site, path, qs), headers=headers)
+    if r.status_code < 400 or _rest_no_route(r):
+        return r
+    cur = _WP_REST_STYLE.get(site.id, "wpjson")
+    _WP_REST_STYLE[site.id] = "restroute" if cur == "wpjson" else "wpjson"
+    r2 = await client.get(wp_rest_url(site, path, qs), headers=headers)
+    if r2.status_code < 400 or _rest_no_route(r2):
+        return r2
+    _WP_REST_STYLE[site.id] = cur
+    return r
+
+
+async def fetch_diagnostics(site: Site, space_mb: int = 0, sizes: bool = True, core: bool = True,
+                            timeout: float = 240.0) -> dict:
+    """Diagnostica dal connettore: spazio scrivibile (prova vera da space_mb MB), cartelle,
+    peso del sito, verifica dei file del core (solo WordPress)."""
+    cb = int(time.time())
+    qs = f"space={max(0, min(400, int(space_mb)))}&sizes={1 if sizes else 0}&core={1 if core else 0}&_={cb}"
+    too_old = ("il connettore di questo sito non ha ancora la diagnostica: aggiornalo alla "
+               + ("2.19.0" if site.cms == "wp" else "1.30.0"))
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        if site.cms == "wp":
+            r = await _wp_get(client, site, "diagnostics", qs, _auth_headers(site))
+            if _rest_no_route(r):
+                raise ConnectorTooOld(too_old)
+        else:
+            url = (f"{site.url.rstrip('/')}/index.php?option=com_ajax&plugin=tdpanopticon&group=system"
+                   f"&format=json&task=diagnostics&{qs}")
+            r = await client.get(url, headers=_auth_headers(site))
+        r.raise_for_status()
+        payload = r.json()
+    if site.cms != "wp":
+        if isinstance(payload, dict) and "success" in payload:
+            if not payload.get("success"):
+                raise RuntimeError(payload.get("message") or "com_ajax error")
+            payload = (payload.get("data") or [None])[0]
+        elif isinstance(payload, list):
+            payload = payload[0] if payload else None
+    # un connettore Joomla vecchio non conosce il task e risponde con lo stato normale
+    if not isinstance(payload, dict) or not payload.get("diagnostics"):
+        raise ConnectorTooOld(too_old)
+    return payload
+
+
+async def fetch_package(site: Site, kind: str, slug: str, max_size: int, timeout: float = 300.0) -> tuple[bytes, str]:
+    """Zip di un plugin o tema installato sul sito (solo WordPress, connettore 2.19.0)."""
+    if site.cms != "wp":
+        raise RuntimeError("il recupero dei pacchetti funziona solo con i siti WordPress")
+    qs = f"type={quote(kind, safe='')}&slug={quote(slug, safe='')}&_={int(time.time())}"
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        r = await _wp_get(client, site, "package", qs, _auth_headers(site, "application/zip, application/json"))
+        if _rest_no_route(r):
+            raise ConnectorTooOld("il connettore di questo sito non sa ancora preparare i pacchetti: aggiornalo alla 2.19.0")
+        r.raise_for_status()
+        ctype = (r.headers.get("content-type") or "").lower()
+        if "zip" not in ctype:
+            try:
+                err = (r.json() or {}).get("error") or "risposta inattesa"
+            except Exception:  # noqa: BLE001
+                err = f"risposta inattesa ({ctype or 'senza tipo'})"
+            raise RuntimeError(err)
+        data = r.content
+    if len(data) > max_size:
+        raise RuntimeError("pacchetto troppo grande")
+    return data, (r.headers.get("x-sentinel-version") or "")

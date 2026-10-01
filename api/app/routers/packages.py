@@ -97,9 +97,8 @@ async def list_packages(s: AsyncSession = Depends(get_session)):
     return [_out(p, await _pending_for(s, p)) for p in pkgs]
 
 
-@router.post("")
-async def upload_package(file: UploadFile = File(...), s: AsyncSession = Depends(get_session)):
-    data = await file.read()
+async def _store_package(s: AsyncSession, data: bytes) -> dict:
+    """Salva uno zip come pacchetto (caricato a mano o preso da un sito). Uno per prodotto."""
     if not data:
         raise HTTPException(422, "File vuoto")
     if len(data) > MAX_SIZE:
@@ -143,6 +142,61 @@ async def upload_package(file: UploadFile = File(...), s: AsyncSession = Depends
     return _out(pkg, pending)
 
 
+@router.post("")
+async def upload_package(file: UploadFile = File(...), s: AsyncSession = Depends(get_session)):
+    return await _store_package(s, await file.read())
+
+
+@router.get("/candidates")
+async def harvest_candidates(q: str = "", s: AsyncSession = Depends(get_session)):
+    """Plugin e temi che si possono prendere da un sito WordPress: per ognuno la versione
+    piu' alta installata nel parco e il sito su cui si trova."""
+    q = (q or "").strip().lower()
+    if len(q) < 2:
+        return []
+    rows = (await s.execute(
+        select(Extension, Site).join(Site, Site.id == Extension.site_id)
+        .where(Site.enabled == True, Site.cms == "wp", Extension.type.in_(("plugin", "theme")))  # noqa: E712
+    )).all()
+    best: dict[tuple, dict] = {}
+    for e, site in rows:
+        if q not in (e.name or "").lower() and q not in (e.slug or "").lower():
+            continue
+        if not e.current_version:
+            continue
+        key = (e.type, e.slug)
+        cur = best.get(key)
+        if cur is None or version_gt(e.current_version, cur["version"]):
+            best[key] = {"kind": e.type, "slug": e.slug, "name": e.name, "version": e.current_version,
+                         "site_id": site.id, "site_name": site.name, "sites": 0}
+    for e, site in rows:
+        k = (e.type, e.slug)
+        if k in best:
+            best[k]["sites"] += 1
+    return sorted(best.values(), key=lambda x: (x["name"] or "").lower())[:30]
+
+
+@router.post("/harvest")
+async def harvest_package(body: dict, s: AsyncSession = Depends(get_session)):
+    """Prende dal sito indicato lo zip del plugin o tema installato e lo salva come pacchetto.
+    Serve ai prodotti a licenza: dove l'aggiornamento e' riuscito si prende il file, e lo
+    si installa sui siti a cui il produttore non lo consegna."""
+    from ..connectors import ConnectorTooOld, fetch_package
+    site = await s.get(Site, int(body.get("site_id") or 0))
+    kind, slug = str(body.get("kind") or ""), str(body.get("slug") or "")
+    if not site or kind not in ("plugin", "theme") or not slug:
+        raise HTTPException(422, "Sito, tipo o prodotto non validi")
+    try:
+        data, _ver = await fetch_package(site, kind, slug, MAX_SIZE)
+    except ConnectorTooOld as ex:
+        raise HTTPException(409, str(ex))
+    except Exception as ex:  # noqa: BLE001
+        raise HTTPException(502, f"Pacchetto non ottenuto da {site.name}: {str(ex)[:300]}")
+    out = await _store_package(s, data)
+    out["from_site"] = site.name
+    return out
+
+
 @router.delete("/{pkg_id}")
 async def delete_package(pkg_id: int, s: AsyncSession = Depends(get_session)):
     pkg = await s.get(Package, pkg_id)
@@ -174,7 +228,8 @@ async def apply_package(pkg_id: int, s: AsyncSession = Depends(get_session)):
         pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
         try:
             for i, sid in enumerate(site_ids):
-                await pool.enqueue_job("update_site", sid, _defer_by=i * 10)
+                # richiesta esplicita: si installa anche dove l'aggiornamento automatico e' spento
+                await pool.enqueue_job("update_site", sid, True, _defer_by=i * 10)
         finally:
             await pool.close()
     return {"queued": len(site_ids)}

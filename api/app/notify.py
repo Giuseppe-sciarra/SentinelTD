@@ -60,12 +60,43 @@ EVENTS: dict[str, dict[str, Any]] = {
     },
     "update_failed": {
         "label": "Update fallito",
-        "desc": "Un singolo update non e' riuscito (con il motivo).",
+        "desc": "Gli aggiornamenti non riusciti di un sito, in un solo messaggio, ciascuno col suo motivo.",
         "channels": {"email": False, "telegram": True},
-        "vars": {"site_name": "Nome del sito", "site_url": "URL", "item": "Estensione", "reason": "Motivo dell'errore", "date": "Data e ora"},
-        "subject": "[Sentinel] Update fallito su {{ site_name }}: {{ item }}",
-        "email": """<p><b>{{ site_name }}</b> — update fallito: <b>{{ item }}</b></p><p style="color:#b00020">{{ reason }}</p><p><a href="{{ site_url }}">{{ site_url }}</a></p>""",
-        "telegram": "❌ <b>{{ site_name }}</b> — update fallito: {{ item }}\n<i>{{ reason }}</i>",
+        "vars": {"site_name": "Nome del sito", "site_url": "URL", "folder": "Cartella del sito",
+                 "failures_head": "Riga di sintesi (es. 2 aggiornamenti non riusciti)",
+                 "failures_lines": "Elenco per Telegram: un elemento per riga, col motivo sotto",
+                 "failures_html": "Elenco per email (HTML)",
+                 "item": "Primo elemento fallito (formato precedente)", "reason": "Motivo del primo (formato precedente)",
+                 "date": "Data e ora"},
+        "subject": "[Sentinel] ❌ {{ site_name }} — {{ failures_head }}{% if folder %} · {{ folder }}{% endif %}",
+        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
+  <h2 style="margin:0 0 4px">❌ {{ site_name }}</h2>
+  <div style="color:#666;margin-bottom:{% if folder %}2px{% else %}14px{% endif %}"><a href="{{ site_url }}">{{ site_url }}</a></div>
+  {% if folder %}<div style="color:#666;margin-bottom:14px">📁 {{ folder }}</div>{% endif %}
+  <p style="margin:0 0 8px"><b>{{ failures_head }}</b></p>
+  {{ failures_html }}
+  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>
+</div>""",
+        "telegram": "❌ <b>{{ site_name }}</b> — {{ failures_head }}{% if folder %}\n📁 {{ folder }}{% endif %}\n{{ failures_lines }}",
+    },
+    "core_integrity": {
+        "label": "File del core da controllare",
+        "desc": "La verifica notturna dei file di WordPress ha trovato file modificati, mancanti o in più (solo quando cambia qualcosa).",
+        "channels": {"email": False, "telegram": True},
+        "vars": {"site_name": "Nome del sito", "site_url": "URL", "folder": "Cartella del sito",
+                 "core_summary": "Sintesi (es. 2 modificati · 1 mancante · 3 in più)",
+                 "core_lines": "Elenco dei file per Telegram", "core_html": "Elenco dei file per email (HTML)",
+                 "panel_link": "Link al sito in Sentinel (HTML)", "date": "Data e ora"},
+        "subject": "[Sentinel] 🛡 {{ site_name }} — file del core da controllare{% if folder %} · {{ folder }}{% endif %}",
+        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
+  <h2 style="margin:0 0 4px">🛡 {{ site_name }}</h2>
+  <div style="color:#666;margin-bottom:14px"><a href="{{ site_url }}">{{ site_url }}</a>{% if folder %} &middot; 📁 {{ folder }}{% endif %}</div>
+  <p style="margin:0 0 8px"><b>File del core da controllare:</b> {{ core_summary }}</p>
+  {{ core_html }}
+  {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}
+  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>
+</div>""",
+        "telegram": "🛡 <b>{{ site_name }}</b> — file del core da controllare{% if folder %}\n📁 {{ folder }}{% endif %}\n{{ core_summary }}\n{{ core_lines }}",
     },
     "cycle_summary": {
         "label": "Riepilogo ciclo",
@@ -199,7 +230,14 @@ SAMPLE: dict[str, dict[str, Any]] = {
                     "results": [{"name": "WooCommerce", "from": "11.0.0", "to": "11.0.1", "ok": True, "error": ""},
                                 {"name": "Yoast SEO", "from": "28.3", "to": "28.4", "ok": True, "error": ""},
                                 {"name": "ACF", "from": "6.8.7", "to": "6.8.8", "ok": False, "error": "Errore di filesystem"}]},
-    "update_failed": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "item": "WPForms Lite 2.0.0.3 -> 2.0.0.4", "reason": "Errore di filesystem"},
+    "update_failed": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "folder": "Clienti",
+                      "failures": [{"name": "Elementor Pro", "from": "4.2.3", "to": "4.3.1", "error": "Il pacchetto non può essere installato. PCLZIP_ERR_BAD_FORMAT"},
+                                   {"name": "WordPress core", "from": "6.9.9", "to": "7.1.2", "error": "Il download non è andato a buon fine"}],
+                      "item": "Elementor Pro 4.2.3 -> 4.3.1", "reason": "Il pacchetto non può essere installato. PCLZIP_ERR_BAD_FORMAT"},
+    "core_integrity": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "folder": "Clienti",
+                       "core": {"status": "issues", "version": "7.1.2", "checked": 1987, "modified_count": 1, "missing_count": 0,
+                                "extra_count": 2, "modified": ["wp-includes/load.php"], "missing": [],
+                                "extra": ["wp-includes/class-wp-old.php", "wp-admin/x.php"]}},
     "cycle_summary": {"applied": 9, "sites_touched": 7, "failed": 1,
                       "ok_lines": "• Sito A: WooCommerce 11.0.0→11.0.1\n• Sito B: Traduzioni (1)\n• Sito C: Yoast 28.3→28.4",
                       "failed_lines": "• Sito D: ACF 6.8.7→6.8.8"},
@@ -226,7 +264,7 @@ def _esc(s: Any) -> str:
 
 # Modelli predefiniti delle versioni precedenti: una copia salvata IDENTICA a uno di questi non
 # e' una personalizzazione, e' il vecchio default rimasto nel database -> si usa quello nuovo.
-_LEGACY_DEFAULTS = {('cycle_summary', 'subject'): ('[Sentinel] Ciclo completato: {{ applied }} update su {{ sites_touched }} siti',), ('cycle_summary', 'body_email'): ('<h3>Ciclo aggiornamenti completato</h3><p>✅ {{ applied }} update applicati su {{ sites_touched }} siti</p><pre style="font-family:inherit">{{ ok_lines }}</pre>{% if failed %}<p>❌ {{ failed }} falliti</p><pre style="font-family:inherit">{{ failed_lines }}</pre>{% endif %}',), ('cycle_summary', 'body_telegram'): ('📊 <b>Ciclo aggiornamenti completato</b>\n✅ {{ applied }} update applicati su {{ sites_touched }} siti\n{{ ok_lines }}{% if failed %}\n\n❌ {{ failed }} falliti\n{{ failed_lines }}{% endif %}',), ('site_report', 'subject'): ('[Sentinel] {{ site_name }}: {{ ok_count }} aggiornati, {{ failed_count }} falliti', '[Sentinel] {{ outcome_icon }} {{ site_name }} — {{ outcome_text }}'), ('site_report', 'body_email'): ('<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ updates_table }}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>', '<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ outcome_icon }} {{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ status_box }}\n  {{ report_table }}\n  {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>'), ('site_report', 'body_telegram'): ('🛠 <b>{{ site_name }}</b> — {{ ok_count }} aggiornati, {{ failed_count }} falliti\n{{ updates_lines }}', '{{ outcome_icon }} <b>{{ site_name }}</b> — {{ outcome_text }}\n{{ updates_lines }}')}
+_LEGACY_DEFAULTS = {('cycle_summary', 'subject'): ('[Sentinel] Ciclo completato: {{ applied }} update su {{ sites_touched }} siti',), ('cycle_summary', 'body_email'): ('<h3>Ciclo aggiornamenti completato</h3><p>✅ {{ applied }} update applicati su {{ sites_touched }} siti</p><pre style="font-family:inherit">{{ ok_lines }}</pre>{% if failed %}<p>❌ {{ failed }} falliti</p><pre style="font-family:inherit">{{ failed_lines }}</pre>{% endif %}',), ('cycle_summary', 'body_telegram'): ('📊 <b>Ciclo aggiornamenti completato</b>\n✅ {{ applied }} update applicati su {{ sites_touched }} siti\n{{ ok_lines }}{% if failed %}\n\n❌ {{ failed }} falliti\n{{ failed_lines }}{% endif %}',), ('site_report', 'subject'): ('[Sentinel] {{ site_name }}: {{ ok_count }} aggiornati, {{ failed_count }} falliti', '[Sentinel] {{ outcome_icon }} {{ site_name }} — {{ outcome_text }}'), ('site_report', 'body_email'): ('<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ updates_table }}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>', '<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ outcome_icon }} {{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ status_box }}\n  {{ report_table }}\n  {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>'), ('site_report', 'body_telegram'): ('🛠 <b>{{ site_name }}</b> — {{ ok_count }} aggiornati, {{ failed_count }} falliti\n{{ updates_lines }}', '{{ outcome_icon }} <b>{{ site_name }}</b> — {{ outcome_text }}\n{{ updates_lines }}'), ('update_failed', 'subject'): ('[Sentinel] Update fallito su {{ site_name }}: {{ item }}',), ('update_failed', 'body_email'): ('<p><b>{{ site_name }}</b> — update fallito: <b>{{ item }}</b></p><p style="color:#b00020">{{ reason }}</p><p><a href="{{ site_url }}">{{ site_url }}</a></p>',), ('update_failed', 'body_telegram'): ('❌ <b>{{ site_name }}</b> — update fallito: {{ item }}\n<i>{{ reason }}</i>',)}
 
 
 def default_config(event: str, language: str | None = None) -> dict:
@@ -525,6 +563,51 @@ def _site_report_extras(out, lang):
     out["panel_link"] = f'<a href="{_esc(panel)}/#/site/{int(sid)}">{t("Apri in Sentinel", lang)}</a>' if panel and sid else ""
 
 
+def _failures_vars(out: dict, lang: str) -> None:
+    """Avviso di fallimento: un solo messaggio per sito, un elemento per riga col motivo."""
+    fl = [f for f in (out.get("failures") or []) if isinstance(f, dict)]
+    if not fl and out.get("item"):
+        # chiamata nel formato precedente (un elemento solo)
+        fl = [{"name": str(out.get("item")), "from": "", "to": "", "error": str(out.get("reason") or "")}]
+    n = len(fl)
+    out["failed_count"] = n
+    out["failures_head"] = (f"{n} {t('aggiornamento non riuscito', lang)}" if n == 1
+                            else f"{n} {t('aggiornamenti non riusciti', lang)}")
+    tg, em = [], []
+    for f in fl:
+        ver = f"{f.get('from') or ''} → {f.get('to') or '?'}" if (f.get("from") or f.get("to")) else ""
+        why = t(str(f.get("error") or ""), lang)
+        tg.append(f"• <b>{_esc(f.get('name'))}</b> {_esc(ver)}".rstrip() + (f"\n   <i>{_esc(why)}</i>" if why else ""))
+        em.append(f'<li style="margin-bottom:8px"><b>{_esc(f.get("name"))}</b> '
+                  f'<span style="font-family:monospace;color:#555">{_esc(ver)}</span>'
+                  + (f'<br><span style="color:#b00020">{_esc(why)}</span>' if why else "") + "</li>")
+    out["failures_lines"] = "\n".join(tg)
+    out["failures_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
+
+
+def _core_vars(out: dict, lang: str) -> None:
+    """Avviso sui file del core: sintesi ed elenco dei file (i modificati e i mancanti per primi)."""
+    c = out.get("core") or {}
+    parts = []
+    if c.get("modified_count"):
+        parts.append(f"{c['modified_count']} {t('modificati', lang) if c['modified_count'] != 1 else t('modificato', lang)}")
+    if c.get("missing_count"):
+        parts.append(f"{c['missing_count']} {t('mancanti', lang) if c['missing_count'] != 1 else t('mancante', lang)}")
+    if c.get("extra_count"):
+        parts.append(f"{c['extra_count']} {t('in più', lang)}")
+    out["core_summary"] = " · ".join(parts)
+    rows = ([(t("modificato", lang), f) for f in (c.get("modified") or [])]
+            + [(t("mancante", lang), f) for f in (c.get("missing") or [])]
+            + [(t("in più", lang), f) for f in (c.get("extra") or [])])
+    shown = rows[:12]
+    out["core_lines"] = "\n".join(f"• <code>{_esc(f)}</code> — {_esc(k)}" for k, f in shown) + (
+        f"\n<i>…{t('e altri', lang)} {len(rows) - len(shown)}</i>" if len(rows) > len(shown) else "")
+    out["core_html"] = ('<ul style="margin:0;padding-left:18px;font-size:13px">'
+                        + "".join(f'<li><code>{_esc(f)}</code> — {_esc(k)}</li>' for k, f in rows[:60]) + "</ul>")
+    panel, sid = str(out.get("panel_url") or "").rstrip("/"), out.get("site_id")
+    out["panel_link"] = f'<a href="{_esc(panel)}/#/site/{int(sid)}">{t("Apri in Sentinel", lang)}</a>' if panel and sid else ""
+
+
 def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = None) -> dict:
     """Add rich variables and localize app-owned values, never free-form user content."""
     from datetime import datetime
@@ -595,6 +678,11 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
         out["updates_lines"] = "\n".join(lines)
         out["cms"] = "WordPress" if str(out.get("cms", "")).lower() in ("wp", "wordpress") else ("Joomla" if out.get("cms") else "")
         _site_report_extras(out, lang)
+
+    if event == "update_failed":
+        _failures_vars(out, lang)
+    if event == "core_integrity":
+        _core_vars(out, lang)
 
     if event == "cycle_summary" and isinstance(out.get("report"), list):
         when = str(out.get("when") or out.get("date") or "")

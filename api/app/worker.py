@@ -23,7 +23,10 @@ from sqlalchemy import select, delete, func
 from .config import settings
 from .db import SessionLocal, engine, run_migrations
 from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
-from .connectors import apply_status, fetch_status, _category, wp_rest_url
+from .connectors import apply_status, fetch_status, _category, wp_rest_url, fetch_diagnostics, ConnectorTooOld
+from .errtext import clean_error
+from .servers import server_of, acquire as srv_acquire, release as srv_release
+from .diagnostics import store_diagnostics, store_diag_error, prune_sizes
 from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
 from .telegram import send_telegram
@@ -827,7 +830,7 @@ def _major(v: str) -> int:
     return t[0] if t else 0
 
 
-def _plan_coupled(queue: list, exts: dict, now=None) -> tuple[list, list, dict]:
+def _plan_coupled(queue: list, exts: dict, now=None, retry: bool = False) -> tuple[list, list, dict]:
     """Riordina la coda per le coppie gratuito + Pro.
 
     queue = [(ext, type, slug, name, current)]
@@ -856,7 +859,8 @@ def _plan_coupled(queue: list, exts: dict, now=None) -> tuple[list, list, dict]:
         pi = next((q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] == pro), None)
         if pi is None:
             # gia' tentato nelle ultime 24 ore senza esito: non insistere, il gratuito aspetta
-            tried = (getattr(pe, "update_manual", False) and pe.update_failed_at is not None
+            # con Aggiorna premuto a mano (retry) si ritenta comunque: e' una richiesta esplicita
+            tried = (not retry and getattr(pe, "update_manual", False) and pe.update_failed_at is not None
                      and (now - pe.update_failed_at) < timedelta(hours=24))
             if tried:
                 queue = [q for q in queue if q is not fi]
@@ -979,7 +983,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                     d = payload[0] if payload else {"ok": False, "error": "risposta vuota", "new": ""}
                 else:
                     d = {"ok": False, "error": "formato risposta non valido", "new": ""}
-            return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", "")),
+            return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "new": str(d.get("new", "")),
                     "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
                     "manual": bool(d.get("manual")), "reason": str(d.get("reason", ""))}
     except Exception as ex:  # noqa: BLE001
@@ -1027,7 +1031,7 @@ async def _vendor_update_one(site: Site, slug: str) -> dict:
                 d = payload[0] if payload else {"ok": False, "error": "risposta vuota", "new": ""}
             else:
                 d = {"ok": False, "error": "formato risposta non valido", "new": ""}
-            return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", "")),
+            return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "new": str(d.get("new", "")),
                     "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
                     "manual": bool(d.get("manual")), "reason": str(d.get("reason", ""))}
     except Exception as ex:  # noqa: BLE001
@@ -1138,10 +1142,57 @@ async def vendor_scan(ctx):
         await s.commit()
 
 
-async def update_site(ctx, site_id: int):
+async def _set_upd_status(redis, site_id: int, state: str, text: str = "", parts: list | None = None) -> None:
+    """Esito di un Aggiorna premuto a mano, letto dal pannello per dirti com'e' andata.
+    parts: l'esito a pezzi ("2 aggiornati", "1 fallito"), che il pannello traduce uno per uno."""
+    try:
+        await redis.set(f"upd:status:{site_id}", json.dumps({"state": state, "text": text, "parts": parts or [text],
+                        "at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False), ex=3600)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("Esito aggiornamento non salvato (sito %s): %s", site_id, ex)
+
+
+async def update_site(ctx, site_id: int, manual: bool = False):
+    """Aggiorna un sito. manual=True: Aggiorna premuto a mano. Si prova subito, anche con
+    l'aggiornamento automatico spento e senza la pausa dopo un fallimento, e l'esito resta
+    in Redis per il pannello. Prima Aggiorna poteva fermarsi senza dire niente: interruttore
+    spento, elementi in pausa o sito che non rispondeva, e il pannello diceva "accodato"."""
+    redis = ctx["redis"]
+    # un sito alla volta per server (vedi servers.py): se il server e' occupato o a riposo,
+    # il lavoro torna in coda dopo qualche secondo invece di tenere fermo il worker
+    async with SessionLocal() as s:
+        _site = await s.get(Site, site_id)
+        _url = _site.url if _site else ""
+    server = await server_of(redis, _url) if _url else ""
+    slot, wait = await srv_acquire(redis, server)
+    if slot is None:
+        if manual:
+            await _set_upd_status(redis, site_id, "running", "in attesa: sullo stesso server sta lavorando un altro sito")
+        await redis.enqueue_job("update_site", site_id, manual, _defer_by=wait)
+        return
+
+    outcome = {"text": "", "parts": [], "worked": False}
+    if manual:
+        await _set_upd_status(redis, site_id, "running", "aggiornamento in corso")
+    try:
+        await _update_site(ctx, site_id, manual, outcome)
+    except Exception as ex:  # noqa: BLE001
+        outcome["text"] = f"aggiornamento interrotto da un errore: {str(ex)[:200]}"
+        raise
+    finally:
+        await srv_release(redis, server, slot, bool(outcome.get("worked")))
+        if manual:
+            await _set_upd_status(redis, site_id, "done", outcome["text"] or "aggiornamento concluso",
+                                  outcome["parts"] or None)
+
+
+async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
-        if not site or not site.enabled or not site.auto_update:
+        if not site or not site.enabled:
+            outcome["text"] = "sito disattivato in Sentinel: non aggiornato"
+            return
+        if not site.auto_update and not manual:
             return
 
         # 1) refresh per avere la lista aggiornata.
@@ -1163,6 +1214,7 @@ async def update_site(ctx, site_id: int):
             # nessuno se ne accorgesse (caso reale: core WP di shop). Ora lascia traccia.
             log.warning("UPDATE SALTATO '%s' (id=%s): sito in errore dopo il refresh (%s) — riprovo al prossimo ciclo",
                         site.name, site.id, (site.error or "status=" + str(site.status))[:200])
+            outcome["text"] = f"il sito non risponde: {(site.error or str(site.status))[:200]}"
             return
 
         now = datetime.now(timezone.utc)
@@ -1189,7 +1241,8 @@ async def update_site(ctx, site_id: int):
             # cooldown: salta se ha gia' fallito di recente SULLA STESSA versione target.
             # Se e' uscita una versione nuova (new_version diverso da quello fallito) -> riprova.
             if (
-                e.update_failed_at is not None
+                not manual
+                and e.update_failed_at is not None
                 and e.update_failed_version == (e.new_version or "")
                 and (now - e.update_failed_at) < (max(cooldown, timedelta(hours=24)) if getattr(e, "update_manual", False) else cooldown)
             ):
@@ -1210,7 +1263,7 @@ async def update_site(ctx, site_id: int):
                 pkg = packages.get((e.type, e.slug))
                 if e.id in queued_ids or not pkg or not _pkg_newer(pkg.version, e.current_version):
                     continue
-                if e.update_failed_at is not None and e.update_failed_version == pkg.version \
+                if not manual and e.update_failed_at is not None and e.update_failed_version == pkg.version \
                         and (now - e.update_failed_at) < cooldown:
                     skipped.append(e.name)
                     continue
@@ -1234,7 +1287,7 @@ async def update_site(ctx, site_id: int):
                 installed[e.slug] = e.current_version or ""
                 names[e.slug] = e.name
                 plugin_exts[e.slug] = e
-            queue, held, wait_for = _plan_coupled(queue, plugin_exts, now)
+            queue, held, wait_for = _plan_coupled(queue, plugin_exts, now, retry=manual)
             # I prodotti a licenza vanno PER PRIMI: subito dopo il controllo i loro dati di
             # aggiornamento sono freschi, mentre ogni aggiornamento successivo li svuota e
             # Elementor Pro interroga il proprio server al massimo una volta al minuto.
@@ -1247,13 +1300,24 @@ async def update_site(ctx, site_id: int):
                          site.name, site.id, nm, cur, e.new_version, pro)
 
         if not queue:
+            if held:
+                outcome["text"] = f"niente da aggiornare adesso: {len(held)} in attesa del prodotto Pro"
+            elif skipped_dlkey:
+                outcome["text"] = f"niente da aggiornare adesso: {len(skipped_dlkey)} senza download key"
+            elif skipped:
+                outcome["text"] = f"niente da aggiornare adesso: {len(skipped)} in pausa dopo un tentativo fallito"
+            else:
+                outcome["text"] = "niente da aggiornare: il sito è già a posto"
             return
+
+        outcome["worked"] = True     # da qui si lavora davvero sul sito: dopo, il server riposa
 
         # controllo visivo: istantanea della home PRIMA di toccare qualunque cosa
         shot_before = await _visual_shot(site, "before")
 
         # 3) aggiorna UNA per volta, con pausa; registra successo/fallimento per il cooldown
         results = []
+        failures = []   # fallimenti del sito: un solo messaggio a fine giro, non uno per elemento
         done = {}   # slug -> versione dopo un aggiornamento riuscito in questo giro
         for (ext, etype, slug, name, current) in queue:
             if slug in wait_for:
@@ -1375,9 +1439,10 @@ async def update_site(ctx, site_id: int):
             if not res["ok"]:
                 log.warning("UPDATE FALLITO '%s' (id=%s): %s  %s -> %s  | motivo: %s",
                             site.name, site.id, name, current, res["new"] or "?", res.get("error") or "")
-                if not site.notifications_silenced:
-                    await notify_dispatch("update_failed", {"site_name": site.name, "site_url": site.url,
-                                           "item": f"{name} {current} -> {res['new'] or '?'}", "reason": res.get("error") or ""})
+                failures.append({"name": name, "from": current or "",
+                                 "to": res["new"] or (ext.new_version if ext is not None else "")
+                                       or (site.core_latest if etype == "core" else "") or "",
+                                 "error": res.get("error") or ""})
             elif res["new"]:
                 log.info("UPDATE OK '%s' (id=%s): %s  %s -> %s",
                          site.name, site.id, name, current, res["new"])
@@ -1387,6 +1452,15 @@ async def update_site(ctx, site_id: int):
             pro_slug = COUPLED_PAIRS.get(sl, "")
             results.append({"name": nm, "from": cur, "to": e.new_version or "", "ok": False, "held": True,
                             "error": _held_reason(nm, names.get(pro_slug, pro_slug), _major(e.new_version))})
+
+        if failures and not site.notifications_silenced:
+            first = failures[0]
+            await notify_dispatch("update_failed", {
+                "site_name": site.name, "site_url": site.url, "folder": _folder_label(site),
+                "failures": failures,
+                # variabili del formato precedente (primo fallimento), per i modelli personalizzati
+                "item": f"{first['name']} {first['from']} -> {first['to'] or '?'}", "reason": first["error"],
+            })
 
         await s.commit()   # persisti lo stato di cooldown prima del re-check
 
@@ -1405,7 +1479,19 @@ async def update_site(ctx, site_id: int):
         # altrimenti arriva un "0 aggiornati, 0 falliti" con la tabella vuota.
         if not results:
             log.info("Nessun aggiornamento reale per '%s' (id=%s): report non inviato", site.name, site.id)
+            outcome["text"] = "niente da aggiornare: tutto era già alla versione giusta"
             return
+
+        _n_ok = sum(1 for r in results if r.get("ok"))
+        _n_fail = sum(1 for r in results if not r.get("ok") and not r.get("manual") and not r.get("held"))
+        _n_other = sum(1 for r in results if r.get("manual") or r.get("held"))
+        _parts = [f"{_n_ok} {'aggiornato' if _n_ok == 1 else 'aggiornati'}"]
+        if _n_fail:
+            _parts.append(f"{_n_fail} {'fallito' if _n_fail == 1 else 'falliti'}")
+        if _n_other:
+            _parts.append(f"{_n_other} in attesa o da fare a mano")
+        outcome["text"] = ", ".join(_parts)
+        outcome["parts"] = _parts
 
         # controllo visivo DOPO: solo se qualcosa e' cambiato davvero sul sito
         visual = None
@@ -1508,15 +1594,8 @@ async def auto_update_cycle(ctx):
             select(Site).where(Site.enabled == True, Site.auto_update == True)  # noqa: E712
         )).scalars().all()
 
-    # reset contatori del riepilogo Telegram per il nuovo ciclo
-    try:
-        redis = ctx["redis"]
-        for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
-                  "tg:cycle:failed_detail", "tg:cycle:ok_detail",
-                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail", "tg:cycle:report"):
-            await redis.delete(k)
-    except Exception as ex:  # noqa: BLE001
-        log.warning("Reset contatori Telegram fallito: %s", ex)
+    # Niente reset dei contatori: il riepilogo li prende e li svuota da solo. Cosi' ci finisce
+    # anche quello che e' stato aggiornato a mano (Aggiorna, Aggiorna tutto) dall'ultimo giro.
 
     delay = 0
     for site in rows:
@@ -1557,14 +1636,6 @@ async def mass_update_now(ctx):
         ]
 
     # reset contatori del riepilogo Telegram (nuovo "ciclo" manuale)
-    try:
-        redis = ctx["redis"]
-        for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
-                  "tg:cycle:failed_detail", "tg:cycle:ok_detail",
-                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail", "tg:cycle:report"):
-            await redis.delete(k)
-    except Exception as ex:  # noqa: BLE001
-        log.warning("Reset contatori Telegram (mass) fallito: %s", ex)
 
     if not pending:
         # niente da aggiornare: manda comunque un ping cosi' sai che ha girato a vuoto
@@ -1578,18 +1649,19 @@ async def mass_update_now(ctx):
         await ctx["redis"].enqueue_job("update_site", site.id, _defer_by=delay)
         delay += stagger
 
-    summary_delay = delay + 60
-    await ctx["redis"].enqueue_job("cycle_summary", _defer_by=summary_delay)
+    # Riepilogo Telegram: niente messaggio proprio, i risultati finiscono nel riepilogo del
+    # ciclo orario. Solo con il ciclo automatico spento si manda qui, altrimenti non arriverebbe mai.
+    if not settings.AUTOUPDATE_ENABLED:
+        await ctx["redis"].enqueue_job("cycle_summary", _defer_by=delay + 60)
     log.info("mass_update_now: accodati %d siti pending", len(pending))
 
 
 async def mass_update_selected(ctx, site_ids: list):
     """
-    Aggiorna SOLO i siti il cui id e' nella lista (pulsante 'Aggiorna selezionati').
-    A differenza di mass_update_now, NON filtra per pending: l'utente ha scelto
-    esplicitamente questi siti, quindi tenta l'update su tutti quelli selezionati
-    (ogni update_site esce comunque subito se non c'e' nulla da fare).
-    Rispetta comunque enabled + auto_update per sicurezza.
+    Aggiorna SOLO i siti il cui id e' nella lista (Aggiorna sul sito, Aggiorna selezionati).
+    E' una richiesta esplicita: si prova subito, anche con l'aggiornamento automatico spento
+    e senza la pausa dopo un fallimento (update_site con manual=True). Solo i siti disattivati
+    in Sentinel restano fuori.
     """
     if not site_ids:
         return
@@ -1598,19 +1670,8 @@ async def mass_update_selected(ctx, site_ids: list):
             select(Site).where(
                 Site.id.in_(site_ids),
                 Site.enabled == True,       # noqa: E712
-                Site.auto_update == True,    # noqa: E712
             )
         )).scalars().all()
-
-    # reset contatori del riepilogo Telegram
-    try:
-        redis = ctx["redis"]
-        for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
-                  "tg:cycle:failed_detail", "tg:cycle:ok_detail",
-                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail", "tg:cycle:report"):
-            await redis.delete(k)
-    except Exception as ex:  # noqa: BLE001
-        log.warning("Reset contatori Telegram (selected) fallito: %s", ex)
 
     if not rows:
         log.info("mass_update_selected: nessun sito valido tra i selezionati")
@@ -1619,30 +1680,61 @@ async def mass_update_selected(ctx, site_ids: list):
     stagger = min(getattr(settings, "AUTOUPDATE_SITE_STAGGER_SECONDS", 60), 10)
     delay = 0
     for site in rows:
-        await ctx["redis"].enqueue_job("update_site", site.id, _defer_by=delay)
+        await ctx["redis"].enqueue_job("update_site", site.id, True, _defer_by=delay)
         delay += stagger
 
-    summary_delay = delay + 60
-    await ctx["redis"].enqueue_job("cycle_summary", _defer_by=summary_delay)
+    if not settings.AUTOUPDATE_ENABLED:
+        await ctx["redis"].enqueue_job("cycle_summary", _defer_by=delay + 60)
     log.info("mass_update_selected: accodati %d siti", len(rows))
 
 
+_CYCLE_KEYS = ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed", "tg:cycle:failed_detail",
+               "tg:cycle:ok_detail", "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail",
+               "tg:cycle:report")
+
+
 async def cycle_summary(ctx):
-    """Legge i contatori del ciclo da Redis e manda UN riepilogo Telegram (parte B)."""
+    """Legge i contatori del ciclo da Redis e manda UN riepilogo Telegram (parte B).
+
+    I contatori si PRENDONO E SVUOTANO in un colpo solo (transazione Redis). Prima restavano
+    li' fino alla scadenza di sicurezza (2 ore): ogni altro riepilogo in coda nel frattempo
+    (ciclo orario, "Aggiorna tutto", "Aggiorna" su un sito) rimandava le stesse cose, e su
+    Telegram arrivavano doppioni a un minuto di distanza. Un solo riepilogo alla volta: se ne
+    arriva un secondo mentre il primo lavora, si rimette in coda e manda solo il nuovo.
+    """
     try:
         redis = ctx["redis"]
-        applied = int(await redis.get("tg:cycle:applied") or 0)
-        sites_touched = int(await redis.get("tg:cycle:sites") or 0)
-        failed = int(await redis.get("tg:cycle:failed") or 0)
+        if not await redis.set("tg:cycle:summary_lock", "1", ex=300, nx=True):
+            await redis.enqueue_job("cycle_summary", _defer_by=60)
+            return
+        try:
+            async with redis.pipeline(transaction=True) as pipe:
+                pipe.get("tg:cycle:applied")
+                pipe.get("tg:cycle:sites")
+                pipe.get("tg:cycle:failed")
+                pipe.lrange("tg:cycle:failed_detail", 0, -1)
+                pipe.lrange("tg:cycle:ok_detail", 0, -1)
+                pipe.lrange("tg:cycle:manual_detail", 0, -1)
+                pipe.lrange("tg:cycle:visual_detail", 0, -1)
+                pipe.get("tg:cycle:visual_ok")
+                pipe.lrange("tg:cycle:report", 0, -1)
+                pipe.delete(*_CYCLE_KEYS)
+                (r_applied, r_sites, r_failed, r_failed_detail, r_ok_detail, r_manual_detail,
+                 r_visual_detail, r_visual_ok, r_report, _deleted) = await pipe.execute()
+        finally:
+            await redis.delete("tg:cycle:summary_lock")
 
         def _dec(items):
             return [d.decode() if isinstance(d, (bytes, bytearray)) else str(d) for d in (items or [])]
 
-        failed_detail = _dec(await redis.lrange("tg:cycle:failed_detail", 0, -1))
-        ok_detail = _dec(await redis.lrange("tg:cycle:ok_detail", 0, -1))
-        manual_detail = _dec(await redis.lrange("tg:cycle:manual_detail", 0, -1))
-        visual_detail = _dec(await redis.lrange("tg:cycle:visual_detail", 0, -1))
-        visual_ok = int(await redis.get("tg:cycle:visual_ok") or 0)
+        applied = int(r_applied or 0)
+        sites_touched = int(r_sites or 0)
+        failed = int(r_failed or 0)
+        failed_detail = _dec(r_failed_detail)
+        ok_detail = _dec(r_ok_detail)
+        manual_detail = _dec(r_manual_detail)
+        visual_detail = _dec(r_visual_detail)
+        visual_ok = int(r_visual_ok or 0)
         if applied > 0 or failed > 0:
             MAX_ROWS = 30
             ok_lines = "\n".join(f"• {x}" for x in ok_detail[:MAX_ROWS]) + (f"\n…e altri {len(ok_detail) - MAX_ROWS} siti" if len(ok_detail) > MAX_ROWS else "")
@@ -1657,7 +1749,7 @@ async def cycle_summary(ctx):
                 ok_lines += "\n" + "\n".join(f"• {x}" for x in manual_detail[:MAX_ROWS])
             failed_lines = "\n".join(f"• {x}" for x in failed_detail[:MAX_ROWS]) + (f"\n…e altri {len(failed_detail) - MAX_ROWS}" if len(failed_detail) > MAX_ROWS else "")
             report = []
-            for raw in _dec(await redis.lrange("tg:cycle:report", 0, -1)):
+            for raw in _dec(r_report):
                 try:
                     report.append(json.loads(raw))
                 except Exception:  # noqa: BLE001
@@ -1857,9 +1949,113 @@ async def _startup(ctx):
         await run_migrations(conn)
 
 
+# --------------------------------------------------------------------------
+# INSTALLAZIONE IN BLOCCO (2.9.4): un lavoro per sito, nel worker
+# --------------------------------------------------------------------------
+_TRANSIENT = re.compile(r"^Timeout|^HTTP 5\d\d|ConnectError|ConnectTimeout|ReadTimeout|ReadError|"
+                        r"RemoteProtocolError|Server disconnected|Connection (reset|refused|aborted)", re.I)
+
+
+async def _inst_set(redis, job: str, site_id: int, data: dict) -> None:
+    await redis.hset(f"inst:{job}:res", str(site_id), json.dumps(data, ensure_ascii=False))
+    await redis.expire(f"inst:{job}:res", 86400)
+
+
+async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
+    """Installa lo zip di un lavoro di installazione in blocco su UN sito.
+
+    Prende un posto sul server del sito come gli aggiornamenti. Timeout ed errori del server
+    (5xx, connessione caduta) si ritentano una volta dopo un minuto: sui server deboli sono
+    quasi sempre momentanei. Gli altri errori (token, connettore, zip) restano tali.
+    """
+    from .routers.install import _install_one
+    redis = ctx["redis"]
+    raw = await redis.get(f"inst:{job}")
+    if not raw:
+        return
+    meta = json.loads(raw)
+    async with SessionLocal() as s:
+        site = await s.get(Site, site_id)
+    if site is None:
+        await _inst_set(redis, job, site_id, {"site_id": site_id, "site_name": "?", "state": "done", "ok": False,
+                                              "error": "sito non trovato", "attempt": attempt})
+        return
+    base = {"site_id": site.id, "site_name": site.name, "url": site.url, "attempt": attempt}
+    server = await server_of(redis, site.url)
+    slot, wait = await srv_acquire(redis, server)
+    if slot is None:
+        await _inst_set(redis, job, site.id, {**base, "state": "waiting", "ok": False, "error": ""})
+        await redis.enqueue_job("install_site", job, site_id, attempt, _defer_by=wait)
+        return
+    try:
+        await _inst_set(redis, job, site.id, {**base, "state": "running", "ok": False, "error": ""})
+        try:
+            with open(meta["path"], "rb") as f:
+                content = f.read()
+        except OSError as ex:
+            await _inst_set(redis, job, site.id, {**base, "state": "done", "ok": False,
+                                                  "error": f"pacchetto non leggibile: {ex}"})
+            return
+        res = await _install_one(site, content, meta["filename"], meta["kind"], bool(meta["activate"]))
+        if not res.get("ok") and attempt == 1 and _TRANSIENT.search(str(res.get("error") or "")):
+            await _inst_set(redis, job, site.id, {**base, **res, "state": "retry", "ok": False,
+                                                  "error": clean_error(res.get("error"))})
+            await redis.enqueue_job("install_site", job, site_id, 2, _defer_by=60)
+            return
+        await _inst_set(redis, job, site.id, {**base, **res, "state": "done", "error": clean_error(res.get("error"))})
+    finally:
+        await srv_release(redis, server, slot, True)
+
+
+# --------------------------------------------------------------------------
+# DIAGNOSTICA DEI SITI (2.9.0)
+# --------------------------------------------------------------------------
+async def diag_site(ctx, site_id: int, space_mb: int = 0):
+    """Diagnostica di un sito: spazio scrivibile (prova vera, solo se space_mb > 0),
+    cartelle, peso (nello storico, una riga al giorno), verifica dei file del core.
+    Pulsante "Esegui diagnostica": space_mb=150. Giro notturno: space_mb=0, nessuna
+    scrittura di prova sui siti."""
+    async with SessionLocal() as s:
+        site = await s.get(Site, site_id)
+        if site is None or not site.enabled or not site.token:
+            return
+        try:
+            data = await fetch_diagnostics(site, space_mb=space_mb, sizes=True, core=True)
+        except ConnectorTooOld as ex:
+            await store_diag_error(site, str(ex))
+            await s.commit()
+            return
+        except Exception as ex:  # noqa: BLE001
+            await store_diag_error(site, f"diagnostica non riuscita: {str(ex)[:300] or type(ex).__name__}")
+            await s.commit()
+            return
+        diag, core_changed = await store_diagnostics(s, site, data)
+        await s.commit()
+        log.info("Diagnostica '%s' (id=%s): spazio %s, peso %s, core %s", site.name, site.id,
+                 (diag.get("space") or {}).get("written_mb", "-"), (diag.get("sizes") or {}).get("total", "-"),
+                 (diag.get("core") or {}).get("status", "-"))
+        if core_changed and not site.notifications_silenced:
+            await notify_dispatch("core_integrity", {
+                "site_name": site.name, "site_url": site.url, "folder": _folder_label(site),
+                "core": diag.get("core") or {}, "site_id": site.id, "panel_url": await _panel_url(),
+            })
+
+
+async def diag_all(ctx):
+    """Giro notturno: diagnostica leggera di tutti i siti (peso e verifica del core)."""
+    async with SessionLocal() as s:
+        ids = [sid for (sid,) in (await s.execute(select(Site.id).where(Site.enabled == True))).all()]  # noqa: E712
+        await prune_sizes(s)
+        await s.commit()
+    for i, sid in enumerate(ids):
+        await ctx["redis"].enqueue_job("diag_site", sid, 0, _defer_by=i * 20)
+    log.info("diag_all: accodate %d diagnostiche", len(ids))
+
+
 class WorkerSettings:
     functions = [poll_site, shoot_site, update_site, cycle_summary, mass_update_now,
-                 mass_update_selected, security_scan, vendor_scan, domain_expiry_scan, monthly_report]
+                 mass_update_selected, security_scan, vendor_scan, domain_expiry_scan, monthly_report,
+                 diag_site, diag_all, install_site]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
@@ -1867,6 +2063,7 @@ class WorkerSettings:
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30
         cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True),  # reminder giornalieri; registry max 1 volta/7gg
         cron(monthly_report, minute={5}),   # ogni ora al minuto 5: invia quando giorno/ora combaciano
+        cron(diag_all, hour={3}, minute={40}),   # diagnostica notturna: peso dei siti e verifica del core
     ]
     on_startup = _startup
     redis_settings = _redis_settings()

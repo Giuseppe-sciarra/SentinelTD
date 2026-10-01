@@ -131,30 +131,83 @@ async def mass_install(
     if not targets:
         raise HTTPException(422, f"Nessun sito {cms} tra quelli selezionati")
 
-    content = await package.read()   # una sola lettura, riusata per ogni sito
+    content = await package.read()
     if not content:
         raise HTTPException(422, "Pacchetto vuoto")
 
-    results = []
-    for site in targets:
-        res = await _install_one(site, content, fname, kind, activate)
-        results.append({
-            "site_id": site.id,
-            "site_name": site.name,
-            "url": site.url,
-            **res,
-        })
+    # In sottofondo (2.9.4): prima l'installazione girava tutta dentro questa richiesta, un
+    # sito dopo l'altro, e la pagina restava ferma finche' non finiva l'ultimo (con 30 siti,
+    # decine di minuti). Ora lo zip va su disco, il worker installa un sito per lavoro
+    # rispettando i posti sui server, e la pagina legge l'avanzamento da /jobs/{id}.
+    import json
+    import os
+    import uuid
+    from arq import create_pool
+    from arq.connections import RedisSettings
+    from ..config import settings
+    from .packages import PACKAGES_DIR
 
-    ok_n = sum(1 for r in results if r["ok"])
+    job = uuid.uuid4().hex[:12]
+    jobs_dir = os.path.join(PACKAGES_DIR, "_jobs")
+    os.makedirs(jobs_dir, exist_ok=True)
+    path = os.path.join(jobs_dir, f"{job}.zip")
+    with open(path, "wb") as f:
+        f.write(content)
+    meta = {"job": job, "filename": fname, "cms": cms, "kind": kind, "activate": bool(activate), "path": path,
+            "total": len(targets), "site_ids": [t.id for t in targets], "created": int(time.time())}
+    pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+    try:
+        await pool.set(f"inst:{job}", json.dumps(meta), ex=86400)
+        for i, site in enumerate(targets):
+            await pool.hset(f"inst:{job}:res", str(site.id), json.dumps(
+                {"site_id": site.id, "site_name": site.name, "url": site.url, "state": "queued", "ok": False, "error": ""}))
+            await pool.enqueue_job("install_site", job, site.id, 1, _defer_by=i * 2)
+        await pool.expire(f"inst:{job}:res", 86400)
+    finally:
+        await pool.aclose()
+    return {"job": job, "filename": fname, "cms": cms, "kind": kind, "activate": activate, "total": len(targets)}
+
+
+@router.get("/jobs/{job}")
+async def install_job(job: str):
+    """Avanzamento di un'installazione in blocco: un esito per sito, e i totali."""
+    import json
+    import os
+    import re
+    from redis.asyncio import from_url
+    from ..config import settings
+    if not re.fullmatch(r"[0-9a-f]{12}", job or ""):
+        raise HTTPException(404)
+    r = from_url(settings.REDIS_URL)
+    try:
+        raw = await r.get(f"inst:{job}")
+        rows = await r.hgetall(f"inst:{job}:res")
+    finally:
+        await r.aclose()
+    if not raw:
+        raise HTTPException(404, "Installazione non trovata o scaduta")
+    meta = json.loads(raw)
+    results = []
+    for v in (rows or {}).values():
+        try:
+            results.append(json.loads(v))
+        except Exception:  # noqa: BLE001
+            pass
+    results.sort(key=lambda x: (x.get("site_name") or "").lower())
+    count = lambda st: sum(1 for x in results if x.get("state") == st)  # noqa: E731
+    done = count("done")
+    finished = done >= meta["total"]
+    if finished:
+        try:
+            os.remove(meta["path"])      # lo zip non serve piu'
+        except OSError:
+            pass
     return {
-        "filename": fname,
-        "cms": cms,
-        "kind": kind,
-        "activate": activate,
-        "total": len(results),
-        "ok": ok_n,
-        "failed": len(results) - ok_n,
-        "results": results,
+        "job": job, "filename": meta["filename"], "cms": meta["cms"], "kind": meta["kind"], "activate": meta["activate"],
+        "total": meta["total"], "done": done, "ok": sum(1 for x in results if x.get("state") == "done" and x.get("ok")),
+        "failed": sum(1 for x in results if x.get("state") == "done" and not x.get("ok")),
+        "retrying": count("retry"), "waiting": count("waiting") + count("queued"), "running": count("running"),
+        "finished": finished, "results": results,
     }
 
 

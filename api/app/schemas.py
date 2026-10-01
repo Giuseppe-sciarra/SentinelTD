@@ -81,6 +81,9 @@ class SiteDetailOut(SiteOut):
     # di leak (un solo sito alla volta, e solo quando apri il pannello dettaglio).
     token: str
     extensions: list[ExtensionOut] = []
+    # diagnostica dal connettore (spazio, cartelle, peso, verifica del core)
+    diag: dict | None = None
+    diag_at: datetime | None = None
 
 
 class LoginIn(BaseModel):

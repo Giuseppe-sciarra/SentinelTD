@@ -105,21 +105,36 @@ async def bulk_update_selected(
     s: AsyncSession = Depends(get_session),
 ):
     """
-    Aggiorna SOLO i siti selezionati (pulsante 'Aggiorna selezionati').
-    Riceve la lista di id dalla UI. A differenza di update-now non filtra per pending:
-    l'utente li ha scelti esplicitamente. Rispetta enabled + auto_update.
+    Aggiorna i siti indicati (Aggiorna sul sito, Aggiorna selezionati). Richiesta esplicita:
+    si prova anche con l'aggiornamento automatico spento; restano fuori solo i siti
+    disattivati in Sentinel, e la risposta li elenca invece di dire "accodato" e basta.
     """
     if not ids:
-        return {"queued": 0, "sites": []}
-    rows = (await s.execute(
-        select(Site).where(
-            Site.id.in_(ids),
-            Site.enabled == True,       # noqa: E712
-            Site.auto_update == True,    # noqa: E712
-        )
-    )).scalars().all()
-    await _enqueue("mass_update_selected", [site.id for site in rows])
-    return {"queued": len(rows), "sites": [site.name for site in rows]}
+        return {"queued": 0, "sites": [], "skipped": []}
+    rows = (await s.execute(select(Site).where(Site.id.in_(ids)))).scalars().all()
+    ok = [site for site in rows if site.enabled]
+    if ok:
+        await _enqueue("mass_update_selected", [site.id for site in ok])
+    return {"queued": len(ok), "sites": [site.name for site in ok],
+            "skipped": [site.name for site in rows if not site.enabled]}
+
+
+@router.get("/{site_id}/update-status")
+async def update_status(site_id: int):
+    """Esito dell'ultimo Aggiorna premuto a mano su questo sito (scritto dal worker)."""
+    import json
+    from redis.asyncio import from_url
+    r = from_url(settings.REDIS_URL)
+    try:
+        raw = await r.get(f"upd:status:{site_id}")
+    finally:
+        await r.aclose()
+    if not raw:
+        return {"state": "none"}
+    try:
+        return json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return {"state": "none"}
 
 
 @router.post("/bulk/rename-folder")
@@ -307,6 +322,28 @@ async def refresh_now(site_id: int, s: AsyncSession = Depends(get_session)):
     await s.commit()
     await s.refresh(site)
     return site
+
+
+@router.post("/{site_id}/diagnostics")
+async def run_diagnostics(site_id: int, space: int = Query(150, ge=0, le=400),
+                          s: AsyncSession = Depends(get_session)):
+    """Diagnostica completa (con prova di scrittura da `space` MB). Gira nel worker: tra
+    prova di scrittura, peso e verifica del core puo' superare il minuto, e il proxy davanti
+    al pannello taglierebbe la richiesta. La pagina controlla diag_at finche' cambia."""
+    site = await s.get(Site, site_id)
+    if not site:
+        raise HTTPException(404)
+    await _enqueue("diag_site", site.id, int(space))
+    return {"queued": True, "since": site.diag_at}
+
+
+@router.get("/{site_id}/sizes")
+async def site_sizes(site_id: int, days: int = Query(365, ge=1, le=730), s: AsyncSession = Depends(get_session)):
+    """Storico del peso del sito: una riga al giorno."""
+    from ..diagnostics import sizes_history
+    if not await s.get(Site, site_id):
+        raise HTTPException(404)
+    return await sizes_history(s, site_id, days)
 
 
 @router.post("/{site_id}/screenshot", response_model=SiteOut)

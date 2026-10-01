@@ -57,6 +57,9 @@ async def run_migrations(conn) -> None:
     """))
     # Sito non raggiungibile: inizio dell'episodio, per avvisare solo dopo N minuti
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS offline_since TIMESTAMPTZ NULL"))
+    # 2.9.0: diagnostica dal connettore (la tabella site_sizes la crea create_all)
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS diag_json TEXT NOT NULL DEFAULT ''"))
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS diag_at TIMESTAMPTZ NULL"))
 
     # Estensioni a licenza da aggiornare a mano (es. Elementor Pro senza pacchetto remoto)
     await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS update_manual BOOLEAN NOT NULL DEFAULT FALSE"))

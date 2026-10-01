@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..errtext import clean_error
 from ..db import get_session
 from ..models import UpdateHistory
 from ..auth import require_auth
@@ -30,7 +31,8 @@ async def list_history(
     return [{
         "id": r.id, "site_id": r.site_id, "site_name": r.site_name, "cms": r.cms,
         "type": r.ext_type, "name": r.ext_name, "slug": r.slug,
-        "from": r.from_version, "to": r.to_version, "ok": r.ok, "error": r.error,
+        # ripulito anche quello salvato prima della 2.9.0 (link interi col token, &#8230;…)
+        "from": r.from_version, "to": r.to_version, "ok": r.ok, "error": clean_error(r.error),
         "at": r.created_at.isoformat() if r.created_at else None,
     } for r in rows]
 
