@@ -337,7 +337,7 @@ async def send_client_report(period: str, scope: str) -> dict:
     if not ncfg.get("enabled", True):
         return {**base, "sent": False, "error": "l'email al cliente è disattivata in Notifiche"}
 
-    cfg = await rep.get_config()
+    cfg = await rep.get_client_config()
     html, blob, filename = await rep.build(period, scope)
     data = await rep.gather(period, cfg, scope)
     names = ", ".join((x.url or "").replace("https://", "").replace("http://", "").rstrip("/") for x in site_rows)

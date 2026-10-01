@@ -1853,8 +1853,12 @@ async def monthly_report(ctx):
     from .models import AppSetting
 
     cfg = await rep.get_config()
+    ccfg = await rep.get_client_config()
     now = datetime.now()
-    if now.day != int(cfg.get("send_day", 1)) or now.hour != int(cfg.get("send_hour", 8)):
+    # il tuo report e quelli dei clienti hanno giorno, ora e interruttore propri
+    mine = bool(cfg.get("enabled", True)) and now.day == int(cfg.get("send_day", 1)) and now.hour == int(cfg.get("send_hour", 8))
+    clients = bool(ccfg.get("enabled", True)) and now.day == int(ccfg.get("send_day", 1)) and now.hour == int(ccfg.get("send_hour", 8))
+    if not (mine or clients):
         return
     period = rep.prev_period(now)
 
@@ -1873,10 +1877,12 @@ async def monthly_report(ctx):
                 if row.value == period:   # formato vecchio: periodo secco
                     sent_before = [rep.GLOBAL_KEY]
 
-    # il tuo report (se attivo) e quelli dei clienti con l'invio automatico attivo: stesso giorno e
-    # stessa ora. I clienti hanno il loro interruttore, indipendente da quello del tuo report.
-    results = await send_all(period, only_pending=True, already=sent_before) if cfg.get("enabled", True) else []
-    results += await send_clients(period, only_pending=True, already=sent_before)
+    # il tuo report quando e' il suo giorno e la sua ora; i clienti quando e' il loro (Report clienti
+    # -> Impostazioni), ognuno poi col suo interruttore. La memoria di cosa e' gia' partito nel
+    # periodo e' una sola, quindi anche con giorni diversi nessun doppione.
+    results = await send_all(period, only_pending=True, already=sent_before) if mine else []
+    if clients:
+        results += await send_clients(period, only_pending=True, already=sent_before)
     if not results:
         return
     ok_scopes = sent_before + [r["scope"] for r in results if r.get("sent")]

@@ -32,6 +32,10 @@ log = logging.getLogger("report")
 CONFIG_KEY = "report:config"
 TEMPLATE_KEY = "report:template"
 LAST_SENT_KEY = "report:last_sent"
+# Report dei clienti: impostazioni e layout separati da quelli dell'agenzia, uniche per tutti i
+# clienti. La prima volta sono una copia di quelli dell'agenzia (vedi get_client_config).
+CLIENT_CONFIG_KEY = "report:client_config"
+CLIENT_TEMPLATE_KEY = "report:client_template"
 
 MESI = ["", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
         "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
@@ -343,6 +347,68 @@ async def save_config(data: dict) -> dict:
             s.add(AppSetting(key=CONFIG_KEY, value=json.dumps(clean)))
         await s.commit()
     return clean
+
+
+async def get_client_config() -> dict:
+    """Impostazioni dei report ai clienti. Se non esistono ancora sono una COPIA di quelle del
+    report dell'agenzia, salvata subito: da li' in poi le due vivono separate. L'invio automatico
+    parte acceso, come prima che fossero separate (i clienti partivano anche col report
+    dell'agenzia spento)."""
+    try:
+        async with SessionLocal() as s:
+            row = await s.get(AppSetting, CLIENT_CONFIG_KEY)
+            if row and row.value:
+                return normalize(json.loads(row.value))
+    except Exception:  # noqa: BLE001
+        pass
+    base = await get_config()
+    base["enabled"] = True
+    try:
+        return await save_client_config(base)
+    except Exception:  # noqa: BLE001
+        return base
+
+
+async def save_client_config(data: dict) -> dict:
+    clean = normalize(data)
+    async with SessionLocal() as s:
+        row = await s.get(AppSetting, CLIENT_CONFIG_KEY)
+        if row:
+            row.value = json.dumps(clean)
+        else:
+            s.add(AppSetting(key=CLIENT_CONFIG_KEY, value=json.dumps(clean)))
+        await s.commit()
+    return clean
+
+
+async def get_client_template() -> str:
+    """Layout del PDF dei clienti. Se non esiste ancora: copia del layout dell'agenzia se e' stato
+    personalizzato, altrimenti il predefinito (che segue gli aggiornamenti di Sentinel)."""
+    try:
+        async with SessionLocal() as s:
+            row = await s.get(AppSetting, CLIENT_TEMPLATE_KEY)
+            if row is not None:
+                if row.value.strip() and hashlib.sha256(row.value.strip().encode()).hexdigest() not in _LEGACY_TEMPLATE_HASHES:
+                    return row.value
+                return localize_template(DEFAULT_TEMPLATE)
+            mine = await s.get(AppSetting, TEMPLATE_KEY)
+            if mine and mine.value.strip() and hashlib.sha256(mine.value.strip().encode()).hexdigest() not in _LEGACY_TEMPLATE_HASHES:
+                s.add(AppSetting(key=CLIENT_TEMPLATE_KEY, value=mine.value))
+                await s.commit()
+                return mine.value
+    except Exception:  # noqa: BLE001
+        pass
+    return localize_template(DEFAULT_TEMPLATE)
+
+
+async def save_client_template(html: str) -> None:
+    async with SessionLocal() as s:
+        row = await s.get(AppSetting, CLIENT_TEMPLATE_KEY)
+        if row:
+            row.value = html
+        else:
+            s.add(AppSetting(key=CLIENT_TEMPLATE_KEY, value=html))
+        await s.commit()
 
 
 async def get_template() -> str:
@@ -682,10 +748,11 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
 
 # ---------------------------------------------------------------- render
 async def render_html(period: str, template: str | None = None, cfg: dict | None = None, scope: str = "") -> str:
-    cfg = cfg or await get_config()
+    client = is_client_scope(scope)
+    cfg = cfg or (await get_client_config() if client else await get_config())
     ctx = await gather(period, cfg, scope)
     ctx["logo"] = await _logo_data_uri()
-    tpl = template if template is not None else await get_template()
+    tpl = template if template is not None else (await get_client_template() if client else await get_template())
     try:
         return _env.from_string(tpl).render(**ctx)
     except TemplateError as ex:
@@ -704,8 +771,8 @@ def html_to_pdf(html: str) -> bytes | None:
 
 
 async def build(period: str, scope: str = "") -> tuple[str, bytes | None, str]:
-    """Ritorna (html, pdf_bytes|None, filename) per il periodo e la cartella indicati."""
-    cfg = await get_config()
+    """Ritorna (html, pdf_bytes|None, filename) per il periodo e la cartella (o il cliente) indicati."""
+    cfg = await get_client_config() if is_client_scope(scope) else await get_config()
     html = await render_html(period, cfg=cfg, scope=scope)
     pdf = html_to_pdf(html)
     label = scope_label(scope)

@@ -70,6 +70,30 @@ async def create_client(payload: dict = Body(...), s: AsyncSession = Depends(get
     return _out(cl, await _sites_of(s, cl.id))
 
 
+@router.get("/config", dependencies=[Depends(require_auth)])
+async def get_clients_config():
+    """Impostazioni uniche per tutti i report dei clienti (separate da quelle del Report mensile)."""
+    return {"config": await rep.get_client_config(), "template": await rep.get_client_template(),
+            "default_template": rep.DEFAULT_TEMPLATE, "suggested_period": rep.prev_period()}
+
+
+@router.put("/config", dependencies=[Depends(require_auth)])
+async def save_clients_config(payload: dict = Body(...)):
+    cfg = await rep.save_client_config(payload.get("config") or {})
+    if "template" in payload:
+        html = (payload.get("template") or "").strip()
+        if html:
+            # un layout rotto non deve bloccare l'invio ai clienti
+            try:
+                rep._env.from_string(html)
+            except Exception as ex:  # noqa: BLE001
+                raise HTTPException(422, f"Template non valido: {ex}")
+            await rep.save_client_template(html)
+        else:
+            await rep.save_client_template(rep.DEFAULT_TEMPLATE)
+    return {"ok": True, "config": cfg}
+
+
 @router.post("/from-sites", dependencies=[Depends(require_auth)])
 async def clients_from_sites(payload: dict = Body(...), s: AsyncSession = Depends(get_session)):
     """Clienti dai siti scelti.
@@ -197,8 +221,11 @@ async def delete_client(cid: int, s: AsyncSession = Depends(get_session)):
 async def preview_client(cid: int, payload: dict = Body(default={})):
     """HTML del report del cliente, mostrato come un foglio A4 (come l'anteprima del Report mensile)."""
     period = payload.get("period") or rep.prev_period()
+    # impostazioni e layout non ancora salvati (anteprima dal pannello Impostazioni dei clienti)
+    cfg = rep.normalize(payload.get("config")) if payload.get("config") else None
+    tpl = payload.get("template") or None
     try:
-        html = await rep.render_html(period, scope=f"{rep.CLIENT_PREFIX}{cid}")
+        html = await rep.render_html(period, template=tpl, cfg=cfg, scope=f"{rep.CLIENT_PREFIX}{cid}")
     except Exception as ex:  # noqa: BLE001
         raise HTTPException(422, f"Errore nel template: {ex}")
     screen_css = ('<style media="screen">html{background:#e9edf2;padding:18px 0}'

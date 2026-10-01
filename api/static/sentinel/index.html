@@ -889,10 +889,15 @@
             <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
               <div style="flex:1;min-width:280px">
                 <h1 class="page-title">Report per cliente</h1>
-                <div class="page-sub">Ogni cliente riceve lo stesso report che arriva a te, con i soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti con peso e spazio.</div>
+                <div class="page-sub">Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti con peso e spazio. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.</div>
               </div>
-              <div class="row"><button class="btn" :class="cli.selMode ? 'on' : ''" @click="cli.selMode ? cliExitSel() : (cli.selMode = true)" x-text="cli.selMode ? 'Fine selezione' : 'Seleziona'"></button><button class="btn" @click="openClientsFromSites()">Crea dai siti</button><button class="btn primary" @click="openClient()">Nuovo cliente</button></div>
+              <div class="row" x-show="cli.tab==='list'"><button class="btn" :class="cli.selMode ? 'on' : ''" @click="cli.selMode ? cliExitSel() : (cli.selMode = true)" x-text="cli.selMode ? 'Fine selezione' : 'Seleziona'"></button><button class="btn" @click="openClientsFromSites()">Crea dai siti</button><button class="btn primary" @click="openClient()">Nuovo cliente</button></div>
             </div>
+            <div class="seg" style="margin-top:14px">
+              <button :class="cli.tab==='list' ? 'on' : ''" @click="cli.tab='list'">Clienti</button>
+              <button :class="cli.tab==='settings' ? 'on' : ''" @click="openClientSettings()">Impostazioni</button>
+            </div>
+            <div x-show="cli.tab==='list'">
             <div class="card cli-bar">
               <div class="small mut" style="flex:1;min-width:260px" x-text="cliSchedule"></div>
               <span class="badge" :class="cliEnabledCount ? 'ok' : ''" x-text="cliEnabledCount + ' ' + pl(cliEnabledCount, 'cliente con invio attivo', 'clienti con invio attivo')"></span>
@@ -969,6 +974,80 @@
                 <iframe :srcdoc="cli.html" sandbox="allow-same-origin" style="width:100%;height:600px;border:0;background:#fff;display:block" @load="fitFrame($event.target, 400, 30000)"></iframe>
               </div>
             </div>
+            </div>
+            <!-- ===== Impostazioni uniche per tutti i report dei clienti ===== -->
+            <div x-show="cli.tab==='settings'">
+              <div class="msg ok" x-show="cliSet.msg" x-text="cliSet.msg"></div>
+              <div class="msg err" x-show="cliSet.err" x-text="cliSet.err"></div>
+              <template x-if="cliSet.cfg">
+              <div class="grid" style="grid-template-columns:380px 1fr;margin-top:16px" id="cliset-grid">
+                <div>
+                  <div class="card">
+                    <h3>Invio automatico ai clienti</h3>
+                    <label class="check" style="margin-bottom:10px"><input type="checkbox" x-model="cliSet.cfg.enabled" @change="cliSet.dirty=true"> Invia i report ai clienti ogni mese</label>
+                    <div class="row" style="gap:8px">
+                      <div class="field" style="flex:1"><label>Giorno</label><input class="input" type="number" min="1" max="28" x-model.number="cliSet.cfg.send_day" @input="cliSet.dirty=true" @change="cliSet.dirty=true"></div>
+                      <div class="field" style="flex:1"><label>Ora</label><input class="input" type="number" min="0" max="23" x-model.number="cliSet.cfg.send_hour" @input="cliSet.dirty=true" @change="cliSet.dirty=true"></div>
+                    </div>
+                    <div class="hint">Vale per tutti i clienti con l'invio acceso: ognuno riceve il suo report ai suoi indirizzi. Il report copre sempre il mese <b>precedente</b>. Il tuo Report mensile ha giorno, ora e interruttore suoi.</div>
+                  </div>
+                  <div class="card" style="margin-top:14px">
+                    <h3>Intestazione</h3>
+                    <div class="field"><label>Ragione sociale</label><input class="input" x-model="cliSet.cfg.company" @input.debounce.500ms="cliSetTouch()"></div>
+                    <div class="field"><label>Titolo del report</label><input class="input" x-model="cliSet.cfg.title" @input.debounce.500ms="cliSetTouch()"></div>
+                    <div class="field"><label>Testo introduttivo</label><textarea class="input" rows="3" x-model="cliSet.cfg.intro" @input.debounce.500ms="cliSetTouch()"></textarea></div>
+                    <div class="hint">In fondo al PDF del cliente compare solo "Report di" seguito dalla ragione sociale. Il logo è quello caricato in <a href="#/settings">Impostazioni → Branding</a>.</div>
+                  </div>
+                  <div class="card" style="margin-top:14px">
+                    <h3>Cosa includere</h3>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_summary" @change="cliSetTouch()"> Riepilogo del periodo</label>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_sites" @change="cliSetTouch()"> Dettaglio per sito (componenti e quante volte)</label>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_top" @change="cliSetTouch()"> Componenti più aggiornati</label>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_failed" @change="cliSetTouch()"> Aggiornamenti non riusciti</label>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_compare" @change="cliSetTouch()"> Confronto col mese precedente</label>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_security" @change="cliSetTouch()"> Stato sicurezza</label>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_site_stats" @change="cliSetTouch()"> Stato dei siti (versioni, PHP, dominio, peso, spazio, file del core)</label>
+                    <label class="check" style="padding:4px 0"><input type="checkbox" x-model="cliSet.cfg.show_expiries" @change="cliSetTouch()"> Scadenze in arrivo</label>
+                    <div class="field" style="margin-top:10px" x-show="cliSet.cfg.show_expiries"><label>Orizzonte scadenze (giorni)</label><input class="input" type="number" min="7" max="365" x-model.number="cliSet.cfg.expiry_horizon_days" @change="cliSetTouch()"></div>
+                  </div>
+                  <div class="card" style="margin-top:14px">
+                    <div class="row"><h3 style="margin:0;flex:1">Layout PDF (avanzato)</h3><label class="check"><input type="checkbox" x-model="cliSet.advanced" @change="previewClientSettings()"> modifica HTML</label></div>
+                    <template x-if="cliSet.advanced">
+                      <div style="margin-top:10px">
+                        <textarea class="input mono" rows="14" x-model="cliSet.template" @input.debounce.700ms="cliSetTouch()"></textarea>
+                        <div class="hint">Jinja + CSS di stampa, come nel Report mensile. In più: <span class="mono">is_client</span> (sempre vero qui) e <span class="mono">scope_label</span> (nome del cliente).</div>
+                        <button class="btn sm ghost" style="margin-top:8px" @click="resetClientTemplate()">Ripristina layout predefinito</button>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="row" style="margin-top:14px">
+                    <button class="btn primary" :disabled="!!(cliSet.busy||!cliSet.dirty)" @click="saveClientSettings()">Salva impostazioni</button>
+                    <span class="small warn" x-show="cliSet.dirty">Modifiche non salvate</span><span class="small ok" x-show="!cliSet.dirty && cliSet.savedAt" x-text="'✓ Salvate alle ' + cliSet.savedAt"></span>
+                  </div>
+                  <div class="card" style="margin-top:14px">
+                    <h3>Email di accompagnamento</h3>
+                    <div class="small mut">Oggetto e testo dell'email al cliente si modificano in <a href="#/notifications">Notifiche → Report mensile al cliente</a>.</div>
+                  </div>
+                </div>
+                <div>
+                  <div class="card">
+                    <div class="row" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0;flex:1">Anteprima</h3><span class="spinner" x-show="cliSet.busy"></span>
+                      <select class="input" style="max-width:240px" x-model.number="cliSet.clientId" @change="previewClientSettings()" x-show="cli.list.length">
+                        <template x-for="c in cli.list" :key="'pc'+c.id"><option :value="c.id" :selected="c.id===cliSet.clientId" x-text="c.name + (c.sites.length > 1 ? ' · ' + c.sites.length + ' siti' : '')"></option></template>
+                      </select>
+                      <select class="input" style="max-width:190px" x-model="cli.period" @change="previewClientSettings()">
+                        <template x-for="p in cli.periods" :key="'pp'+p.period"><option :value="p.period" :selected="p.period===cli.period" x-text="p.label"></option></template>
+                      </select>
+                      <button class="btn sm ghost" @click="openPreviewFull(cliSet.html)" x-show="cliSet.html">⤢ A tutta pagina</button></div>
+                    <div class="small mut" style="margin-top:10px" x-show="!cli.list.length">Crea almeno un cliente per vedere l'anteprima.</div>
+                    <div style="background:#fff;border-radius:8px;overflow:hidden;margin-top:10px" x-show="cliSet.html">
+                      <iframe :srcdoc="cliSet.html" sandbox="allow-same-origin" style="width:100%;height:600px;border:0;background:#fff;display:block" @load="fitFrame($event.target, 400, 30000)"></iframe>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              </template>
+            </div>
           </div>
         </template>
 
@@ -998,8 +1077,8 @@
                   <h3>Invio automatico</h3>
                   <label class="check" style="margin-bottom:10px"><input type="checkbox" x-model="rep.cfg.enabled" @change="rep.dirty=true"> Invia il report ogni mese</label>
                   <div class="row" style="gap:8px">
-                    <div class="field" style="flex:1"><label>Giorno</label><input class="input" type="number" min="1" max="28" x-model.number="rep.cfg.send_day" @change="rep.dirty=true"></div>
-                    <div class="field" style="flex:1"><label>Ora</label><input class="input" type="number" min="0" max="23" x-model.number="rep.cfg.send_hour" @change="rep.dirty=true"></div>
+                    <div class="field" style="flex:1"><label>Giorno</label><input class="input" type="number" min="1" max="28" x-model.number="rep.cfg.send_day" @input="rep.dirty=true" @change="rep.dirty=true"></div>
+                    <div class="field" style="flex:1"><label>Ora</label><input class="input" type="number" min="0" max="23" x-model.number="rep.cfg.send_hour" @input="rep.dirty=true" @change="rep.dirty=true"></div>
                   </div>
                   <div class="field"><label>Indirizzo a cui inviare i report</label><input class="input" type="email" x-model="rep.cfg.recipients" @input="rep.dirty=true" placeholder="reports@example.com"><div class="hint">Tutti i report (globale e per cartella) arrivano qui. Vuoto = destinatario impostato nel file <span class="mono">.env</span>.</div></div>
                   <div class="hint">Il report copre sempre il mese <b>precedente</b>: il giorno 1 ricevi quello appena concluso.</div>
@@ -1052,7 +1131,7 @@
 
                 <div class="row" style="margin-top:14px">
                   <button class="btn primary" :disabled="!!(rep.busy||!rep.dirty)" @click="saveReportCfg()">Salva impostazioni</button>
-                  <span class="small mut" x-show="!rep.dirty">Nessuna modifica</span>
+                  <span class="small warn" x-show="rep.dirty">Modifiche non salvate</span><span class="small ok" x-show="!rep.dirty && rep.savedAt" x-text="'✓ Salvate alle ' + rep.savedAt"></span>
                 </div>
                 <div class="card" style="margin-top:14px">
                   <h3>Email di accompagnamento</h3>

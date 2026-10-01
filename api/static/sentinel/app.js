@@ -39,10 +39,11 @@ function sentinel() {
     notif: { events: [], cur: null, edit: null, preview: null, msg: '', err: '', busy: false, tab: 'email', previewTab: 'email', source: false },
     stats: { period: '', scope: '__all__', months: 12, data: null, trend: null, periods: [], scopes: [], mode: 'month', cmpA: '', cmpB: '', cmp: null, busy: false, hover: null, days: 30 },
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
-    rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false },
+    rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
-           open: {}, inSel: {}, ac: { field: null, idx: 0 } },
+           open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
+    cliSet: { cfg: null, template: '', defaultTemplate: '', advanced: false, dirty: false, busy: false, msg: '', err: '', html: '', clientId: null, savedAt: '' },
     sec2fa: { totp: false, passkeys: [], setup: null, code: '', msg: '', err: '' },
 
     // ---------- init ----------
@@ -1556,7 +1557,8 @@ function sentinel() {
     // ---------- report mensile ----------
     // ---------- report per cliente ----------
     async loadClients() {
-      const [l, c, p] = await Promise.all([this.api('/api/clients'), this.api('/api/reports/config'), this.api('/api/reports/periods')]);
+      // giorno, ora e interruttore sono quelli dei clienti (Report clienti -> Impostazioni), non del Report mensile
+      const [l, c, p] = await Promise.all([this.api('/api/clients'), this.api('/api/clients/config'), this.api('/api/reports/periods')]);
       if (l.ok) this.cli.list = await l.json();
       if (c.ok) { const d = await c.json(); this.cli.cfg = d.config; if (!this.cli.period) this.cli.period = d.suggested_period; }
       if (p.ok) { this.cli.periods = await p.json(); if (!this.cli.periods.some(x => x.period === this.cli.period) && this.cli.periods.length) this.cli.period = this.cli.periods[0].period; }
@@ -1564,7 +1566,48 @@ function sentinel() {
     get cliPeriodLabel() { const p = this.cli.periods.find(x => x.period === this.cli.period); return p ? p.label : this.cli.period; },
     get cliSchedule() {
       const c = this.cli.cfg; if (!c) return '';
-      return `Partono il giorno ${c.send_day} di ogni mese alle ${String(c.send_hour).padStart(2, '0')}:00, insieme al tuo report, con il mese precedente. Giorno e ora si cambiano in Report mensile.`;
+      if (!c.enabled) return 'Invio automatico ai clienti spento: si riaccende in Impostazioni.';
+      return `Partono il giorno ${c.send_day} di ogni mese alle ${String(c.send_hour).padStart(2, '0')}:00, con il mese precedente. Giorno, ora, sezioni e layout si cambiano in Impostazioni.`;
+    },
+    // ---- impostazioni uniche per tutti i report dei clienti ----
+    async openClientSettings() {
+      this.cli.tab = 'settings';
+      if (this.cliSet.cfg && this.cliSet.dirty) return;   // modifiche non salvate: non le butto via
+      const r = await this.api('/api/clients/config');
+      if (!r.ok) return;
+      const d = await r.json();
+      Object.assign(this.cliSet, { cfg: d.config, template: d.template, defaultTemplate: d.default_template, dirty: false, msg: '', err: '' });
+      if (!this.cliSet.clientId || !this.cli.list.some(c => c.id === this.cliSet.clientId)) {
+        const first = this.cli.list.find(c => c.sites.length) || this.cli.list[0];
+        this.cliSet.clientId = first ? first.id : null;
+      }
+      await this.previewClientSettings();
+    },
+    cliSetTouch() { this.cliSet.dirty = true; this.previewClientSettings(); },
+    async previewClientSettings() {
+      if (!this.cliSet.cfg || !this.cliSet.clientId) { this.cliSet.html = ''; return; }
+      this.cliSet.busy = true; this.cliSet.err = '';
+      try {
+        const body = { period: this.cli.period, config: this.cliSet.cfg, template: this.cliSet.advanced ? this.cliSet.template : null };
+        const r = await this.api(`/api/clients/${this.cliSet.clientId}/preview`, { method: 'POST', body: JSON.stringify(body) });
+        if (r.ok) this.cliSet.html = await r.text();
+        else { const d = await r.json().catch(() => ({})); this.cliSet.err = d.detail || 'Errore anteprima'; }
+      } finally { this.cliSet.busy = false; }
+    },
+    async saveClientSettings() {
+      this.cliSet.busy = true; this.cliSet.msg = this.cliSet.err = '';
+      try {
+        const body = { config: this.cliSet.cfg }; if (this.cliSet.advanced) body.template = this.cliSet.template;
+        const r = await this.api('/api/clients/config', { method: 'PUT', body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.cliSet.err = d.detail || 'Errore'; return; }
+        this.cliSet.cfg = d.config; this.cli.cfg = d.config; this.cliSet.dirty = false; this.cliSet.msg = 'Impostazioni dei clienti salvate';
+        this.cliSet.savedAt = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+      } finally { this.cliSet.busy = false; }
+    },
+    resetClientTemplate() {
+      if (!confirm('Ripristinare il layout PDF predefinito per i clienti?')) return;
+      this.cliSet.template = this.cliSet.defaultTemplate; this.cliSetTouch();
     },
     get cliEnabledCount() { return this.cli.list.filter(c => c.enabled).length; },
     async toggleClient(c, ev) {
@@ -1858,6 +1901,7 @@ function sentinel() {
         const d = await r.json().catch(() => ({}));
         if (!r.ok) { this.rep.err = d.detail || 'Errore'; return; }
         this.rep.cfg = d.config; this.rep.msg = 'Impostazioni salvate'; this.rep.dirty = false;
+        this.rep.savedAt = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
       } finally { this.rep.busy = false; }
     },
     resetReportTemplate() { if (!confirm('Ripristinare il layout PDF predefinito?')) return; this.rep.template = this.rep.defaultTemplate; this.rep.dirty = true; this.previewReport(); },

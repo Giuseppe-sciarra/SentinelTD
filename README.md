@@ -151,6 +151,7 @@ no address, no key — so anyone can build their own; see `connectors/README.md`
 | Text, HTML and channels of every notification | Notifications |
 | Monthly report: day, recipient, content, layout | Monthly report |
 | Clients, their sites and addresses, automatic report to the client | Client reports |
+| Client reports: day, hour, sections, texts, PDF layout (one set for all clients) | Client reports → Settings |
 | Text of the email sent to clients with their report | Notifications → Monthly report to the client |
 | Brake on weak servers (sites at a time, rests, pause between updates) | Settings → Site servers |
 | Database credentials, SMTP, Telegram, secrets, ports | `.env` |

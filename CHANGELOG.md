@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.12.1
+
+### Fixed
+- Monthly report and Client reports → Settings: next to *Save settings* the panel said
+  "No changes" right after a successful save, which read as if nothing had been saved. It now
+  shows *Unsaved changes* while something is modified, *✓ Saved at HH:MM* after saving, and
+  nothing otherwise. Day and hour mark the change while typing, not only when leaving the field
+
+## 2.12.0
+
+### Added
+- **Client reports have their own settings**, one set for all clients and separate from your
+  Monthly report: *Client reports → Settings* (next to *Clients*). Automatic sending switch,
+  day and hour, company, title and intro, sections to include, expiry horizon and PDF layout,
+  with a live preview on a client and month of choice (unsaved changes included)
+- The first time, the client settings are a **copy of your current Monthly report settings**
+  (custom layout included) and automatic sending to clients starts on, as before; from then on
+  the two live separately
+- Your report and the client reports go out each on their own day and hour; the memory of what
+  was already sent in the period is shared, so no duplicates even on different days. New
+  endpoints `GET/PUT /api/clients/config`; the client preview accepts unsaved settings
+
+### Changed
+- The client list shows the clients' schedule (or that sending to clients is off) instead of
+  the Monthly report's
+
 ## 2.11.4
 
 ### Added
