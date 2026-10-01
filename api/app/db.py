@@ -55,6 +55,19 @@ async def run_migrations(conn) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS ux_update_monthly_key
         ON update_monthly (period, site_id, ext_type, slug)
     """))
+    # Estensioni a licenza da aggiornare a mano (es. Elementor Pro senza pacchetto remoto)
+    await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS update_manual BOOLEAN NOT NULL DEFAULT FALSE"))
+
+    # Domini: registrar, nameserver e decisione di rinnovo.
+    for ddl in (
+        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_registrar VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_nameservers TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_renew VARCHAR(8) NOT NULL DEFAULT ''",
+        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_renew_note TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_renew_at TIMESTAMPTZ NULL",
+    ):
+        await conn.execute(text(ddl))
+
     # Versione di partenza nel rollup (per il report dettagliato "dalla X alla Y").
     await conn.execute(text("ALTER TABLE update_monthly ADD COLUMN IF NOT EXISTS first_version VARCHAR(64) NOT NULL DEFAULT ''"))
     done_fv = (await conn.execute(text(

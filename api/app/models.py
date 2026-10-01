@@ -41,6 +41,13 @@ class Site(Base):
     domain_check_error: Mapped[str] = mapped_column(Text, default="")
     # JSON {"expires":"YYYY-MM-DD","sent":[30,14,7]} per evitare doppioni
     domain_alert_state: Mapped[str] = mapped_column(Text, default="")
+    # dove e' registrato il dominio (dallo scan RDAP/WHOIS)
+    domain_registrar: Mapped[str] = mapped_column(String(200), default="")
+    domain_nameservers: Mapped[str] = mapped_column(Text, default="")
+    # decisione di rinnovo: "" = da decidere, "yes" = si rinnova, "no" = non si rinnova
+    domain_renew: Mapped[str] = mapped_column(String(8), default="")
+    domain_renew_note: Mapped[str] = mapped_column(Text, default="")
+    domain_renew_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     core_current: Mapped[str] = mapped_column(String(40), default="")
     core_latest: Mapped[str] = mapped_column(String(40), default="")
     core_update: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -83,6 +90,8 @@ class Extension(Base):
     # ogni ora. Si riprova solo dopo AUTOUPDATE_RETRY_DAYS o se esce una versione nuova.
     update_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     update_failed_version: Mapped[str] = mapped_column(String(40), default="")
+    # prodotto a licenza che non si aggiorna da remoto: riprova al massimo una volta al giorno
+    update_manual: Mapped[bool] = mapped_column(Boolean, default=False)
 
     site: Mapped[Site] = relationship(back_populates="extensions")
 

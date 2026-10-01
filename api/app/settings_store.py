@@ -15,6 +15,8 @@ DEFAULTS = {
     "expiry_critical_days": 7,
     "screenshot_every_hours": 12,   # ogni quante ore rigenerare l'anteprima dei siti
     "history_retention_days": 400,  # cronologia dettagliata degli update (report dettagliato)
+    "domain_decision_days": 60,     # quanti giorni prima chiedere "si rinnova o no?"
+    "domain_alert_norenew": 1,      # 1 = avvisa anche per i domini da NON rinnovare
 }
 
 
@@ -38,6 +40,8 @@ def normalize(data: dict | None) -> dict:
         ("expiry_critical_days", 1, 3650),
         ("screenshot_every_hours", 1, 720),
         ("history_retention_days", 7, 3650),
+        ("domain_decision_days", 0, 3650),
+        ("domain_alert_norenew", 0, 1),
     ):
         try:
             out[key] = max(lo, min(hi, int(src.get(key, out[key]))))

@@ -57,7 +57,7 @@ services:
     command: [arq, app.worker.WorkerSettings]
     env_file: .env
     environment: *app-environment
-    volumes: [branding:/data/branding:ro]
+    volumes: [branding:/data/branding:ro, screenshots:/data/screenshots:ro]   # istantanee prima/dopo per i report
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

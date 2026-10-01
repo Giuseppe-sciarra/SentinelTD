@@ -5,6 +5,7 @@ defined('_JEXEC') or die;
 
 use Joomla\CMS\Factory;
 use Joomla\CMS\Form\Field\TextField;
+use Joomla\CMS\Language\Text;
 
 /**
  * Campo che genera il token alla prima apertura e lo persiste nei params del plugin.
@@ -28,6 +29,16 @@ class TdtokenField extends TextField
             $this->value = $token;
         }
 
+        // testi nella lingua dell'amministratore (il form del plugin di norma la carica gia':
+        // la carichiamo comunque, cosi' i pulsanti non mostrano mai le chiavi grezze)
+        $lang = $app->getLanguage();
+        $lang->load('plg_system_tdpanopticon', JPATH_ADMINISTRATOR)
+            || $lang->load('plg_system_tdpanopticon', JPATH_PLUGINS . '/system/tdpanopticon');
+        $tCopy    = htmlspecialchars(Text::_('PLG_SYSTEM_TDPANOPTICON_COPY'), ENT_QUOTES);
+        $tRegen   = htmlspecialchars(Text::_('PLG_SYSTEM_TDPANOPTICON_REGENERATE'), ENT_QUOTES);
+        $tConfirm = htmlspecialchars(json_encode(Text::_('PLG_SYSTEM_TDPANOPTICON_REGENERATE_CONFIRM'), JSON_UNESCAPED_UNICODE), ENT_QUOTES);
+        $tHelp    = htmlspecialchars(Text::_('PLG_SYSTEM_TDPANOPTICON_TOKEN_HELP'), ENT_QUOTES);
+
         $id  = htmlspecialchars($this->id, ENT_QUOTES);
         $val = htmlspecialchars($token, ENT_QUOTES);
 
@@ -40,10 +51,10 @@ class TdtokenField extends TextField
 <input type="text" id="{$id}" name="{$this->name}" value="{$val}" readonly
        style="width:480px;max-width:100%;font-family:monospace" onclick="this.select()">
 <button type="button" class="btn btn-secondary"
-        onclick="navigator.clipboard.writeText(document.getElementById('{$id}').value)">Copia</button>
+        onclick="navigator.clipboard.writeText(document.getElementById('{$id}').value)">{$tCopy}</button>
 <a class="btn btn-outline-danger" href="{$regenUrl}"
-   onclick="return confirm('Rigenerare il token? Dovrai aggiornarlo anche in Sentinel TD.');">Rigenera</a>
-<div class="form-text">Copia questo token e incollalo quando aggiungi il sito in Sentinel TD.</div>
+   onclick="return confirm({$tConfirm});">{$tRegen}</a>
+<div class="form-text">{$tHelp}</div>
 HTML;
     }
 

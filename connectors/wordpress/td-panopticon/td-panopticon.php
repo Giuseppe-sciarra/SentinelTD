@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.15.0
+ * Version: 2.17.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -18,17 +18,11 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-/*
- * Una sola copia attiva per sito. Se il connettore e' gia' caricato (caso tipico:
- * cartella vecchia "td-panopticon" e nuova "sentinel-td" installate entrambe),
- * questa copia esce SUBITO: senza questa guardia PHP andrebbe in fatal error per
- * ridichiarazione di costanti e funzioni, e il sito resterebbe bianco.
- */
 if (defined('TDPANOP_LOADED')) {
     add_action('admin_notices', function () {
+        $msg = 'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).';
         echo '<div class="notice notice-warning"><p><strong>Sentinel TD Agent</strong>: '
-           . 'un\'altra copia del connettore è già attiva su questo sito. '
-           . 'Tieni attiva una sola copia (disattiva e rimuovi quella non usata).</p></div>';
+           . esc_html(function_exists('tdpanop__') ? tdpanop__($msg) : $msg) . '</p></div>';
     });
     return;
 }
@@ -45,6 +39,164 @@ const TDPANOP_OPT = 'td_panopticon_token';
  * ------------------------------------------------------------------------- */
 const TDPANOP_HUB_URL = '';   // vuoto: si imposta dal backend del sito, oppure lo compila Sentinel nel pacchetto che genera
 const TDPANOP_HUB_KEY = '';   // idem: mai nel repository
+
+/*
+ * Tutto il resto del connettore sta in un blocco condizionale. Motivo: PHP registra
+ * le funzioni di primo livello mentre COMPILA il file, prima di eseguire la guardia
+ * qui sopra; con due copie del connettore attive (vecchia cartella "td-panopticon" e
+ * nuova "sentinel-td") la seconda andava in errore fatale per funzioni ridichiarate e
+ * il sito diventava bianco. Dentro un blocco le funzioni vengono registrate solo
+ * quando il blocco viene eseguito, e la seconda copia esce prima di arrivarci.
+ */
+if (!function_exists('tdpanop_token')) {
+
+/* ---------------------------------------------------------------------------
+ * Lingue: italiano, inglese, francese, tedesco.
+ * I testi nel codice sono in italiano; per le altre lingue si usa la tabella qui
+ * sotto, scelta in base alla lingua dell'utente in amministrazione. Le lingue non
+ * previste usano l'inglese. Tabella dentro il file: il connettore resta un file
+ * unico, come lo genera il pannello.
+ * ------------------------------------------------------------------------- */
+function tdpanop__($text)
+{
+    static $map = null;
+    if ($map === null) {
+        $locale = function_exists('determine_locale') ? determine_locale() : get_locale();
+        $lang   = strtolower(substr((string) $locale, 0, 2));
+        $all    = tdpanop_translations();
+        $map    = ($lang === 'it') ? [] : ($all[$lang] ?? $all['en']);
+    }
+    return isset($map[$text]) ? $map[$text] : $text;
+}
+
+function tdpanop_translations()
+{
+    return [
+        'en' => [
+            'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Sentinel TD connector: exposes versions and available updates over REST and allows remote updates. Token and connection in Settings → Sentinel TD.',
+            'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).' => 'another copy of the connector is already active on this site. Keep only one copy active (deactivate and remove the unused one).',
+            'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token regenerated. Update it in Sentinel TD as well.',
+            'Collegamento fallito: %s' => 'Connection failed: %s',
+            'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'This site is ALREADY in Sentinel TD: nothing was changed.',
+            'Sito collegato a Sentinel TD.' => 'Site connected to Sentinel TD.',
+            'Sito collegato a Sentinel TD nella cartella "%s".' => 'Site connected to Sentinel TD in the folder "%s".',
+            'Sito collegato a Sentinel TD con auto-update attivo.' => 'Site connected to Sentinel TD with automatic updates on.',
+            'Sito collegato a Sentinel TD nella cartella "%s" con auto-update attivo.' => 'Site connected to Sentinel TD in the folder "%s" with automatic updates on.',
+            'Collegamento rifiutato (HTTP %d): %s' => 'Connection refused (HTTP %d): %s',
+            'verifica URL e chiave' => 'check the URL and the key',
+            'chiave non valida o pannello non raggiungibile (HTTP %d)' => 'invalid key or panel not reachable (HTTP %d)',
+            'Copia questo token e incollalo quando aggiungi il sito in %s.' => 'Copy this token and paste it when you add the site in %s.',
+            'Token del sito' => 'Site token',
+            'Copia' => 'Copy',
+            'Rigenerare il token? Dovrai aggiornarlo anche in Sentinel TD, altrimenti i check falliranno.' => 'Regenerate the token? You will have to update it in Sentinel TD too, otherwise the checks will fail.',
+            'Rigenera token' => 'Regenerate token',
+            'Collega a Sentinel TD' => 'Connect to Sentinel TD',
+            'Pannello: %s (pre-configurato). Scegli la cartella e collega.' => 'Panel: %s (pre-configured). Choose the folder and connect.',
+            'Registra questo sito nel pannello da solo: niente copia-incolla del token. Se il sito è già presente in Sentinel TD, non viene modificato nulla.' => 'Register this site in the panel by itself: no token copy and paste. If the site is already in Sentinel TD, nothing is changed.',
+            'URL pannello' => 'Panel URL',
+            'Chiave di registrazione' => 'Registration key',
+            'dal pannello: Impostazioni → Connettori → Registrazione automatica' => 'from the panel: Settings → Connectors → Automatic registration',
+            'https://sentinel.tuodominio.it' => 'https://sentinel.example.com',
+            'Salva e carica cartelle' => 'Save and load folders',
+            'Impossibile leggere le cartelle: %s' => 'Unable to read the folders: %s',
+            'Cartella' => 'Folder',
+            '— Nessuna cartella —' => '— No folder —',
+            'oppure nuova:' => 'or a new one:',
+            'es. ClienteX' => 'e.g. ClientX',
+            'Auto-update' => 'Auto-update',
+            'Attiva gli aggiornamenti automatici gestiti da Sentinel TD per questo sito' => 'Turn on automatic updates managed by Sentinel TD for this site',
+            'Collega questo sito a Sentinel TD' => 'Connect this site to Sentinel TD',
+        ],
+        'fr' => [
+            'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Connecteur Sentinel TD : expose les versions et les mises à jour disponibles via REST et permet les mises à jour à distance. Jeton et connexion dans Réglages → Sentinel TD.',
+            'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).' => 'une autre copie du connecteur est déjà active sur ce site. Ne gardez qu\'une seule copie active (désactivez et supprimez celle qui ne sert pas).',
+            'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Jeton régénéré. Mettez-le aussi à jour dans Sentinel TD.',
+            'Collegamento fallito: %s' => 'Échec de la connexion : %s',
+            'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'Ce site est DÉJÀ présent dans Sentinel TD : aucune modification effectuée.',
+            'Sito collegato a Sentinel TD.' => 'Site connecté à Sentinel TD.',
+            'Sito collegato a Sentinel TD nella cartella "%s".' => 'Site connecté à Sentinel TD dans le dossier « %s ».',
+            'Sito collegato a Sentinel TD con auto-update attivo.' => 'Site connecté à Sentinel TD avec les mises à jour automatiques activées.',
+            'Sito collegato a Sentinel TD nella cartella "%s" con auto-update attivo.' => 'Site connecté à Sentinel TD dans le dossier « %s » avec les mises à jour automatiques activées.',
+            'Collegamento rifiutato (HTTP %d): %s' => 'Connexion refusée (HTTP %d) : %s',
+            'verifica URL e chiave' => 'vérifiez l\'URL et la clé',
+            'chiave non valida o pannello non raggiungibile (HTTP %d)' => 'clé non valide ou panneau injoignable (HTTP %d)',
+            'Copia questo token e incollalo quando aggiungi il sito in %s.' => 'Copiez ce jeton et collez-le lorsque vous ajoutez le site dans %s.',
+            'Token del sito' => 'Jeton du site',
+            'Copia' => 'Copier',
+            'Rigenerare il token? Dovrai aggiornarlo anche in Sentinel TD, altrimenti i check falliranno.' => 'Régénérer le jeton ? Vous devrez aussi le mettre à jour dans Sentinel TD, sinon les vérifications échoueront.',
+            'Rigenera token' => 'Régénérer le jeton',
+            'Collega a Sentinel TD' => 'Connecter à Sentinel TD',
+            'Pannello: %s (pre-configurato). Scegli la cartella e collega.' => 'Panneau : %s (préconfiguré). Choisissez le dossier et connectez.',
+            'Registra questo sito nel pannello da solo: niente copia-incolla del token. Se il sito è già presente in Sentinel TD, non viene modificato nulla.' => 'Enregistrez ce site dans le panneau directement : pas de copier-coller du jeton. Si le site est déjà présent dans Sentinel TD, rien n\'est modifié.',
+            'URL pannello' => 'URL du panneau',
+            'Chiave di registrazione' => 'Clé d\'enregistrement',
+            'dal pannello: Impostazioni → Connettori → Registrazione automatica' => 'depuis le panneau : Paramètres → Connecteurs → Enregistrement automatique',
+            'https://sentinel.tuodominio.it' => 'https://sentinel.exemple.fr',
+            'Salva e carica cartelle' => 'Enregistrer et charger les dossiers',
+            'Impossibile leggere le cartelle: %s' => 'Impossible de lire les dossiers : %s',
+            'Cartella' => 'Dossier',
+            '— Nessuna cartella —' => '— Aucun dossier —',
+            'oppure nuova:' => 'ou un nouveau :',
+            'es. ClienteX' => 'ex. ClientX',
+            'Auto-update' => 'Mise à jour auto',
+            'Attiva gli aggiornamenti automatici gestiti da Sentinel TD per questo sito' => 'Activer les mises à jour automatiques gérées par Sentinel TD pour ce site',
+            'Collega questo sito a Sentinel TD' => 'Connecter ce site à Sentinel TD',
+        ],
+        'de' => [
+            'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Sentinel-TD-Connector: stellt Versionen und verfügbare Updates per REST bereit und ermöglicht Updates aus der Ferne. Token und Verbindung unter Einstellungen → Sentinel TD.',
+            'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).' => 'eine weitere Kopie des Connectors ist auf dieser Website bereits aktiv. Lassen Sie nur eine Kopie aktiv (deaktivieren und entfernen Sie die nicht genutzte).',
+            'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token neu erzeugt. Aktualisieren Sie ihn auch in Sentinel TD.',
+            'Collegamento fallito: %s' => 'Verbindung fehlgeschlagen: %s',
+            'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'Diese Website ist BEREITS in Sentinel TD vorhanden: es wurde nichts geändert.',
+            'Sito collegato a Sentinel TD.' => 'Website mit Sentinel TD verbunden.',
+            'Sito collegato a Sentinel TD nella cartella "%s".' => 'Website mit Sentinel TD im Ordner „%s“ verbunden.',
+            'Sito collegato a Sentinel TD con auto-update attivo.' => 'Website mit Sentinel TD verbunden, automatische Updates aktiv.',
+            'Sito collegato a Sentinel TD nella cartella "%s" con auto-update attivo.' => 'Website mit Sentinel TD im Ordner „%s“ verbunden, automatische Updates aktiv.',
+            'Collegamento rifiutato (HTTP %d): %s' => 'Verbindung abgelehnt (HTTP %d): %s',
+            'verifica URL e chiave' => 'URL und Schlüssel prüfen',
+            'chiave non valida o pannello non raggiungibile (HTTP %d)' => 'ungültiger Schlüssel oder Panel nicht erreichbar (HTTP %d)',
+            'Copia questo token e incollalo quando aggiungi il sito in %s.' => 'Kopieren Sie diesen Token und fügen Sie ihn ein, wenn Sie die Website in %s hinzufügen.',
+            'Token del sito' => 'Website-Token',
+            'Copia' => 'Kopieren',
+            'Rigenerare il token? Dovrai aggiornarlo anche in Sentinel TD, altrimenti i check falliranno.' => 'Token neu erzeugen? Sie müssen ihn auch in Sentinel TD aktualisieren, sonst schlagen die Prüfungen fehl.',
+            'Rigenera token' => 'Token neu erzeugen',
+            'Collega a Sentinel TD' => 'Mit Sentinel TD verbinden',
+            'Pannello: %s (pre-configurato). Scegli la cartella e collega.' => 'Panel: %s (vorkonfiguriert). Ordner wählen und verbinden.',
+            'Registra questo sito nel pannello da solo: niente copia-incolla del token. Se il sito è già presente in Sentinel TD, non viene modificato nulla.' => 'Diese Website direkt im Panel registrieren: kein Kopieren des Tokens nötig. Ist die Website bereits in Sentinel TD vorhanden, wird nichts geändert.',
+            'URL pannello' => 'Panel-URL',
+            'Chiave di registrazione' => 'Registrierungsschlüssel',
+            'dal pannello: Impostazioni → Connettori → Registrazione automatica' => 'im Panel: Einstellungen → Connectoren → Automatische Registrierung',
+            'https://sentinel.tuodominio.it' => 'https://sentinel.beispiel.de',
+            'Salva e carica cartelle' => 'Speichern und Ordner laden',
+            'Impossibile leggere le cartelle: %s' => 'Ordner können nicht gelesen werden: %s',
+            'Cartella' => 'Ordner',
+            '— Nessuna cartella —' => '— Kein Ordner —',
+            'oppure nuova:' => 'oder neu:',
+            'es. ClienteX' => 'z. B. KundeX',
+            'Auto-update' => 'Auto-Update',
+            'Attiva gli aggiornamenti automatici gestiti da Sentinel TD per questo sito' => 'Von Sentinel TD verwaltete automatische Updates für diese Website aktivieren',
+            'Collega questo sito a Sentinel TD' => 'Diese Website mit Sentinel TD verbinden',
+        ],
+    ];
+}
+
+// descrizione nella lista plugin, nella lingua dell'utente
+add_filter('all_plugins', function ($plugins) {
+    foreach ($plugins as $file => $data) {
+        if (isset($data['Name']) && $data['Name'] === 'Sentinel TD Agent') {
+            $plugins[$file]['Description'] = tdpanop__($data['Description']);
+        }
+    }
+    return $plugins;
+});
+
+/*
+ * Una sola copia attiva per sito. Se il connettore e' gia' caricato (caso tipico:
+ * cartella vecchia "td-panopticon" e nuova "sentinel-td" installate entrambe),
+ * questa copia esce SUBITO: senza questa guardia PHP andrebbe in fatal error per
+ * ridichiarazione di costanti e funzioni, e il sito resterebbe bianco.
+ */
+
 
 /* ---------------------------------------------------------------------------
  * Token: generazione all'attivazione
@@ -99,7 +251,7 @@ function tdpanop_admin_page()
     // rigenera
     if (isset($_POST['tdpanop_rotate']) && check_admin_referer('tdpanop_rotate')) {
         update_option(TDPANOP_OPT, wp_generate_password(48, false, false));
-        echo '<div class="notice notice-success is-dismissible"><p>Token rigenerato. Aggiornalo anche in Sentinel TD.</p></div>';
+        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html(tdpanop__('Token rigenerato. Aggiornalo anche in Sentinel TD.')) . '</p></div>';
     }
 
     // ---- Collega a Sentinel TD (auto-registrazione) -------------------------------
@@ -143,18 +295,22 @@ function tdpanop_admin_page()
             ]),
         ]);
         if (is_wp_error($resp)) {
-            echo '<div class="notice notice-error"><p>Collegamento fallito: ' . esc_html($resp->get_error_message()) . '</p></div>';
+            echo '<div class="notice notice-error"><p>' . esc_html(sprintf(tdpanop__('Collegamento fallito: %s'), $resp->get_error_message())) . '</p></div>';
         } else {
             $code = (int) wp_remote_retrieve_response_code($resp);
             $body = json_decode((string) wp_remote_retrieve_body($resp), true);
             if ($code === 200 && !empty($body['ok'])) {
-                $msg = !empty($body['existed'])
-                    ? 'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.'
-                    : 'Sito collegato a Sentinel TD' . ($tag !== '' ? ' nella cartella "' . esc_html($tag) . '"' : '') . ($auto ? ' con auto-update attivo.' : '.');
+                if (!empty($body['existed'])) {
+                    $msg = esc_html(tdpanop__('Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.'));
+                } elseif ($tag !== '') {
+                    $msg = esc_html(sprintf(tdpanop__($auto ? 'Sito collegato a Sentinel TD nella cartella "%s" con auto-update attivo.' : 'Sito collegato a Sentinel TD nella cartella "%s".'), $tag));
+                } else {
+                    $msg = esc_html(tdpanop__($auto ? 'Sito collegato a Sentinel TD con auto-update attivo.' : 'Sito collegato a Sentinel TD.'));
+                }
                 echo '<div class="notice notice-success is-dismissible"><p>' . $msg . '</p></div>';
             } else {
                 $detail = is_array($body) ? ($body['detail'] ?? '') : '';
-                echo '<div class="notice notice-error"><p>Collegamento rifiutato (HTTP ' . $code . '): ' . esc_html($detail ?: 'verifica URL e chiave') . '</p></div>';
+                echo '<div class="notice notice-error"><p>' . esc_html(sprintf(tdpanop__('Collegamento rifiutato (HTTP %d): %s'), $code, $detail ?: tdpanop__('verifica URL e chiave'))) . '</p></div>';
             }
         }
     }
@@ -168,7 +324,7 @@ function tdpanop_admin_page()
             $b = json_decode((string) wp_remote_retrieve_body($r), true);
             $hub_tags = (is_array($b) && !empty($b['tags']) && is_array($b['tags'])) ? $b['tags'] : [];
         } else {
-            $hub_tags_err = 'chiave non valida o pannello non raggiungibile (HTTP ' . (int) wp_remote_retrieve_response_code($r) . ')';
+            $hub_tags_err = sprintf(tdpanop__('chiave non valida o pannello non raggiungibile (HTTP %d)'), (int) wp_remote_retrieve_response_code($r));
         }
     }
 
@@ -176,14 +332,14 @@ function tdpanop_admin_page()
 ?>
     <div class="wrap">
         <h1>Sentinel TD</h1>
-        <p>Copia questo token e incollalo quando aggiungi il sito in <strong>Sentinel TD</strong>.</p>
+        <p><?php echo sprintf(esc_html(tdpanop__('Copia questo token e incollalo quando aggiungi il sito in %s.')), '<strong>Sentinel TD</strong>'); ?></p>
         <table class="form-table">
             <tr>
-                <th scope="row"><label for="tdpanop_tok">Token del sito</label></th>
+                <th scope="row"><label for="tdpanop_tok"><?php echo esc_html(tdpanop__('Token del sito')); ?></label></th>
                 <td>
                     <input type="text" id="tdpanop_tok" readonly value="<?php echo esc_attr($token); ?>"
                         style="width:480px;max-width:100%;font-family:monospace" onclick="this.select()">
-                    <button type="button" class="button" onclick="navigator.clipboard.writeText(document.getElementById('tdpanop_tok').value)">Copia</button>
+                    <button type="button" class="button" onclick="navigator.clipboard.writeText(document.getElementById('tdpanop_tok').value)"><?php echo esc_html(tdpanop__('Copia')); ?></button>
                 </td>
             </tr>
             <tr>
@@ -191,66 +347,66 @@ function tdpanop_admin_page()
                 <td><code><?php echo esc_html(rest_url('tdpanopticon/v1/status')); ?></code></td>
             </tr>
         </table>
-        <form method="post" onsubmit="return confirm('Rigenerare il token? Dovrai aggiornarlo anche in Sentinel TD, altrimenti i check falliranno.');">
+        <form method="post" onsubmit="return confirm('<?php echo esc_js(tdpanop__('Rigenerare il token? Dovrai aggiornarlo anche in Sentinel TD, altrimenti i check falliranno.')); ?>');">
             <?php wp_nonce_field('tdpanop_rotate'); ?>
-            <input type="submit" name="tdpanop_rotate" class="button button-secondary" value="Rigenera token">
+            <input type="submit" name="tdpanop_rotate" class="button button-secondary" value="<?php echo esc_attr(tdpanop__('Rigenera token')); ?>">
         </form>
 
         <hr style="margin:24px 0">
-        <h2>Collega a Sentinel TD</h2>
+        <h2><?php echo esc_html(tdpanop__('Collega a Sentinel TD')); ?></h2>
         <?php if ($hub_hardcoded) : ?>
-            <p>Pannello: <code><?php echo esc_html(TDPANOP_HUB_URL); ?></code> (pre-configurato). Scegli la cartella e collega.</p>
+            <p><?php echo sprintf(esc_html(tdpanop__('Pannello: %s (pre-configurato). Scegli la cartella e collega.')), '<code>' . esc_html(TDPANOP_HUB_URL) . '</code>'); ?></p>
         <?php else : ?>
-            <p>Registra questo sito nel pannello da solo: niente copia-incolla del token. Se il sito è già presente in Sentinel TD, non viene modificato nulla.</p>
+            <p><?php echo esc_html(tdpanop__('Registra questo sito nel pannello da solo: niente copia-incolla del token. Se il sito è già presente in Sentinel TD, non viene modificato nulla.')); ?></p>
 
             <form method="post" style="margin-bottom:14px">
                 <?php wp_nonce_field('tdpanop_hub'); ?>
                 <table class="form-table">
                     <tr>
-                        <th scope="row"><label for="tdpanop_hub_url">URL pannello</label></th>
+                        <th scope="row"><label for="tdpanop_hub_url"><?php echo esc_html(tdpanop__('URL pannello')); ?></label></th>
                         <td><input type="url" id="tdpanop_hub_url" name="tdpanop_hub_url" value="<?php echo esc_attr($hub_url); ?>"
-                                placeholder="https://sentinel.tuodominio.it" style="width:420px;max-width:100%"></td>
+                                placeholder="<?php echo esc_attr(tdpanop__('https://sentinel.tuodominio.it')); ?>" style="width:420px;max-width:100%"></td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="tdpanop_hub_key">Chiave di registrazione</label></th>
+                        <th scope="row"><label for="tdpanop_hub_key"><?php echo esc_html(tdpanop__('Chiave di registrazione')); ?></label></th>
                         <td><input type="text" id="tdpanop_hub_key" name="tdpanop_hub_key" value="<?php echo esc_attr($hub_key); ?>"
                                 style="width:420px;max-width:100%;font-family:monospace"
-                                placeholder="dal pannello: Connettori → Registrazione automatica"></td>
+                                placeholder="<?php echo esc_attr(tdpanop__('dal pannello: Impostazioni → Connettori → Registrazione automatica')); ?>"></td>
                     </tr>
                 </table>
-                <input type="submit" name="tdpanop_hub_save" class="button" value="Salva e carica cartelle">
+                <input type="submit" name="tdpanop_hub_save" class="button" value="<?php echo esc_attr(tdpanop__('Salva e carica cartelle')); ?>">
             </form>
         <?php endif; ?>
 
         <?php if ($hub_url !== '' && $hub_key !== '') : ?>
             <?php if ($hub_tags_err !== '') : ?>
                 <div class="notice notice-warning inline">
-                    <p>Impossibile leggere le cartelle: <?php echo esc_html($hub_tags_err); ?></p>
+                    <p><?php echo esc_html(sprintf(tdpanop__('Impossibile leggere le cartelle: %s'), $hub_tags_err)); ?></p>
                 </div>
             <?php else : ?>
                 <form method="post">
                     <?php wp_nonce_field('tdpanop_hub'); ?>
                     <table class="form-table">
                         <tr>
-                            <th scope="row"><label for="tdpanop_hub_tag">Cartella</label></th>
+                            <th scope="row"><label for="tdpanop_hub_tag"><?php echo esc_html(tdpanop__('Cartella')); ?></label></th>
                             <td>
                                 <select id="tdpanop_hub_tag" name="tdpanop_hub_tag">
-                                    <option value="__none">— Nessuna cartella —</option>
+                                    <option value="__none"><?php echo esc_html(tdpanop__('— Nessuna cartella —')); ?></option>
                                     <?php foreach ($hub_tags as $t) : ?>
                                         <option value="<?php echo esc_attr($t); ?>"><?php echo esc_html($t); ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <span style="margin:0 8px">oppure nuova:</span>
-                                <input type="text" name="tdpanop_hub_tag_new" placeholder="es. ClienteX" style="width:180px">
+                                <span style="margin:0 8px"><?php echo esc_html(tdpanop__('oppure nuova:')); ?></span>
+                                <input type="text" name="tdpanop_hub_tag_new" placeholder="<?php echo esc_attr(tdpanop__('es. ClienteX')); ?>" style="width:180px">
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">Auto-update</th>
+                            <th scope="row"><?php echo esc_html(tdpanop__('Auto-update')); ?></th>
                             <td><label><input type="checkbox" name="tdpanop_hub_auto" value="1" checked>
-                                    Attiva gli aggiornamenti automatici gestiti da Sentinel TD per questo sito</label></td>
+                                    <?php echo esc_html(tdpanop__('Attiva gli aggiornamenti automatici gestiti da Sentinel TD per questo sito')); ?></label></td>
                         </tr>
                     </table>
-                    <input type="submit" name="tdpanop_hub_register" class="button button-primary" value="Collega questo sito a Sentinel TD">
+                    <input type="submit" name="tdpanop_hub_register" class="button button-primary" value="<?php echo esc_attr(tdpanop__('Collega questo sito a Sentinel TD')); ?>">
                 </form>
             <?php endif; ?>
         <?php endif; ?>
@@ -521,6 +677,28 @@ function tdpanop_update(WP_REST_Request $req)
         return new WP_REST_Response(['ok' => false, 'error' => 'DISALLOW_FILE_MODS attivo: update bloccati'], 200);
     }
 
+    // Versione che il pannello si aspetta (opzionale): serve a distinguere "gia' aggiornato"
+    // da "non aggiornabile da qui".
+    $panelExpected = trim((string) $req->get_param('expected'));
+
+    // Plugin e temi A LICENZA (Elementor Pro, ACF Pro, WP Rocket, Yoast Premium…) non stanno
+    // su wordpress.org: le loro info di aggiornamento le inserisce il plugin stesso, di
+    // solito solo nel backend. Ricostruendo la cache qui (via REST, fuori dal backend)
+    // sparirebbero, e WordPress risponderebbe "il plugin e' alla sua ultima versione".
+    // Quindi salviamo la voce attuale PRIMA di ricostruire, e se dopo manca la rimettiamo.
+    $savedEntry = null;
+    if ($type === 'plugin' || $type === 'theme') {
+        $prev = get_site_transient($type === 'plugin' ? 'update_plugins' : 'update_themes');
+        if ($type === 'plugin') {
+            $pf = tdpanop_plugin_file_by_slug($slug);
+            if ($pf !== '' && $prev && !empty($prev->response[$pf])) {
+                $savedEntry = $prev->response[$pf];
+            }
+        } elseif ($prev && !empty($prev->response[$slug])) {
+            $savedEntry = $prev->response[$slug];
+        }
+    }
+
     // refresh transient prima di agire. Con un object cache persistente il transient puo'
     // essere stantio/vuoto e wp_update_plugins() e' throttlato a 12h: l'upgrader vedrebbe
     // "up_to_date" (response mancante) e NON applicherebbe nulla. Cancellandolo prima, il
@@ -531,6 +709,25 @@ function tdpanop_update(WP_REST_Request $req)
     wp_update_plugins();
     wp_update_themes();
     wp_version_check();
+
+    // rimetti la voce a licenza se la ricostruzione l'ha persa (vedi sopra)
+    $reinjected = false;
+    if ($savedEntry !== null) {
+        $tname = $type === 'plugin' ? 'update_plugins' : 'update_themes';
+        $key   = $type === 'plugin' ? tdpanop_plugin_file_by_slug($slug) : $slug;
+        $cur   = get_site_transient($tname);
+        if (!is_object($cur)) {
+            $cur = new stdClass();
+        }
+        if (!isset($cur->response) || !is_array($cur->response)) {
+            $cur->response = [];
+        }
+        if (empty($cur->response[$key])) {
+            $cur->response[$key] = $savedEntry;
+            set_site_transient($tname, $cur);
+            $reinjected = true;
+        }
+    }
 
     $skin = new Automatic_Upgrader_Skin();
     $res  = null;
@@ -685,6 +882,39 @@ function tdpanop_update(WP_REST_Request $req)
         return new WP_REST_Response(['ok' => false, 'error' => $e->getMessage()], 200);
     }
 
+    if ($expected === '' && $panelExpected !== '') {
+        $expected = $panelExpected;
+    }
+
+    // La versione e' SALITA? Allora e' un aggiornamento riuscito, qualunque cosa abbia
+    // risposto l'upgrader: capita con i plugin a licenza che si aggiornano da soli o che
+    // arrivano a una versione diversa da quella annunciata (prima risultavano "falliti").
+    if ($type === 'plugin' || $type === 'theme') {
+        if ($verAfter !== '' && $verBefore !== '' && version_compare($verAfter, $verBefore, '>')) {
+            $out = ['ok' => true, 'error' => '', 'new' => $verAfter];
+            if ($reactivated !== null) {
+                $out['reactivated'] = (bool) $reactivated;
+            }
+            return new WP_REST_Response($out, 200);
+        }
+        // Non e' salita. Era gia' alla versione attesa? Allora non c'era niente da fare.
+        if ($verBefore !== '' && $expected !== '' && version_compare($verBefore, $expected, '>=')) {
+            return new WP_REST_Response(['ok' => true, 'noop' => true, 'error' => '', 'new' => $verBefore,
+                'message' => 'già alla versione ' . $verBefore], 200);
+        }
+        // Nessun pacchetto scaricabile per questo plugin/tema: tipico dei prodotti a licenza
+        // che si aggiornano solo dal backend del sito. Non e' un guasto: va fatto a mano.
+        $tcheck = get_site_transient($type === 'plugin' ? 'update_plugins' : 'update_themes');
+        $tkey   = $type === 'plugin' ? tdpanop_plugin_file_by_slug($slug) : $slug;
+        $tent   = ($tcheck && !empty($tcheck->response[$tkey])) ? $tcheck->response[$tkey] : null;
+        $pkg    = is_object($tent) ? ($tent->package ?? '') : (is_array($tent) ? ($tent['package'] ?? '') : '');
+        if ($pkg === '' || $res === false) {
+            return new WP_REST_Response(['ok' => false, 'manual' => true, 'current' => $verBefore, 'new' => $expected,
+                'error' => 'aggiornamento non disponibile da remoto: questo prodotto si aggiorna con la propria licenza '
+                         . 'dal backend del sito (Bacheca → Aggiornamenti)'], 200);
+        }
+    }
+
     // errore esplicito dall'upgrader
     if (is_wp_error($res)) {
         return new WP_REST_Response(['ok' => false, 'error' => $res->get_error_message(), 'current' => $verBefore], 200);
@@ -692,7 +922,7 @@ function tdpanop_update(WP_REST_Request $req)
 
     // SUCCESSO solo se la versione è davvero cambiata (ed è salita a quella attesa, se nota)
     $changed = ($verAfter !== '' && $verAfter !== $verBefore);
-    $reached = ($expected === '' || $verAfter === $expected);
+    $reached = ($expected === '' || $verAfter === $expected || version_compare($verAfter, $expected, '>='));
 
     if ($changed && $reached) {
         $out = ['ok' => true, 'error' => '', 'new' => $verAfter];
@@ -988,3 +1218,5 @@ add_action('init', function () {
     wp_safe_redirect(admin_url());
     exit;
 });
+
+} // fine blocco condizionale (vedi sopra)

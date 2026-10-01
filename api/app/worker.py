@@ -8,6 +8,7 @@ Niente loop busy: il "cron" è un solo cron job (tick) che fa da dispatcher.
 """
 from datetime import datetime, timezone, timedelta
 import asyncio
+import os
 import html
 import json
 import logging
@@ -30,6 +31,15 @@ from .i18n import DEFAULT_LANGUAGE, t
 from . import security
 
 log = logging.getLogger("panopticon.worker")
+# Il logger non aveva ne' livello ne' handler: ereditava il default di Python, che mostra
+# solo WARNING e superiori. Tutte le righe informative del ciclo (UPDATE OK, update non
+# necessario, report non inviato…) erano quindi invisibili in `docker compose logs worker`.
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
+    log.addHandler(_h)
+log.setLevel(logging.INFO)
+log.propagate = False
 
 _WHOIS_SERVERS: dict[str, str] = {}
 _RDAP_UNSUPPORTED_TLDS: set[str] = set()
@@ -84,6 +94,58 @@ def _registrable_domain(host: str) -> str:
     return ".".join(labels[-2:])
 
 
+# Registrar e nameserver rilevati durante l'ultimo lookup, per dominio: servono a
+# mostrare "dove e' registrato" senza una seconda interrogazione.
+_LAST_INFO: dict[str, dict] = {}
+
+
+def _rdap_info(payload: dict) -> dict:
+    """Registrar e nameserver da una risposta RDAP."""
+    registrar = ""
+    for ent in payload.get("entities") or []:
+        roles = [str(r).lower() for r in (ent.get("roles") or [])]
+        if "registrar" not in roles:
+            continue
+        # il nome sta nel vCard: ["vcard", [["fn", {}, "text", "Nome Registrar"], ...]]
+        for item in (ent.get("vcardArray") or [None, []])[1] or []:
+            if isinstance(item, list) and len(item) >= 4 and item[0] == "fn":
+                registrar = str(item[3]).strip()
+                break
+        if not registrar:
+            registrar = str(ent.get("handle") or "").strip()
+        if registrar:
+            break
+    ns = []
+    for n in payload.get("nameservers") or []:
+        name = str(n.get("ldhName") or "").strip().lower().rstrip(".")
+        if name:
+            ns.append(name)
+    return {"registrar": registrar[:200], "nameservers": ", ".join(sorted(set(ns))[:8])[:500]}
+
+
+def _whois_info(text_body: str) -> dict:
+    """Registrar e nameserver da un testo WHOIS."""
+    import re as _re
+    reg = ""
+    m = _re.search(r"(?im)^(?:registrar|registrar name|sponsoring registrar|registrar organization)\s*:\s*(.+)$", text_body)
+    if m:
+        reg = m.group(1).strip()
+    if not reg:
+        m = _re.search(r"(?is)registrar\s*\n\s*organization:\s*(.+?)\n", text_body)
+        if m:
+            reg = m.group(1).strip()
+    # Formato gTLD: "Name Server: ns1.example.com" (i due punti sono obbligatori, altrimenti
+    # l'intestazione "Nameservers" dei .it veniva letta come server "s").
+    ns = [x for x in _re.findall(r"(?im)^\s*(?:name server|nserver|nameserver)s?\s*:\s*(\S+)", text_body)]
+    # Formato .it e simili: intestazione "Nameservers" e poi un server per riga, indentato.
+    blk = _re.search(r"(?ims)^nameservers\s*\n((?:[ \t]+\S+[ \t]*\n?)+)", text_body)
+    if blk:
+        ns += blk.group(1).split()
+    ns = [x.strip().lower().rstrip(".") for x in ns]
+    ns = [x for x in ns if "." in x]          # solo nomi host veri
+    return {"registrar": reg[:200], "nameservers": ", ".join(sorted(set(ns))[:8])[:500]}
+
+
 async def _rdap_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datetime]:
     """Trova la scadenza del dominio registrabile via RDAP.
 
@@ -121,6 +183,7 @@ async def _rdap_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datet
             now = datetime.now(timezone.utc)
             future = [d for d in candidates if d >= now - timedelta(days=2)]
             canonical = str(payload.get("ldhName") or domain).lower().rstrip(".")
+            _LAST_INFO[canonical] = _rdap_info(payload)
             return canonical, min(future or candidates)
         except Exception as ex:  # noqa: BLE001
             errors.append(f"{base}: {ex}")
@@ -217,6 +280,7 @@ async def _whois_expiry(host: str) -> tuple[str, datetime]:
     )
 
     text = await _whois_query(server, domain.encode("idna").decode("ascii").lower(), timeout=8.0)
+    _LAST_INFO[domain] = _whois_info(text)
     dates: list[datetime] = []
     for m in expiry_re.finditer(text):
         dt = _parse_whois_date(m.group(1))
@@ -420,6 +484,7 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
                     error = str(ex)[:500]
                     log.info("Scadenza dominio '%s' non rilevata: %s", domain, ex)
 
+            info = _LAST_INFO.pop(resolved or domain, None) or _LAST_INFO.pop(domain, None) or {}
             out: list[dict] = []
             for site in members:
                 old_date = site.domain_expires_at.date() if site.domain_expires_at else None
@@ -430,6 +495,9 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
                     "domain_expires_at": expiry if expiry is not None else site.domain_expires_at,
                     "domain_check_error": error,
                     "reset_alert_state": bool(expiry and old_date != expiry.date()),
+                    # dove e' registrato: si aggiorna solo se il lookup l'ha rilevato
+                    "domain_registrar": info.get("registrar") or site.domain_registrar,
+                    "domain_nameservers": info.get("nameservers") or site.domain_nameservers,
                 })
             return out
 
@@ -448,6 +516,8 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
                 row.domain_checked_at = upd["domain_checked_at"]
                 row.domain_expires_at = upd["domain_expires_at"]
                 row.domain_check_error = upd["domain_check_error"]
+                row.domain_registrar = upd.get("domain_registrar") or ""
+                row.domain_nameservers = upd.get("domain_nameservers") or ""
                 if upd["reset_alert_state"]:
                     row.domain_alert_state = ""
             await s.commit()
@@ -477,11 +547,28 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
         source_expiry = next((x.domain_expires_at for x in members if x.domain_expires_at), None)
         if not source_expiry:
             continue
+        # Decisione di rinnovo: "" da decidere, "yes" si rinnova, "no" non si rinnova.
+        renew = next((x.domain_renew for x in members if x.domain_renew), "")
+        registrar = next((x.domain_registrar for x in members if x.domain_registrar), "")
+        note = next((x.domain_renew_note for x in members if x.domain_renew_note), "")
+        if renew == "no" and not prefs.get("domain_alert_norenew", 1):
+            continue                      # deciso: non si rinnova, e gli avvisi sono disattivati
+
+        # Soglie: a quelle di scadenza si aggiunge, per i domini ancora da decidere,
+        # un promemoria molto prima, per avere il tempo di sentire il cliente.
+        thresholds = list(prefs["domain_alert_days"])
+        decision_days = int(prefs.get("domain_decision_days") or 0)
+        if not renew and decision_days > 0 and decision_days not in thresholds:
+            thresholds.append(decision_days)
+
+        renew_label = {"yes": "Da rinnovare", "no": "Da NON rinnovare"}.get(renew, "Rinnovo da decidere")
+        extra_notes = [x for x in (representative.domain_check_error or "", renew_label,
+                                   f"Registrar: {registrar}" if registrar else "", note) if x]
         new_state, _ = await _dispatch_expiry(
-            kind="Dominio", item=domain, provider="Registro dominio",
-            notes=representative.domain_check_error or "",
+            kind="Dominio", item=domain, provider=registrar or "Registro dominio",
+            notes=" · ".join(extra_notes),
             expires_at=source_expiry, state_raw=source_state,
-            thresholds=prefs["domain_alert_days"],
+            thresholds=sorted(set(thresholds), reverse=True),
             site_name=", ".join(x.name for x in members), site_url=representative.url,
             silenced=all(x.notifications_silenced for x in members),
         )
@@ -648,7 +735,73 @@ async def tick(ctx):
 # --------------------------------------------------------------------------
 # Auto-update schedulato
 # --------------------------------------------------------------------------
-async def _update_one(site: Site, ext_type: str, slug: str) -> dict:
+# --------------------------------------------------------------------------
+# CONTROLLO VISIVO: istantanea della home prima e dopo gli aggiornamenti
+# --------------------------------------------------------------------------
+async def _visual_shot(site: Site, variant: str) -> dict | None:
+    """Istantanea della home ('before'/'after'). None se lo shooter non risponde:
+    il controllo visivo non deve mai bloccare gli aggiornamenti."""
+    try:
+        async with httpx.AsyncClient(timeout=150.0) as client:   # lo shooter fa una cattura alla volta
+            r = await client.post(f"{settings.SHOOTER_URL}/shot",
+                                  json={"site_id": site.id, "url": site.url, "variant": variant})
+            r.raise_for_status()
+            return r.json()
+    except Exception as ex:  # noqa: BLE001
+        log.warning("Istantanea %s non riuscita per '%s' (id=%s): %s", variant, site.name, site.id, ex)
+        return None
+
+
+async def _visual_compare(site: Site) -> dict | None:
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.post(f"{settings.SHOOTER_URL}/compare", json={"site_id": site.id})
+            r.raise_for_status()
+            return r.json()
+    except Exception as ex:  # noqa: BLE001
+        log.warning("Confronto visivo non riuscito per '%s' (id=%s): %s", site.name, site.id, ex)
+        return None
+
+
+VISUAL_DIFF_WARN = 35.0   # % di pixel cambiati oltre cui la home va guardata
+
+
+def _visual_verdict(before: dict | None, after: dict | None, cmp: dict | None) -> dict:
+    """ok / warn / ko / na, con un messaggio breve per email e Telegram.
+    Gli errori contano solo se NON c'erano gia' prima dell'aggiornamento."""
+    if not after:
+        return {"status": "na", "message": "controllo visivo non disponibile"}
+    b = before or {}
+    if after.get("error_text") and not b.get("error_text"):
+        return {"status": "ko", "message": "errore in home dopo l'aggiornamento: «%s»" % after["error_text"][:120]}
+    sa, sb = int(after.get("http_status") or 0), int(b.get("http_status") or 0)
+    if sa >= 500 and sb < 500:
+        return {"status": "ko", "message": f"la home risponde con errore HTTP {sa}"}
+    if cmp and cmp.get("blank_after") and not cmp.get("blank_before"):
+        return {"status": "ko", "message": "la home è diventata una pagina bianca"}
+    if not cmp or not before:
+        return {"status": "ok", "message": "home raggiungibile (confronto con il prima non disponibile)"}
+    diff = float(cmp.get("diff") or 0)
+    if diff >= VISUAL_DIFF_WARN:
+        return {"status": "warn", "diff": diff, "message": f"la home è cambiata del {diff:g}%: controlla che sia tutto a posto"}
+    return {"status": "ok", "diff": diff, "message": f"home invariata (differenza {diff:g}%)"}
+
+
+def _visual_attachments(site: Site) -> list:
+    """Le due istantanee, da allegare all'email quando la home va controllata."""
+    out = []
+    shots = os.getenv("SHOTS_DIR", "/data/screenshots")
+    for variant, label in (("before", "prima"), ("after", "dopo")):
+        path = os.path.join(shots, f"site_{site.id}_{variant}.jpg")
+        try:
+            with open(path, "rb") as f:
+                out.append((f"{label}-sito-{site.id}.jpg", "image/jpeg", f.read()))
+        except OSError:
+            pass
+    return out
+
+
+async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
     """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}."""
     headers = {
         "Authorization": f"Bearer {site.token}",
@@ -662,7 +815,7 @@ async def _update_one(site: Site, ext_type: str, slug: str) -> dict:
             if site.cms == "wp":
                 r = await client.post(
                     wp_rest_url(site, "update", f"_={cb}"),
-                    headers=headers, json={"type": ext_type, "slug": slug},
+                    headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or ""},
                 )
                 r.raise_for_status()
                 d = r.json()
@@ -688,7 +841,9 @@ async def _update_one(site: Site, ext_type: str, slug: str) -> dict:
                     d = payload[0] if payload else {"ok": False, "error": "risposta vuota", "new": ""}
                 else:
                     d = {"ok": False, "error": "formato risposta non valido", "new": ""}
-            return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", ""))}
+            return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", "")),
+                    "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
+                    "manual": bool(d.get("manual"))}
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -731,7 +886,9 @@ async def _vendor_update_one(site: Site, slug: str) -> dict:
                 d = payload[0] if payload else {"ok": False, "error": "risposta vuota", "new": ""}
             else:
                 d = {"ok": False, "error": "formato risposta non valido", "new": ""}
-            return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", ""))}
+            return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", "")),
+                    "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
+                    "manual": bool(d.get("manual"))}
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -893,7 +1050,7 @@ async def update_site(ctx, site_id: int):
             if (
                 e.update_failed_at is not None
                 and e.update_failed_version == (e.new_version or "")
-                and (now - e.update_failed_at) < cooldown
+                and (now - e.update_failed_at) < (max(cooldown, timedelta(hours=24)) if getattr(e, "update_manual", False) else cooldown)
             ):
                 skipped.append(e.name)
                 continue
@@ -909,6 +1066,9 @@ async def update_site(ctx, site_id: int):
         if not queue:
             return
 
+        # controllo visivo: istantanea della home PRIMA di toccare qualunque cosa
+        shot_before = await _visual_shot(site, "before")
+
         # 3) aggiorna UNA per volta, con pausa; registra successo/fallimento per il cooldown
         results = []
         for (ext, etype, slug, name, current) in queue:
@@ -919,7 +1079,56 @@ async def update_site(ctx, site_id: int):
             # forzato su vendorupdate causava un loop quando il canale offriva l'update:
             # vendorupdate diceva "gia' all'ultima" senza installare, la riga restava in
             # #__updates, e il pending (con notifica) rinasceva a ogni ciclo.
-            res = await _update_one(site, etype, slug)
+            res = await _update_one(site, etype, slug, expected=(ext.new_version if ext is not None else ""))
+
+            # PRODOTTO A LICENZA che non si aggiorna da remoto (es. Elementor Pro senza
+            # pacchetto scaricabile): non e' un guasto, va fatto dal backend del sito.
+            # Niente "fallito", niente notifica d'errore, riprova al massimo una volta al giorno.
+            if not res["ok"] and res.get("manual"):
+                log.info("UPDATE DA FARE A MANO '%s' (id=%s): %s %s -> %s (prodotto a licenza)",
+                         site.name, site.id, name, current, res["new"] or "?")
+                if ext is not None:
+                    ext.update_failed_at = datetime.now(timezone.utc)
+                    ext.update_failed_version = ext.new_version or ""
+                    ext.update_manual = True
+                results.append({"name": name, "from": current, "to": res["new"] or (ext.new_version if ext is not None else ""),
+                                "ok": False, "manual": True, "error": res.get("error") or ""})
+                await asyncio.sleep(settings.AUTOUPDATE_PAUSE_SECONDS)
+                continue
+
+            # NIENTE DA FARE: solo quando il CONNETTORE lo dichiara esplicitamente (noop).
+            # NON dedurlo da "versione uguale" o "versione assente": un pacchetto che non
+            # aggiorna la propria etichetta (Balbooa, ma puo' farlo qualunque produttore)
+            # farebbe sparire un aggiornamento VERO — niente storico, niente email, niente
+            # Telegram. E' successo nella 2.5.1: meglio un report in piu' che uno in meno.
+            nothing_done = bool(res["ok"]) and bool(res.get("noop"))
+            # Per il connettore "niente da installare" puo' comunque essere un cambio di
+            # versione per SENTINEL: con Balbooa il pannello vedeva 2.4.3.3 (etichetta del
+            # pacchetto) e dopo vede 2.4.3.4. Per l'utente e' un aggiornamento a tutti gli
+            # effetti: va nel report come "2.4.3.3 -> 2.4.3.4", nello storico e nelle statistiche.
+            ver_after = (res["new"] or "").strip()
+            if nothing_done and ver_after and (current or "").strip() and ver_after != (current or "").strip():
+                nothing_done = False
+            if nothing_done:
+                # Anche quando non c'era niente da installare, Sentinel HA AGITO su quel sito
+                # (ha ripulito la riga pendente): l'email e il Telegram partono comunque,
+                # scrivendo chiaramente "gia' aggiornato". Nascondere questi casi ha fatto
+                # sparire notifiche che l'utente si aspetta (2.5.1-2.5.4): mai piu'.
+                # Resta fuori SOLO dallo storico e dal rollup, per non gonfiare le statistiche.
+                log.info("UPDATE NON NECESSARIO '%s' (id=%s): %s resta a %s%s",
+                         site.name, site.id, name, current or "?",
+                         f" ({res.get('message')})" if res.get("message") else "")
+                if ext is not None:
+                    ext.update_failed_at = None
+                    ext.update_failed_version = ""
+                ver = (res["new"] or current or "").strip()
+                results.append({
+                    "name": f"{name} — già aggiornato, nessuna installazione necessaria",
+                    "from": ver, "to": ver, "ok": True, "error": "",
+                })
+                await asyncio.sleep(settings.AUTOUPDATE_PAUSE_SECONDS)
+                continue
+
             results.append({
                 "name": name, "from": current,
                 "to": res["new"] or "", "ok": res["ok"], "error": res["error"],
@@ -938,6 +1147,7 @@ async def update_site(ctx, site_id: int):
                     # successo: azzera eventuale cooldown
                     ext.update_failed_at = None
                     ext.update_failed_version = ""
+                    ext.update_manual = False
                 else:
                     # fallito: segna timestamp e versione target, cosi' non riprova ogni ora
                     ext.update_failed_at = datetime.now(timezone.utc)
@@ -964,10 +1174,32 @@ async def update_site(ctx, site_id: int):
         # lo stato vero (contatta i server di update); gira una sola volta per sito toccato.
         await apply_status(s, site, force=True)
         await s.commit()
+
+        # Nessun aggiornamento REALE in questo giro (solo "niente da fare", tipicamente la
+        # riga fantasma Balbooa appena ripulita): il re-check sopra serve comunque a
+        # registrare il nuovo stato, ma email e riepilogo Telegram non devono partire —
+        # altrimenti arriva un "0 aggiornati, 0 falliti" con la tabella vuota.
+        if not results:
+            log.info("Nessun aggiornamento reale per '%s' (id=%s): report non inviato", site.name, site.id)
+            return
+
+        # controllo visivo DOPO: solo se qualcosa e' cambiato davvero sul sito
+        visual = None
+        if any(r.get("ok") for r in results):
+            shot_after = await _visual_shot(site, "after")
+            cmp = await _visual_compare(site) if (shot_before and shot_after) else None
+            visual = _visual_verdict(shot_before, shot_after, cmp)
+            lvl = log.warning if visual["status"] in ("warn", "ko") else log.info
+            lvl("CONTROLLO HOME '%s' (id=%s): %s — %s", site.name, site.id, visual["status"], visual["message"])
+
         try:
             if not site.notifications_silenced:
-                await notify_dispatch("site_report", {"site_name": site.name, "site_url": site.url,
-                                      "cms": site.cms, "results": results})
+                ctx_report = {"site_name": site.name, "site_url": site.url, "cms": site.cms, "results": results}
+                if visual:
+                    ctx_report["visual"] = visual
+                    if visual["status"] in ("warn", "ko"):
+                        ctx_report["_attachments"] = _visual_attachments(site)
+                await notify_dispatch("site_report", ctx_report)
         except Exception as ex:  # noqa: BLE001
             # l'invio email non deve far fallire il job, ma l'errore va tracciato
             log.warning("Invio email report fallito per '%s' (id=%s): %s", site.name, site.id, ex)
@@ -979,7 +1211,17 @@ async def update_site(ctx, site_id: int):
             if site.notifications_silenced:
                 return
             n_ok = sum(1 for r in results if r["ok"])
-            n_fail = sum(1 for r in results if not r["ok"])
+            n_fail = sum(1 for r in results if not r["ok"] and not r.get("manual"))
+            redis = ctx["redis"]
+            for r in results:
+                if r.get("manual"):
+                    await redis.rpush("tg:cycle:manual_detail", f"{site.name}: {r['name']}")
+            if visual:
+                if visual["status"] == "ok":
+                    await redis.incr("tg:cycle:visual_ok")
+                elif visual["status"] in ("warn", "ko"):
+                    icon = "⚠️" if visual["status"] == "warn" else "🛑"
+                    await redis.rpush("tg:cycle:visual_detail", f"{icon} {site.name}: {visual['message']}")
             redis = ctx["redis"]
             if n_ok:
                 await redis.incrby("tg:cycle:applied", n_ok)
@@ -1000,11 +1242,12 @@ async def update_site(ctx, site_id: int):
             if n_fail:
                 await redis.incrby("tg:cycle:failed", n_fail)
                 for r in results:
-                    if not r["ok"]:
+                    if not r["ok"] and not r.get("manual"):
                         await redis.rpush("tg:cycle:failed_detail", f"{site.name}: {r['name']}")
             # TTL di sicurezza: i contatori si autodistruggono dopo 2h se qualcosa va storto
             for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
-                      "tg:cycle:failed_detail", "tg:cycle:ok_detail"):
+                      "tg:cycle:failed_detail", "tg:cycle:ok_detail",
+                      "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
                 await redis.expire(k, 7200)
         except Exception as ex:  # noqa: BLE001
             log.warning("Aggiornamento contatori Telegram fallito: %s", ex)
@@ -1023,7 +1266,8 @@ async def auto_update_cycle(ctx):
     try:
         redis = ctx["redis"]
         for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
-                  "tg:cycle:failed_detail", "tg:cycle:ok_detail"):
+                  "tg:cycle:failed_detail", "tg:cycle:ok_detail",
+                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
             await redis.delete(k)
     except Exception as ex:  # noqa: BLE001
         log.warning("Reset contatori Telegram fallito: %s", ex)
@@ -1070,7 +1314,8 @@ async def mass_update_now(ctx):
     try:
         redis = ctx["redis"]
         for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
-                  "tg:cycle:failed_detail", "tg:cycle:ok_detail"):
+                  "tg:cycle:failed_detail", "tg:cycle:ok_detail",
+                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
             await redis.delete(k)
     except Exception as ex:  # noqa: BLE001
         log.warning("Reset contatori Telegram (mass) fallito: %s", ex)
@@ -1115,7 +1360,8 @@ async def mass_update_selected(ctx, site_ids: list):
     try:
         redis = ctx["redis"]
         for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
-                  "tg:cycle:failed_detail", "tg:cycle:ok_detail"):
+                  "tg:cycle:failed_detail", "tg:cycle:ok_detail",
+                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
             await redis.delete(k)
     except Exception as ex:  # noqa: BLE001
         log.warning("Reset contatori Telegram (selected) fallito: %s", ex)
@@ -1148,9 +1394,21 @@ async def cycle_summary(ctx):
 
         failed_detail = _dec(await redis.lrange("tg:cycle:failed_detail", 0, -1))
         ok_detail = _dec(await redis.lrange("tg:cycle:ok_detail", 0, -1))
+        manual_detail = _dec(await redis.lrange("tg:cycle:manual_detail", 0, -1))
+        visual_detail = _dec(await redis.lrange("tg:cycle:visual_detail", 0, -1))
+        visual_ok = int(await redis.get("tg:cycle:visual_ok") or 0)
         if applied > 0 or failed > 0:
             MAX_ROWS = 30
             ok_lines = "\n".join(f"• {x}" for x in ok_detail[:MAX_ROWS]) + (f"\n…e altri {len(ok_detail) - MAX_ROWS} siti" if len(ok_detail) > MAX_ROWS else "")
+            # controllo della home dopo gli aggiornamenti
+            if visual_ok or visual_detail:
+                ok_lines += f"\n\n🖼 Controllo home: {visual_ok} ok" + (f", {len(visual_detail)} da guardare" if visual_detail else "")
+                if visual_detail:
+                    ok_lines += "\n" + "\n".join(visual_detail[:MAX_ROWS])
+            # prodotti a licenza da aggiornare dal backend del sito
+            if manual_detail:
+                ok_lines += "\n\n🔧 Da aggiornare a mano (licenza): " + str(len(manual_detail))
+                ok_lines += "\n" + "\n".join(f"• {x}" for x in manual_detail[:MAX_ROWS])
             failed_lines = "\n".join(f"• {x}" for x in failed_detail[:MAX_ROWS]) + (f"\n…e altri {len(failed_detail) - MAX_ROWS}" if len(failed_detail) > MAX_ROWS else "")
             await notify_dispatch("cycle_summary", {"applied": applied, "sites_touched": sites_touched, "failed": failed,
                                   "ok_lines": ok_lines, "failed_lines": failed_lines})

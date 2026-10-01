@@ -876,3 +876,94 @@ a.statrow:hover .nm { color: var(--acc); }
 .wd-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--acc), #7c5cff); }
 .wd-name { font-size: 12px; color: var(--txt-2); text-transform: capitalize; }
 .wd-val { font-size: 13px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ==========================================================================
+   Scadenze domini — gruppi per cartella e controllo del rinnovo
+   ========================================================================== */
+.dk-kpi .card { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.dk-kpi .card:hover { border-color: var(--bd-2); }
+.dk-kpi .card.on { border-color: var(--acc); box-shadow: 0 0 0 3px rgba(79,140,255,.12); }
+
+.dk-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.dk-tools .search { flex: 1; min-width: 240px; }
+.dk-folder { width: auto; min-width: 220px; max-width: 320px; }
+.dk-soon { white-space: nowrap; font-size: 13px; color: var(--txt-2); }
+.dk-sel { margin-bottom: 12px; gap: 10px; }
+
+.dk-tbl td { vertical-align: middle; }
+.dk-group td {
+  background: var(--panel-2); padding: 10px 14px !important; font-size: 13px;
+  border-top: 1px solid var(--bd); border-bottom: 1px solid var(--bd);
+}
+.dk-group td .ico { width: 15px; height: 15px; vertical-align: -3px; margin-right: 6px; color: var(--mut); }
+.dk-group .badge { margin-left: 10px; }
+.dk-name { font-weight: 600; font-size: 14px; }
+.dk-date { font-weight: 600; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.dk-note { margin-top: 5px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.dk-note a { color: var(--mut); text-decoration: none; }
+.dk-note a:hover { color: var(--acc); }
+
+/* controllo a tre stati: Rinnova · Da decidere · Non rinnova */
+.rn {
+  display: inline-flex; border: 1px solid var(--bd-2); border-radius: 8px; overflow: hidden;
+  background: var(--panel-2);
+}
+.rn button {
+  border: 0; background: transparent; color: var(--mut); font: inherit; font-size: 12px; font-weight: 500;
+  padding: 5px 10px; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s;
+}
+.rn button + button { border-left: 1px solid var(--bd-2); }
+.rn button:hover:not(:disabled) { color: var(--txt); background: rgba(255,255,255,.04); }
+.rn button:disabled { cursor: default; opacity: .6; }
+.rn button.yes.on  { background: var(--ok-bg);   color: var(--ok);   font-weight: 600; }
+.rn button.todo.on { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+.rn button.no.on   { background: var(--err-bg);  color: var(--err);  font-weight: 600; }
+/* nella barra delle azioni in blocco i tre bottoni sono azioni, colorati al passaggio */
+.dk-sel .rn button.yes:hover  { color: var(--ok); }
+.dk-sel .rn button.todo:hover { color: var(--warn); }
+.dk-sel .rn button.no:hover   { color: var(--err); }
+
+@media (max-width: 760px) {
+  .dk-folder { min-width: 0; flex: 1; }
+  .rn button { padding: 5px 7px; }
+}
+
+.dk-ns { margin-top: 2px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* fornitore del dominio: etichetta ben visibile sotto il nome */
+.dk-reg {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 5px; padding: 3px 9px 3px 7px;
+  border-radius: 7px; background: rgba(79,140,255,.10); border: 1px solid rgba(79,140,255,.28);
+  color: #d6e4ff; font-size: 12.5px; font-weight: 500; max-width: 100%;
+}
+.dk-reg .ico { width: 14px; height: 14px; flex: none; color: #8fb3ff; }
+.dk-reg span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-reg.none { background: transparent; border-color: var(--bd); color: var(--mut); font-weight: 400; }
+.dk-reg.none .ico { color: var(--mut); }
+.dk-sort { width: auto; min-width: 250px; }
+/* i due menu della barra restano compatti accanto alla ricerca */
+.dk-tools select.input { width: auto; flex: 0 0 auto; }
+@media (max-width: 900px) { .dk-tools select.input { flex: 1 1 200px; } }
+
+/* rinomina cartella: matita che compare passando sulla voce */
+.nav a .fold-edit {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px;
+  color: var(--mut); opacity: 0; transition: opacity .12s, background .12s, color .12s; flex: none;
+}
+.nav a:hover .fold-edit { opacity: 1; }
+.nav a .fold-edit:hover { color: var(--txt); background: rgba(255,255,255,.08); }
+.nav a .fold-edit .ico { width: 13px; height: 13px; }
+@media (hover: none) { .nav a .fold-edit { opacity: .55; } }
+
+/* bordo trascinabile della sidebar */
+.sb-resize {
+  position: fixed; top: 0; bottom: 0; left: calc(var(--sidebar-w) - 4px); width: 8px;
+  cursor: col-resize; z-index: 30;
+}
+.sb-resize::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+  background: transparent; transition: background .12s;
+}
+.sb-resize:hover::after, .sb-resize.drag::after { background: var(--acc); }
+body.sb-dragging, body.sb-dragging * { cursor: col-resize !important; user-select: none !important; }
+@media (max-width: 960px) { .sb-resize { display: none; } }

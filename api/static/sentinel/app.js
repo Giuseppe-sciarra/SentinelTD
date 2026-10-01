@@ -21,10 +21,10 @@ function sentinel() {
     sec: { summary: null, items: [], loading: false, sev: '' },
     conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false },
     brand: { logo_url: '/static/logo.png', favicon_url: '/static/favicon.png', custom_logo: false, custom_favicon: false, busy: false },
-    exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false },
+    exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, dSort: 'folder' },
     expiryForm: { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 }, expiryEdit: false, expiryErr: '',
     prefsLoaded: false,
-    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, busy: false, msg: '', err: '' },
+    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, busy: false, msg: '', err: '' },
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
@@ -43,6 +43,7 @@ function sentinel() {
 
     // ---------- init ----------
     async init() {
+      this.initSidebarResize();
       await this.loadBrand();
       this._readHash();
       window.addEventListener('hashchange', () => { this._readHash(); this._onRoute(); });
@@ -505,6 +506,165 @@ function sentinel() {
     },
 
     // ---------- scadenze domini + registro globale plugin/temi ----------
+    // ---------- scadenze domini: cartelle, rinnovo, registrar ----------
+    domainFolders() {
+      const map = {};
+      for (const d of this.exp.domains) for (const t of (d.tags || [])) map[t] = (map[t] || 0) + 1;
+      return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count }));
+    },
+    // cartella del dominio: stesse regole dei siti (una sottocartella appartiene anche al padre)
+    _domInFolder(d, folder) {
+      const tags = d.tags || [];
+      if (folder === '__none') return !tags.length;
+      return tags.some(t => t === folder || t.startsWith(folder + '/'));
+    },
+    // domini della cartella scelta + ricerca (senza il filtro di stato): base dei riquadri
+    domainScope() {
+      const f = (this.exp.dFilter || '').trim().toLowerCase();
+      return this.exp.domains.filter(d => {
+        if (this.exp.dFolder && !this._domInFolder(d, this.exp.dFolder)) return false;
+        if (f && !(d.name.includes(f) || (d.site_names || []).join(' ').toLowerCase().includes(f) ||
+                   (d.registrar || '').toLowerCase().includes(f) || (d.tags || []).join(' ').toLowerCase().includes(f))) return false;
+        return true;
+      });
+    },
+    domainRows() {
+      return this.domainScope().filter(d => {
+        if (this.exp.dRenew === 'todo' && d.renew) return false;
+        if (this.exp.dRenew === 'yes' && d.renew !== 'yes') return false;
+        if (this.exp.dRenew === 'no' && d.renew !== 'no') return false;
+        if (this.exp.dRenew === 'soon' && !(d.days !== null && d.days <= this.prefs.expiry_warning_days)) return false;
+        return true;
+      });
+    },
+    // Stesso fornitore scritto in modi diversi ("Register SPA", "Register S.p.A."):
+    // la chiave toglie forma societaria e punteggiatura, cosi' finiscono nello stesso gruppo.
+    _regKey(r) {
+      return (r || '').toLowerCase()
+        .replace(/\b(s\.?\s?p\.?\s?a\.?|s\.?\s?r\.?\s?l\.?|s\.?\s?a\.?\s?s\.?|s\.?\s?a\.?|b\.?\s?v\.?|ag|inc\.?|co\.?|ltd\.?|llc|gmbh|corp\.?|limited|domains?)\b/g, ' ')
+        .replace(/\.(com|net|it)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+    },
+    // Elenco raggruppato/ordinato secondo "Ordina per":
+    //  folder    -> gruppi per cartella (cliente), dentro per scadenza
+    //  registrar -> gruppi per fornitore, dentro per scadenza
+    //  name      -> elenco unico A-Z
+    //  expiry    -> elenco unico dalla scadenza piu' vicina
+    domainGroups() {
+      const rows = this.domainRows();
+      const byExpiry = (a, b) => ((a.days ?? 1e9) - (b.days ?? 1e9)) || a.name.localeCompare(b.name);
+      const mode = this.exp.dSort || 'folder';
+      if (mode === 'name') return [{ name: '', kind: '', system: true, rows: [...rows].sort((a, b) => a.name.localeCompare(b.name)) }];
+      if (mode === 'expiry') return [{ name: '', kind: '', system: true, rows: [...rows].sort(byExpiry) }];
+
+      const map = new Map();
+      for (const d of rows) {
+        let key, label, system = false;
+        if (mode === 'registrar') {
+          key = this._regKey(d.registrar) || '~';
+          label = d.registrar || 'Registrar non rilevato';
+          system = !d.registrar;
+        } else {
+          label = (d.tags && d.tags.length) ? d.tags[0].split('/')[0] : 'Senza cartella';
+          key = label === 'Senza cartella' ? '~' : label.toLowerCase();
+          system = label === 'Senza cartella';
+        }
+        if (!map.has(key)) map.set(key, { name: label, kind: mode, system, rows: [] });
+        map.get(key).rows.push(d);
+      }
+      return [...map.entries()]
+        .sort((a, b) => (a[0] === '~') - (b[0] === '~') || a[0].localeCompare(b[0]))
+        .map(([, g]) => ({ ...g, rows: g.rows.sort(byExpiry) }));
+    },
+    validNs(d) { return (d.nameservers || '').split(',').map(s => s.trim()).filter(s => s.includes('.')).join(' · '); },
+    // rinomina una cartella (o una sottocartella) su tutti i siti che la usano
+    async renameFolder(tag) {
+      const slash = tag.lastIndexOf('/');
+      const parent = slash >= 0 ? tag.slice(0, slash + 1) : '';
+      const current = slash >= 0 ? tag.slice(slash + 1) : tag;
+      let name = prompt(`Nuovo nome per la cartella "${current}"`, current);
+      if (name === null) return;
+      name = name.trim().replace(/^\/+|\/+$/g, '');
+      if (!name || name === current) return;
+      if (name.includes(',')) { this.say('La virgola non è ammessa nel nome della cartella'); return; }
+      const target = parent + name;
+      const merge = this.allTags.some(t => t.toLowerCase() === target.toLowerCase() && t.toLowerCase() !== tag.toLowerCase());
+      if (merge && !confirm(`La cartella "${target}" esiste già: le due cartelle verranno unite. Continuare?`)) return;
+      const r = await this.api('/api/sites/bulk/rename-folder', { method: 'POST', body: JSON.stringify({ from: tag, to: target }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.say(d.detail || 'Rinomina non riuscita'); return; }
+      // chi stava guardando la vecchia cartella resta sulla stessa, col nome nuovo
+      if (this.route.folder && (this.route.folder === tag || this.route.folder.startsWith(tag + '/')))
+        location.hash = '#/folder/' + encodeURIComponent(target + this.route.folder.slice(tag.length));
+      if (this.exp.dFolder === tag) this.exp.dFolder = target;
+      await this.load(true);
+      if (this.route.page === 'domain-expiries') this.loadDomainExpiries();
+      this.say(`Cartella rinominata in "${target}" su ${d.updated} ${this.pl(d.updated, 'sito', 'siti')}`);
+    },
+
+    // sidebar ridimensionabile: trascina il bordo destro, doppio clic per tornare alla larghezza standard
+    initSidebarResize() {
+      const KEY = 'sentinel-sidebar-w', MIN = 200, MAX = 460;
+      const root = document.documentElement;
+      const apply = (w) => root.style.setProperty('--sidebar-w', w + 'px');
+      try { const saved = parseInt(localStorage.getItem(KEY), 10); if (saved >= MIN && saved <= MAX) apply(saved); } catch (e) { }
+      let dragging = false;
+      document.addEventListener('pointerdown', (e) => {
+        const h = e.target.closest && e.target.closest('.sb-resize');
+        if (!h || e.button !== 0) return;
+        dragging = true; h.classList.add('drag'); document.body.classList.add('sb-dragging');
+        e.preventDefault();
+      });
+      document.addEventListener('pointermove', (e) => {
+        if (dragging) apply(Math.max(MIN, Math.min(MAX, Math.round(e.clientX))));
+      });
+      document.addEventListener('pointerup', () => {
+        if (!dragging) return;
+        dragging = false;
+        document.querySelectorAll('.sb-resize.drag').forEach(x => x.classList.remove('drag'));
+        document.body.classList.remove('sb-dragging');
+        try { localStorage.setItem(KEY, String(parseInt(getComputedStyle(root).getPropertyValue('--sidebar-w'), 10))); } catch (e) { }
+      });
+      document.addEventListener('dblclick', (e) => {
+        if (!(e.target.closest && e.target.closest('.sb-resize'))) return;
+        root.style.removeProperty('--sidebar-w');
+        try { localStorage.removeItem(KEY); } catch (e) { }
+      });
+    },
+
+    dToggle(name) { this.exp.dSel = this.exp.dSel.includes(name) ? this.exp.dSel.filter(x => x !== name) : [...this.exp.dSel, name]; },
+    dSelAll() { this.exp.dSel = [...new Set([...this.exp.dSel, ...this.domainRows().map(d => d.name)])]; },
+    dSelNone() { this.exp.dSel = []; },
+    renewLabel(v) { return v === 'yes' ? 'Si rinnova' : (v === 'no' ? 'Non si rinnova' : 'Da decidere'); },
+    renewCls(v) { return v === 'yes' ? 'ok' : (v === 'no' ? 'err' : 'warn'); },
+    async setRenew(domains, value, note) {
+      const list = Array.isArray(domains) ? domains : [domains];
+      if (!list.length) return;
+      this.exp.busy = true;
+      try {
+        const body = { domains: list, renew: value };
+        if (note !== undefined) body.note = note;
+        const r = await this.api('/api/domain-expiries/renew', { method: 'PATCH', body: JSON.stringify(body) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); this.say(d.detail || 'Non riuscito'); return; }
+        await this.loadDomainExpiries();
+        this.exp.dSel = [];
+        this.say(`${list.length} ${this.pl(list.length, 'dominio', 'domini')}: ${this.renewLabel(value).toLowerCase()}`);
+      } finally { this.exp.busy = false; }
+    },
+    async editRenewNote(d) {
+      const note = prompt(`Nota per ${d.name} (cliente, decisione, scadenza da concordare…)`, d.renew_note || '');
+      if (note === null) return;
+      await this.setRenew([d.name], d.renew || '', note);
+    },
+    async refreshWhois(domains) {
+      const list = Array.isArray(domains) ? domains : [domains];
+      this.exp.busy = true;
+      try {
+        const r = await this.api('/api/domain-expiries/scan', { method: 'POST', body: JSON.stringify({ domains: list }) });
+        if (!r.ok) { this.say('Aggiornamento non avviato'); return; }
+        this.say(list.length ? `Aggiornamento avviato per ${list.length} ${this.pl(list.length, 'dominio', 'domini')}` : 'Aggiornamento avviato');
+        setTimeout(() => { if (this.route.page === 'domain-expiries') this.loadDomainExpiries(); }, 12000);
+      } finally { this.exp.busy = false; }
+    },
     async loadDomainExpiries() {
       this.exp.loadingDomains = true;
       try { const r = await this.api('/api/domain-expiries'); if (r.ok) this.exp.domains = await r.json(); }
@@ -574,7 +734,8 @@ function sentinel() {
         // una nuova impostazione non richiede di ricordarsi di inserirla anche qui
         // (era successo con screenshot_every_hours: il valore non partiva e tornava al default).
         const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'expiry_warning_days',
-                          'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days'];
+                          'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days',
+                          'domain_decision_days', 'domain_alert_norenew'];
         const body = { domain_alert_days: da, component_alert_days: ca };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);

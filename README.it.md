@@ -25,11 +25,18 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   raggiunge solo i siti che hanno davvero quell'estensione
 - Storico degli aggiornamenti con, per ogni componente, quante volte è stato aggiornato e
   da quale versione a quale
+- **Controllo della home**: un'istantanea prima e dopo ogni aggiornamento; il report dice se
+  il sito è uguale, se è cambiato vistosamente (istantanee allegate) o se si è rotto
+- I prodotti a licenza che si aggiornano solo dal backend del sito (es. Elementor Pro)
+  risultano *da aggiornare a mano*, non falliti
 
 **Sicurezza e scadenze**
 - Vulnerabilità note confrontate con le estensioni realmente installate, con gravità e
   versione che risolve
 - **Scadenza dei domini** via RDAP con ripiego su WHOIS, e avvisi alle soglie che decidi tu
+- Per ogni dominio: **dove è registrato** (registrar e nameserver) e la **decisione di
+  rinnovo** — da decidere, si rinnova, non si rinnova — anche in blocco, con le cartelle e
+  un avviso in anticipo per avere il tempo di sentire il cliente
 - Rinnovi di licenze e abbonamenti (temi, plugin, hosting) con periodicità e il pulsante
   *Rinnovata* che sposta la data avanti di un periodo
 
@@ -45,7 +52,7 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 **Amministrazione**
 - Accesso con password, **TOTP** e **passkey**
 - Personalizzazione: il tuo logo e la tua favicon nel pannello, nei PDF e nelle email
-- Interfaccia in **italiano, inglese, francese e tedesco**
+- Interfaccia in **italiano, inglese, francese e tedesco**, connettori compresi
 - Pacchetti dei connettori generati dal pannello stesso, già col tuo indirizzo e la tua chiave
 
 ---
@@ -136,6 +143,7 @@ vedi `connectors/README.md`.
 | Cosa | Dove |
 |------|------|
 | Logo, favicon, nome del pannello | Impostazioni → Branding |
+| Rinominare una cartella | matita accanto alla cartella nella barra laterale |
 | Soglie di scadenza, frequenza scansioni, anteprime, conservazione cronologia | Impostazioni |
 | Indirizzo del pannello e chiave di registrazione per i connettori | Impostazioni → Connettori |
 | Testi, HTML e canali di ogni notifica | Notifiche |

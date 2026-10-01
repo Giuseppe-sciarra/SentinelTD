@@ -38,7 +38,9 @@ EVENTS: dict[str, dict[str, Any]] = {
             "ok_count": "Update riusciti", "failed_count": "Update falliti", "date": "Data e ora",
             "updates_table": "Tabella HTML degli update (per email)",
             "updates_lines": "Elenco testuale degli update (per Telegram)",
-            "results": "Lista grezza [{name, from, to, ok, error}] per template avanzati",
+            "results": "Lista grezza [{name, from, to, ok, manual, error}] per template avanzati",
+            "manual_count": "Prodotti da aggiornare a mano (licenza)",
+            "visual": "Controllo home prima/dopo: {status: ok|warn|ko|na, message, diff}",
         },
         "subject": "[Sentinel] {{ site_name }}: {{ ok_count }} aggiornati, {{ failed_count }} falliti",
         "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
@@ -259,11 +261,18 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
     if event == "site_report":
         results = out.get("results") or []
         out["ok_count"] = sum(1 for r in results if r.get("ok"))
-        out["failed_count"] = sum(1 for r in results if not r.get("ok"))
+        # i prodotti da aggiornare a mano (licenza) NON sono falliti
+        out["failed_count"] = sum(1 for r in results if not r.get("ok") and not r.get("manual"))
+        out["manual_count"] = sum(1 for r in results if r.get("manual"))
         rows, lines = [], []
         for r in results:
             name, frm, to = _esc(r.get("name")), _esc(r.get("from")), _esc(r.get("to"))
-            if r.get("ok"):
+            if r.get("manual"):
+                badge = ('<span style="color:#b26a00;font-weight:600">' + t("da aggiornare a mano", lang) + "</span> "
+                         '<span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>")
+                ver = f"{frm} &rarr; {to}" if to and to != frm else frm
+                lines.append(f"🔧 {name} {frm}→{to} — " + t("da aggiornare a mano", lang))
+            elif r.get("ok"):
                 badge = '<span style="color:#1a7f4b;font-weight:600">' + t("aggiornato", lang) + "</span>"
                 ver = f"{frm} &rarr; {to}" if to and to != frm else (to or frm)
                 lines.append(f"✅ {name} {frm}→{to}" if to and to != frm else f"✅ {name}")
@@ -284,6 +293,18 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
             f'<th style="padding:6px 10px">{t("Esito", lang)}</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table>'
         )
+        # controllo della home prima/dopo
+        vis = out.get("visual") or {}
+        if vis.get("status"):
+            icon, color = {"ok": ("✅", "#1a7f4b"), "warn": ("⚠️", "#b26a00"), "ko": ("🛑", "#b00020"),
+                           "na": ("ℹ️", "#888")}.get(vis["status"], ("ℹ️", "#888"))
+            msg = _esc(t(str(vis.get("message") or ""), lang))
+            extra = (" " + t("Le istantanee prima e dopo sono allegate.", lang)) if vis["status"] in ("warn", "ko") else ""
+            out["updates_table"] += (
+                f'<p style="margin:14px 0 0;padding:10px 12px;border-radius:8px;background:#f6f7f9;color:{color}">'
+                f'{icon} <b>{t("Controllo home", lang)}:</b> {msg}{_esc(extra)}</p>'
+            )
+            lines.append(f"\n{icon} {t('Controllo home', lang)}: {msg}")
         out["updates_lines"] = "\n".join(lines)
         out["cms"] = "WordPress" if str(out.get("cms", "")).lower() in ("wp", "wordpress") else ("Joomla" if out.get("cms") else "")
 
@@ -320,6 +341,9 @@ async def dispatch(event: str, ctx: dict) -> dict:
     if event not in EVENTS:
         return sent
     lang = DEFAULT_LANGUAGE
+    # gli allegati (es. istantanee prima/dopo) non passano dal template: vanno all'email
+    ctx = dict(ctx)
+    attachments = ctx.pop("_attachments", None) or []
     cfg = await get_config(event, lang)
     if not cfg.get("enabled", True):
         return sent
@@ -329,7 +353,7 @@ async def dispatch(event: str, ctx: dict) -> dict:
         r = render(event, default_config(event, lang), ctx, lang)
     if cfg.get("email"):
         try:
-            await send_report(r["subject"], r["body_email"])
+            await send_report(r["subject"], r["body_email"], attachments=attachments or None)
             sent["email"] = True
         except Exception as ex:  # noqa: BLE001
             log.warning("notify %s: email fallita: %s", event, ex)

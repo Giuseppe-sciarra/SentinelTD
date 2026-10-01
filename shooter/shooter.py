@@ -11,6 +11,7 @@ esposto all'esterno, vive solo sulla rete interna di compose.
 import asyncio
 import logging
 import os
+import time
 import re
 
 from fastapi import FastAPI, HTTPException, Body
@@ -66,10 +67,20 @@ async def shot(payload: dict = Body(...)):
     if not url.startswith(("http://", "https://")) or site_id <= 0:
         raise HTTPException(422, "url e site_id obbligatori")
 
-    name = f"site_{site_id}.jpg"                 # nome fisso: niente path arbitrari
+    # Variante "before"/"after": istantanee per il controllo visivo degli aggiornamenti.
+    # Nome sempre costruito qui (mai un path dal chiamante) e URL con parametro unico, cosi'
+    # la cache del reverse proxy non restituisce la pagina di prima dell'aggiornamento.
+    variant = str(payload.get("variant") or "").strip().lower()
+    if variant not in ("", "before", "after"):
+        raise HTTPException(422, "variant non valida")
+    if variant:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}sentinel_check={int(time.time())}"
+    name = f"site_{site_id}_{variant}.jpg" if variant else f"site_{site_id}.jpg"
     dest = os.path.join(SHOTS_DIR, name)
     tmp = dest + ".tmp"
     thumb = os.path.join(SHOTS_DIR, f"site_{site_id}_thumb.jpg")
+    http_status, error_text = 0, ""
 
     async with _lock:
         ctx = await _browser.new_context(
@@ -81,7 +92,8 @@ async def shot(payload: dict = Body(...)):
         )
         page = await ctx.new_page()
         try:
-            await page.goto(url, wait_until="networkidle", timeout=NAV_TIMEOUT)
+            resp = await page.goto(url, wait_until="networkidle", timeout=NAV_TIMEOUT)
+            http_status = resp.status if resp else 0
         except Exception:                        # noqa: BLE001
             # se "networkidle" non arriva (chat widget, polling, pubblicita') scatto lo stesso:
             # meglio un'anteprima imperfetta che nessuna anteprima
@@ -151,6 +163,14 @@ async def shot(payload: dict = Body(...)):
 
             # 3) respiro finale per font, animazioni d'ingresso e frame video
             await page.wait_for_timeout(SETTLE_MS)
+
+            # segni inequivocabili di sito rotto nel testo della pagina
+            if variant:
+                try:
+                    body_text = await page.evaluate("document.body ? document.body.innerText.slice(0, 30000) : ''")
+                    error_text = _find_error_text(body_text or "")
+                except Exception:  # noqa: BLE001
+                    pass
             await page.screenshot(path=tmp, type="jpeg", quality=QUALITY, full_page=False,
                                   animations="disabled")
         finally:
@@ -158,6 +178,10 @@ async def shot(payload: dict = Body(...)):
             await ctx.close()
 
     os.replace(tmp, dest)                        # scrittura atomica: mai un file mezzo scritto
+
+    if variant:
+        log.info("istantanea %s: %s (%s) http=%s", variant, name, url, http_status)
+        return {"path": name, "http_status": http_status, "error_text": error_text}
 
     # Miniatura per la lista siti: senza, il pannello caricherebbe 40+ screenshot a
     # piena risoluzione a ogni apertura (megabyte inutili). ~10 KB l'una.
@@ -173,3 +197,51 @@ async def shot(payload: dict = Body(...)):
 
     log.info("screenshot ok: %s (%s)", name, url)
     return {"path": name}
+
+
+# Frasi che compaiono solo quando un sito e' rotto (WordPress, Joomla, PHP, server).
+_ERROR_PATTERNS = [
+    "there has been a critical error", "si è verificato un errore critico", "errore critico",
+    "error establishing a database connection", "errore nello stabilire una connessione al database",
+    "briefly unavailable for scheduled maintenance", "temporaneamente non disponibile per una manutenzione",
+    "fatal error:", "parse error:", "uncaught error", "uncaught exception",
+    "internal server error", "service unavailable", "bad gateway",
+    "the website is temporarily unable to service", "500 - errore",
+]
+
+
+def _find_error_text(text: str) -> str:
+    low = text.lower()
+    for p in _ERROR_PATTERNS:
+        i = low.find(p)
+        if i >= 0:
+            return text[max(0, i - 10): i + 140].strip().replace("\n", " ")
+    return ""
+
+
+@app.post("/compare")
+async def compare(payload: dict = Body(...)):
+    """Confronta le istantanee prima/dopo di un sito.
+
+    diff  = percentuale di pixel cambiati in modo evidente (immagini ridotte a 240x150,
+            scala di grigi, soglia 40/255: ignora compressione JPEG e piccoli spostamenti)
+    blank = la pagina dopo e' praticamente uniforme (pagina bianca o solo sfondo)
+    """
+    from PIL import Image, ImageChops, ImageStat
+    site_id = int(payload.get("site_id") or 0)
+    if site_id <= 0:
+        raise HTTPException(422, "site_id obbligatorio")
+    a = os.path.join(SHOTS_DIR, f"site_{site_id}_before.jpg")
+    b = os.path.join(SHOTS_DIR, f"site_{site_id}_after.jpg")
+    if not (os.path.isfile(a) and os.path.isfile(b)):
+        raise HTTPException(404, "istantanee mancanti")
+    size = (240, 150)
+    with Image.open(a) as ia, Image.open(b) as ib:
+        ga = ia.convert("L").resize(size, Image.BILINEAR)
+        gb = ib.convert("L").resize(size, Image.BILINEAR)
+    diff = ImageChops.difference(ga, gb)
+    changed = sum(1 for v in diff.getdata() if v > 40)
+    pct = round(changed * 100 / (size[0] * size[1]), 1)
+    blank_after = ImageStat.Stat(gb).stddev[0] < 6
+    blank_before = ImageStat.Stat(ga).stddev[0] < 6
+    return {"diff": pct, "blank_after": blank_after, "blank_before": blank_before}

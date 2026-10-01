@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,25 +120,94 @@ async def list_domain_expiries(s: AsyncSession = Depends(get_session)):
         expiry = with_expiry.domain_expires_at if with_expiry else None
         checked = max((x.domain_checked_at for x in members if x.domain_checked_at), default=None)
         errors = [x.domain_check_error for x in members if x.domain_check_error]
+        tags: list[str] = []
+        for x in members:
+            for t in (x.tags or "").split(","):
+                t = t.strip()
+                if t and t not in tags:
+                    tags.append(t)
+        renew = next((x.domain_renew for x in members if x.domain_renew), "")
+        decided = next((x.domain_renew_at for x in members if x.domain_renew_at), None)
         domains.append({
             "id": f"domain:{domain}",
             "name": domain,
             "site_names": [x.name for x in members],
             "site_ids": [x.id for x in members],
             "site_count": len(members),
+            "tags": tags,
             "expires_at": expiry.isoformat() if expiry else None,
             "days": _days(expiry),
             "checked_at": checked.isoformat() if checked else None,
             "error": errors[0] if errors else "",
+            "registrar": next((x.domain_registrar for x in members if x.domain_registrar), ""),
+            "nameservers": next((x.domain_nameservers for x in members if x.domain_nameservers), ""),
+            "renew": renew,
+            "renew_note": next((x.domain_renew_note for x in members if x.domain_renew_note), ""),
+            "renew_at": decided.isoformat() if decided else None,
         })
     domains.sort(key=lambda x: (x["days"] is None, x["days"] if x["days"] is not None else 10**9, x["name"]))
     return domains
 
 
 @router.post("/domain-expiries/scan")
-async def scan_domains_now():
-    await _enqueue("domain_expiry_scan", True, None)
-    return {"queued": True}
+async def scan_domains_now(payload: dict = Body(default={}), s: AsyncSession = Depends(get_session)):
+    """Aggiorna i dati del registro (scadenza, registrar, nameserver).
+
+    Senza corpo aggiorna tutti i domini; con {"domains": [...]} solo quelli scelti:
+    lo scan lavora per dominio registrabile, quindi basta un sito per gruppo.
+    """
+    names = [str(x).strip().lower().strip(".") for x in (payload.get("domains") or []) if str(x).strip()]
+    if not names:
+        await _enqueue("domain_expiry_scan", True, None)
+        return {"queued": "all"}
+
+    sites = (await s.execute(select(Site))).scalars().all()
+    seen: set[str] = set()
+    queued = 0
+    for site in sites:
+        d = (_registrable_from_url(site.domain_name or site.url) or "").lower().strip(".")
+        if d in names and d not in seen:
+            seen.add(d)
+            await _enqueue("domain_expiry_scan", True, site.id)
+            queued += 1
+    if not queued:
+        raise HTTPException(404, "Nessun dominio corrispondente")
+    return {"queued": queued}
+
+
+@router.patch("/domain-expiries/renew")
+async def set_domain_renew(payload: dict = Body(...), s: AsyncSession = Depends(get_session)):
+    """Imposta la decisione di rinnovo su uno o piu' domini.
+
+    La decisione appartiene al DOMINIO: se piu' siti condividono lo stesso dominio
+    registrabile, viene scritta su tutti, altrimenti l'elenco mostrerebbe valori diversi
+    per la stessa registrazione.
+    """
+    renew = str(payload.get("renew") or "").strip().lower()
+    if renew not in ("", "yes", "no"):
+        raise HTTPException(422, "Valore non valido: usa yes, no oppure vuoto")
+    names = {str(x).strip().lower().strip(".") for x in (payload.get("domains") or []) if str(x).strip()}
+    if not names:
+        raise HTTPException(422, "Nessun dominio indicato")
+    note = str(payload.get("note") or "")[:500]
+    has_note = "note" in payload
+
+    sites = (await s.execute(select(Site))).scalars().all()
+    touched = 0
+    for site in sites:
+        d = (_registrable_from_url(site.domain_name or site.url) or "").lower().strip(".")
+        if d not in names:
+            continue
+        site.domain_renew = renew
+        site.domain_renew_at = datetime.now(timezone.utc) if renew else None
+        if has_note:
+            site.domain_renew_note = note
+        site.domain_alert_state = ""      # la decisione cambia gli avvisi: riparti pulito
+        touched += 1
+    if not touched:
+        raise HTTPException(404, "Nessun dominio corrispondente")
+    await s.commit()
+    return {"updated": touched, "domains": sorted(names), "renew": renew}
 
 
 # ---------------------------------------------------------------------------

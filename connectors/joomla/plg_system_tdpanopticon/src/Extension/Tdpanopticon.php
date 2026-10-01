@@ -109,7 +109,8 @@ final class Tdpanopticon extends CMSPlugin
                 }
             }
             $installed[(int) $row->extension_id] = [
-                'name'    => $row->name,
+                // il nome di questo connettore e' una chiave di lingua: al pannello va un nome leggibile
+                'name'    => ($row->name === 'PLG_SYSTEM_TDPANOPTICON') ? 'Sentinel TD Agent (Joomla)' : $row->name,
                 'type'    => $row->type,
                 'element' => $row->element,
                 'version' => $ver,
@@ -444,14 +445,30 @@ final class Tdpanopticon extends CMSPlugin
             if (in_array(strtolower($slug), $vendorAliases, true)) {
                 return $this->doVendorUpdateBySlug(strtolower($slug));
             }
-            return ['ok' => true, 'error' => '', 'new' => 'nessun update'];
+            return ['ok' => true, 'noop' => true, 'error' => '', 'new' => '', 'message' => 'nessun update'];
         }
 
         // l'eid su cui agire e' quello che ha l'update (importante per leggere la versione giusta)
 
+        // Prodotto Balbooa? La versione di riferimento e' quella vera (max pacchetto/componente),
+        // non quella del solo pacchetto, che Balbooa non aggiorna.
+        $balbooa = $this->balbooaConfig($slug);
+
         // versione + stato di pubblicazione PRIMA dell'update
-        $verBefore = $this->readInstalledVersion($db, $eid);
+        $verBefore = $balbooa ? $this->balbooaRealVersion($db, $balbooa) : $this->readInstalledVersion($db, $eid);
         $wasEnabled = $this->isExtensionEnabled($db, $eid);
+
+        // Riga stantia: il canale annuncia una versione che NON supera quella installata.
+        // Non c'e' niente da installare: pulisci e dillo chiaramente, senza contarlo come
+        // aggiornamento (era questo a produrre le righe "2.4.3.3 -> 2.4.3.3" nei report).
+        if ($verBefore !== '' && $expected !== '' && version_compare($expected, $verBefore, '<=')) {
+            if ($balbooa) {
+                $this->alignBalbooaPackage($db, $balbooa, $verBefore);
+            }
+            $this->clearUpdateRows($db, $slug, $eids);
+            return ['ok' => true, 'noop' => true, 'error' => '', 'new' => $verBefore,
+                    'current' => $verBefore, 'message' => 'nessun aggiornamento disponibile'];
+        }
 
         try {
             $factory = $app->bootComponent('com_installer')->getMVCFactory();
@@ -462,8 +479,12 @@ final class Tdpanopticon extends CMSPlugin
 
             $model->update([$updateId]);
 
-            // versione installata DOPO l'update
-            $verAfter = $this->readInstalledVersion($db, $eid);
+            // versione installata DOPO l'update (per Balbooa: quella vera, e riallinea il pacchetto)
+            $verAfter = $balbooa ? $this->balbooaRealVersion($db, $balbooa) : $this->readInstalledVersion($db, $eid);
+            if ($balbooa && $verAfter !== '') {
+                $this->alignBalbooaPackage($db, $balbooa, $verAfter);
+                $this->clearUpdateRows($db, $slug, $eids);
+            }
 
             // RIATTIVAZIONE: se l'estensione era abilitata prima ma l'update l'ha
             // lasciata disabilitata, ripristina lo stato enabled=1.
@@ -732,9 +753,35 @@ final class Tdpanopticon extends CMSPlugin
         return $this->doVendorUpdateBySlug(strtolower(Factory::getApplication()->getInput()->getString('slug', '')));
     }
 
-    private function doVendorUpdateBySlug(string $slug): array
+    /**
+     * Toglie da #__updates le righe relative a un'estensione.
+     *
+     * Serve quando il canale annuncia un update che in realta' non esiste (versione
+     * annunciata <= installata): senza questa pulizia la riga resta, il pannello continua
+     * a vedere un aggiornamento "pendente" e a ogni ciclo parte un update che non fa nulla.
+     */
+    private function clearUpdateRows($db, string $element, array $eids = []): void
     {
+        try {
+            $q = $db->getQuery(true)->delete($db->quoteName('#__updates'));
+            $where = [$db->quoteName('element') . ' = ' . $db->quote($element)];
+            if ($eids) {
+                $ids = implode(',', array_map('intval', $eids));
+                $where[] = $db->quoteName('extension_id') . ' IN (' . $ids . ')';
+            }
+            $q->where('(' . implode(' OR ', $where) . ')');
+            $db->setQuery($q)->execute();
+        } catch (\Throwable $e) {
+            // pulizia best-effort: se fallisce non compromette l'update
+        }
+    }
 
+    /**
+     * Configurazione dei prodotti Balbooa, dato uno slug qualsiasi del prodotto
+     * (pkg_BaForms, com_baforms, baforms…). null se lo slug non e' Balbooa.
+     */
+    private function balbooaConfig(string $slug): ?array
+    {
         // Per ogni prodotto: package element, tabella token (gate licenza), URL del file API
         // pubblico, nome della variabile JS in quel file, nome del file zip temporaneo.
         $map = [
@@ -759,11 +806,76 @@ final class Tdpanopticon extends CMSPlugin
             'pkg_baforms' => 'baforms', 'com_baforms' => 'baforms', 'baforms' => 'baforms',
             'pkg_gallery' => 'gallery', 'com_gallery' => 'gallery', 'gallery' => 'gallery',
         ];
-        $key = $aliases[$slug] ?? '';
-        if ($key === '' || !isset($map[$key])) {
+        $key = $aliases[strtolower($slug)] ?? '';
+        return ($key !== '' && isset($map[$key])) ? $map[$key] : null;
+    }
+
+    /**
+     * Versione VERA di un prodotto Balbooa: la piu' alta tra pacchetto e componente.
+     * Balbooa aggiorna il componente ma lascia il pacchetto alla versione vecchia
+     * (pkg_BaForms 2.4.3.3 con com_baforms 2.4.3.4): leggere il solo pacchetto fa sembrare
+     * "non aggiornato" un prodotto che lo e'.
+     */
+    private function balbooaRealVersion($db, array $c): string
+    {
+        $verPkg = $this->readInstalledVersionByElement($db, $c['pkg'], 'package');
+        $verCom = isset($c['com']) ? $this->readInstalledVersionByElement($db, $c['com'], 'component') : '';
+        if ($verCom !== '' && version_compare($verCom, $verPkg ?: '0', '>')) {
+            return $verCom;
+        }
+        return $verPkg ?: $verCom;
+    }
+
+    /**
+     * Porta la versione registrata del PACCHETTO Balbooa alla versione vera del prodotto.
+     *
+     * E' la causa del fantasma: Joomla confronta la versione del pacchetto (ferma) con
+     * quella annunciata dal canale e ricrea la riga in #__updates a ogni ricerca. Con il
+     * pacchetto riallineato il confronto torna pari e la riga non viene piu' ricreata.
+     * Si tocca SOLO il campo version della cache del manifest, e solo se e' piu' bassa.
+     */
+    private function alignBalbooaPackage($db, array $c, string $version): void
+    {
+        if ($version === '') {
+            return;
+        }
+        try {
+            $q = $db->getQuery(true)
+                ->select($db->quoteName(['extension_id', 'manifest_cache']))
+                ->from($db->quoteName('#__extensions'))
+                ->where($db->quoteName('element') . ' = ' . $db->quote($c['pkg']))
+                ->where($db->quoteName('type') . ' = ' . $db->quote('package'));
+            $db->setQuery($q);
+            $row = $db->loadObject();
+            if (!$row) {
+                return;
+            }
+            $mc = json_decode((string) $row->manifest_cache, true);
+            if (!is_array($mc)) {
+                return;
+            }
+            $current = (string) ($mc['version'] ?? '');
+            if ($current !== '' && version_compare($current, $version, '>=')) {
+                return;
+            }
+            $mc['version'] = $version;
+            $u = $db->getQuery(true)
+                ->update($db->quoteName('#__extensions'))
+                ->set($db->quoteName('manifest_cache') . ' = ' . $db->quote(json_encode($mc)))
+                ->where($db->quoteName('extension_id') . ' = ' . (int) $row->extension_id);
+            $db->setQuery($u)->execute();
+        } catch (\Throwable $e) {
+            // best-effort: se non riesce, al peggio il fantasma resta (senza email)
+        }
+    }
+
+    private function doVendorUpdateBySlug(string $slug): array
+    {
+        $c = $this->balbooaConfig($slug);
+        if ($c === null) {
             return ['ok' => false, 'error' => 'vendor non gestito: ' . $slug];
         }
-        return $this->updateBalbooaProduct($map[$key]);
+        return $this->updateBalbooaProduct($c);
     }
 
     /**
@@ -834,9 +946,19 @@ final class Tdpanopticon extends CMSPlugin
             return ['ok' => false, 'error' => 'Versione non trovata nel file API Balbooa'];
         }
 
-        // 5) niente da fare se non e' piu' recente
+        // 5) niente da fare se non e' piu' recente.
+        // NON e' un aggiornamento applicato: va segnalato come tale ('noop'), altrimenti il
+        // pannello registra una riga "X -> X" e la conta fra gli update riusciti. In piu'
+        // togliamo la riga fantasma da #__updates, che altrimenti fa ripartire il giro a
+        // ogni ciclo (tipico dei prodotti Balbooa quando il loro canale resta indietro).
         if (version_compare($verNew, $verBefore, '<=')) {
-            return ['ok' => true, 'error' => '', 'new' => $verBefore];
+            $this->alignBalbooaPackage($db, $c, $verBefore);
+            $this->clearUpdateRows($db, $c['pkg']);
+            if (!empty($c['com'])) {
+                $this->clearUpdateRows($db, $c['com']);
+            }
+            return ['ok' => true, 'noop' => true, 'error' => '', 'new' => $verBefore,
+                    'current' => $verBefore, "message" => "già all'ultima versione"];
         }
 
         // 6) c'e' update: estrai il pacchetto base64 (proprieta' <jsvar>.package)
@@ -873,6 +995,8 @@ final class Tdpanopticon extends CMSPlugin
             $verAfterPkg = $this->readInstalledVersionByElement($db, $c['pkg'], 'package');
             $verAfterCom = isset($c['com']) ? $this->readInstalledVersionByElement($db, $c['com'], 'component') : '';
             $verAfter = ($verAfterCom !== '' && version_compare($verAfterCom, $verAfterPkg ?: '0', '>')) ? $verAfterCom : ($verAfterPkg ?: $verAfterCom);
+            $this->alignBalbooaPackage($db, $c, $verAfter ?: $verNew);
+            $this->clearUpdateRows($db, $c['pkg']);
             return ['ok' => true, 'error' => '', 'new' => $verAfter ?: $verNew];
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => $e->getMessage()];

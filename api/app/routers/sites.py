@@ -122,6 +122,49 @@ async def bulk_update_selected(
     return {"queued": len(rows), "sites": [site.name for site in rows]}
 
 
+@router.post("/bulk/rename-folder")
+async def rename_folder(payload: dict = Body(...), s: AsyncSession = Depends(get_session)):
+    """Rinomina una cartella su tutti i siti che la usano.
+
+    Una cartella e' un tag sui siti: rinominarla vuol dire sostituire il tag ovunque.
+    Si porta dietro anche le sottocartelle ("Vecchio/Sotto" -> "Nuovo/Sotto"). Se il
+    nome nuovo esiste gia', le due cartelle si uniscono senza creare doppioni.
+    """
+    old = str(payload.get("from") or "").strip().strip("/")
+    new = str(payload.get("to") or "").strip().strip("/")
+    if not old or not new:
+        raise HTTPException(422, "Indica il nome attuale e quello nuovo")
+    if "," in new:
+        raise HTTPException(422, "La virgola non e' ammessa: separa le cartelle")
+    if len(new) > 100:
+        raise HTTPException(422, "Nome troppo lungo")
+    if old == new:
+        return {"updated": 0, "from": old, "to": new}
+
+    old_lc = old.lower()
+    rows = (await s.execute(select(Site))).scalars().all()
+    updated = 0
+    for site in rows:
+        tags = _tag_list(site.tags)
+        out, seen = [], set()
+        for t in tags:
+            tl = t.lower()
+            if tl == old_lc:
+                t = new
+            elif tl.startswith(old_lc + "/"):
+                t = new + t[len(old):]
+            if t.lower() not in seen:
+                out.append(t)
+                seen.add(t.lower())
+        if out != tags:
+            site.tags = ",".join(out)
+            updated += 1
+    if not updated:
+        raise HTTPException(404, "Nessun sito si trova in quella cartella")
+    await s.commit()
+    return {"updated": updated, "from": old, "to": new}
+
+
 @router.post("/bulk/tags")
 async def bulk_tags(payload: BulkTagsIn, s: AsyncSession = Depends(get_session)):
     """

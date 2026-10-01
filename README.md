@@ -25,11 +25,18 @@ Your server, your data, your branding.
   sites that actually have that extension
 - Update history with, for every component, how many times it was updated and from which
   version to which
+- **Homepage check**: a snapshot before and after every update; the report says whether the
+  site looks the same, changed noticeably (snapshots attached) or broke
+- Licensed products that only update from the site's own admin (e.g. Elementor Pro) are
+  reported as *to update manually*, not as failures
 
 **Security and renewals**
 - Vulnerability feed matched against the extensions actually installed, with severity and
   the version that fixes each issue
 - **Domain expiry** through RDAP with WHOIS fallback, with reminders at your own thresholds
+- For every domain: **where it is registered** (registrar and nameservers) and a **renewal
+  decision** — to decide, renew, do not renew — set one by one or in bulk, with folders and
+  an early reminder so there is time to ask the client
 - Licence and subscription renewals (themes, plugins, hosting) with recurring periods and
   a *Renewed* button that moves the date forward by one period
 
@@ -44,7 +51,7 @@ Your server, your data, your branding.
 **Administration**
 - Password sign-in with **TOTP** and **passkeys**
 - Branding: your logo and favicon in the panel, in the PDFs and in the emails
-- Interface in **Italian, English, French and German**
+- Interface in **Italian, English, French and German**, connectors included
 - Connector packages built by the panel itself, already carrying your address and key
 
 ---
@@ -133,6 +140,7 @@ no address, no key — so anyone can build their own; see `connectors/README.md`
 | What | Where |
 |------|-------|
 | Logo, favicon, panel name | Settings → Branding |
+| Rename a folder | pencil next to the folder in the sidebar |
 | Expiry thresholds, scan frequency, preview refresh, history retention | Settings |
 | Panel address and registration key for the connectors | Settings → Connectors |
 | Text, HTML and channels of every notification | Notifications |
