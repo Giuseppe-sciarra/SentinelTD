@@ -1063,7 +1063,7 @@
               x-text="sites.length+' siti monitorati'"></span></div>
         </div>
         <div class="sp"></div>
-        <button class="ghost hdr-btn" @click="massUpdate()" :disabled="massBusy" title="Aggiorna subito i siti con update pending">
+        <button class="ghost hdr-btn" @click="massUpdate()" :disabled="!!(massBusy)" title="Aggiorna subito i siti con update pending">
           <span x-show="!massBusy">⬆ Aggiorna tutto</span>
           <span x-show="massBusy">Avvio…</span>
         </button>
@@ -1165,12 +1165,12 @@
           <span class="cnt" x-text="selIds.length + ' selezionati'"></span>
           <button @click="selectAllFiltered()" x-text="allFilteredSelected?'Deseleziona tutti':'Seleziona tutti'"></button>
           <span class="sp"></span>
-          <button class="primary" :disabled="!selIds.length || massBusy" @click="massUpdateSelected()">
+          <button class="primary" :disabled="!!(!selIds.length || massBusy)" @click="massUpdateSelected()">
             <span x-show="!massBusy">⬆ Aggiorna selezionati</span>
             <span x-show="massBusy">Avvio…</span>
           </button>
-          <button :disabled="!selIds.length" @click="openTagModal('add')">+ Aggiungi tag</button>
-          <button class="danger" :disabled="!selIds.length" @click="openTagModal('remove')">− Rimuovi tag</button>
+          <button :disabled="!!(!selIds.length)" @click="openTagModal('add')">+ Aggiungi tag</button>
+          <button class="danger" :disabled="!!(!selIds.length)" @click="openTagModal('remove')">− Rimuovi tag</button>
         </div>
       </template>
 
@@ -1365,7 +1365,7 @@
         <div class="row" style="gap:8px;margin-top:14px">
           <div class="sp"></div>
           <button @click="tagModal=null">Annulla</button>
-          <button class="primary" :disabled="tagBusy" @click="applyTags()"
+          <button class="primary" :disabled="!!(tagBusy)" @click="applyTags()"
             x-text="tagModal==='add' ? 'Aggiungi' : 'Rimuovi'"></button>
         </div>
       </div>
@@ -1541,7 +1541,7 @@
             <a class="btn-like" :href="connDownloadUrl(c.kind)" x-show="c.present" download>⬇ Scarica</a>
             <label class="btn-like" :class="connBusy?'dis':''">
               <span x-text="c.present ? 'Sostituisci' : 'Carica'"></span>
-              <input type="file" accept=".zip" style="display:none" :disabled="connBusy" @change="uploadConn(c.kind, $event)">
+              <input type="file" accept=".zip" style="display:none" :disabled="!!(connBusy)" @change="uploadConn(c.kind, $event)">
             </label>
           </div>
         </template>
@@ -1604,7 +1604,7 @@
           <div class="row" style="gap:8px">
             <input type="text" x-model="inst.q" placeholder="nome o slug, es. panopticon"
               @keydown.enter="instSearch()" style="flex:1">
-            <button @click="instSearch()" :disabled="inst.searchBusy || inst.q.trim().length<2"
+            <button @click="instSearch()" :disabled="!!(inst.searchBusy || inst.q.trim().length<2)"
               x-text="inst.searchBusy?'…':'Cerca'"></button>
           </div>
           <div class="err-msg" x-show="inst.searchErr" x-text="inst.searchErr"></div>
@@ -1615,7 +1615,7 @@
                 <div style="border-bottom:1px solid var(--bd)">
                   <label class="row"
                     :style="'gap:10px;align-items:center;padding:8px 12px;margin:0;'+(r.protected?'opacity:.5;cursor:not-allowed':'cursor:pointer')">
-                    <input type="checkbox" style="width:auto" :disabled="r.protected"
+                    <input type="checkbox" style="width:auto" :disabled="!!(r.protected)"
                       :checked="instResultSelected(r)" @change="instToggleResult(r)">
                     <div style="flex:1;min-width:0">
                       <div><span x-text="r.name"></span>
@@ -1700,12 +1700,12 @@
 
         <div class="row" style="margin-top:14px">
           <div class="sp"></div>
-          <button @click="closeInstall()" :disabled="instBusy">Chiudi</button>
+          <button @click="closeInstall()" :disabled="!!(instBusy)">Chiudi</button>
           <button x-show="inst.mode==='install'" class="primary"
-            :disabled="instBusy || !instFile || inst.sel.length===0" @click="runInstall()"
+            :disabled="!!(instBusy || !instFile || inst.sel.length===0)" @click="runInstall()"
             x-text="instBusy ? 'Installazione in corso…' : 'Installa'"></button>
           <button x-show="inst.mode==='remove'" class="danger"
-            :disabled="instBusy || !inst.rmItems.length || inst.sel.length===0" @click="runUninstall()"
+            :disabled="!!(instBusy || !inst.rmItems.length || inst.sel.length===0)" @click="runUninstall()"
             x-text="instBusy ? 'Rimozione in corso…' : 'Rimuovi'"></button>
         </div>
 
@@ -1754,8 +1754,8 @@
         <div class="row" style="gap:8px;align-items:center">
           <span class="mut" style="flex:1">Attualmente attivo su <b x-text="mAuto"></b> di <b x-text="sites.length"></b>
             siti. Applica a tutti in un colpo.</span>
-          <button class="primary" :disabled="bulkBusy" @click="bulkAutoUpdate(true)">Attiva su tutti</button>
-          <button class="danger" :disabled="bulkBusy" @click="bulkAutoUpdate(false)">Disattiva tutti</button>
+          <button class="primary" :disabled="!!(bulkBusy)" @click="bulkAutoUpdate(true)">Attiva su tutti</button>
+          <button class="danger" :disabled="!!(bulkBusy)" @click="bulkAutoUpdate(false)">Disattiva tutti</button>
         </div>
         <div class="ok-msg" x-show="bulkMsg" x-text="bulkMsg"></div>
 
@@ -1764,7 +1764,7 @@
         <div class="row" style="gap:8px;align-items:center">
           <span class="mut" style="flex:1">Ricevi avvisi su update falliti, siti offline e un riepilogo a fine ciclo. La
             configurazione (token/chat) sta nel file <code>.env</code>.</span>
-          <button :disabled="tgBusy" @click="testTelegram()">Invia messaggio di test</button>
+          <button :disabled="!!(tgBusy)" @click="testTelegram()">Invia messaggio di test</button>
         </div>
         <div class="ok-msg" x-show="tgMsg" x-text="tgMsg"></div>
         <div class="err-msg" x-show="tgErr" x-text="tgErr"></div>

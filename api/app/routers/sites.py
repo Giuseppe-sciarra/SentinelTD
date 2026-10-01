@@ -299,9 +299,11 @@ async def refresh_now(site_id: int, s: AsyncSession = Depends(get_session)):
     site = await s.get(Site, site_id)
     if not site:
         raise HTTPException(404)
-    # pulsante 'Check' manuale: forza il refresh lato connettore (come l'icona reload
-    # di Akeeba). I check automatici schedulati restano passivi (force=False).
-    await apply_status(s, site, force=True)
+    # pulsante 'Check' manuale. Su un sito online forza il refresh completo lato connettore
+    # (come l'icona reload di Akeeba). Su un sito che risulta offline basta sapere SE risponde:
+    # il refresh completo (il sito ricontatta wordpress.org e i produttori) su un hosting
+    # lento puo' durare minuti, e il pulsante restava grigio a lungo senza dire nulla.
+    await apply_status(s, site, force=(site.status == "ok"))
     await s.commit()
     await s.refresh(site)
     return site
@@ -377,7 +379,7 @@ async def open_admin(site_id: int, autologin: bool = Query(False), s: AsyncSessi
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 r = await client.post(
                     wp_rest_url(site, "autologin"),
-                    headers={"Authorization": f"Bearer {site.token}"},
+                    headers={"Authorization": f"Bearer {site.token}", "X-Sentinel-Token": site.token},
                 )
                 r.raise_for_status()
                 u = r.json().get("url")

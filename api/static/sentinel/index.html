@@ -360,11 +360,11 @@
                         <div class="small mut">Dettaglio del mese selezionato · confronto con <span x-text="stats.data.prev_label"></span></div></div>
                     </template>
                     <div class="row" style="gap:4px" x-show="stats.mode!=='days'">
-                      <button class="btn icon" :disabled="!canShiftStat(-1)" @click="shiftStatMonth(-1)" title="Mese precedente (freccia ←)">‹</button>
+                      <button class="btn icon" :disabled="!!(!canShiftStat(-1))" @click="shiftStatMonth(-1)" title="Mese precedente (freccia ←)">‹</button>
                       <select class="input" style="max-width:190px" x-model="stats.period" @change="pickMonth(stats.period)">
                         <template x-for="m in statMonths" :key="'pp'+m.period"><option :value="m.period" :selected="m.period===stats.period" x-text="m.label+(m.updates?' — '+m.updates+' update':'')"></option></template>
                       </select>
-                      <button class="btn icon" :disabled="!canShiftStat(1)" @click="shiftStatMonth(1)" title="Mese successivo (freccia →)">›</button>
+                      <button class="btn icon" :disabled="!!(!canShiftStat(1))" @click="shiftStatMonth(1)" title="Mese successivo (freccia →)">›</button>
                     </div>
                   </div>
                   <div class="grid kpi" style="margin:10px 0 6px">
@@ -526,7 +526,7 @@
                       <td class="num"><span class="badge warn" x-show="hasUpd(s)" x-text="s.updates_count"></span><span class="badge ok" x-show="!hasUpd(s)&&!isOff(s)">ok</span><span class="badge err" x-show="isOff(s)">offline</span></td>
                       <td class="hide-m mut small" x-text="ago(s.last_checked)"></td>
                       <td @click.stop><div class="acts">
-                        <button class="btn sm icon" title="Check" @click="check(s)" :disabled="busy[s.id]"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6"/></svg></button>
+                        <button class="btn sm icon" title="Check" @click="check(s)" :disabled="!!(busy[s.id])"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6"/></svg></button>
                         <button class="btn sm icon" title="Aggiorna ora" @click="updateNow(s)" x-show="hasUpd(s)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M6 9l6-6 6 6M4 21h16"/></svg></button>
                         <button class="btn sm icon" title="Apri admin" @click="goAdmin(s)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4h6v6M20 4l-9 9M9 6H5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"/></svg></button>
                       </div></td>
@@ -558,7 +558,7 @@
               <span class="dot" :class="isOff(detail)?'err':(hasUpd(detail)?'warn':'ok')" style="width:12px;height:12px"></span>
               <div><h1 class="page-title" x-text="detail.name" translate="no"></h1><div class="page-sub"><a :href="detail.url" target="_blank" x-text="detail.url" translate="no"></a></div></div>
               <div class="sp"></div>
-              <button class="btn sm" @click="check(detail)" :disabled="busy[detail.id]"><span class="spinner" x-show="busy[detail.id]"></span> Check ora</button>
+              <button class="btn sm" @click="check(detail)" :disabled="!!(busy[detail.id])"><span class="spinner" x-show="busy[detail.id]"></span> Check ora</button>
               <button class="btn sm primary" @click="updateNow(detail)" x-show="hasUpd(detail)">Aggiorna tutto</button>
               <button class="btn sm" @click="goAdmin(detail)">Apri admin ↗</button>
               <button class="btn sm" :class="detail.notifications_silenced?'danger':''" @click="toggleSilence(detail)" x-text="detail.notifications_silenced?'🔕 Riattiva notifiche':'🔔 Silenzia'"></button>
@@ -594,7 +594,7 @@
                   <div class="row" style="margin-bottom:10px">
                     <h3 style="margin:0;flex:1">Anteprima</h3>
                     <span class="small mut" x-show="detail.shot_at" x-text="ago(detail.shot_at)"></span>
-                    <button class="btn sm ghost" @click="shootNow(detail)" :disabled="busy['shot'+detail.id]">
+                    <button class="btn sm ghost" @click="shootNow(detail)" :disabled="!!(busy['shot'+detail.id])">
                       <span class="spinner" x-show="busy['shot'+detail.id]"></span> ⟳ Aggiorna
                     </button>
                   </div>
@@ -691,11 +691,11 @@
               <div class="sp"></div>
               <span class="small mut">Rinnovo:</span>
               <div class="rn">
-                <button type="button" class="yes" :disabled="exp.busy" @click="setRenew(exp.dSel,'yes')">Rinnova</button>
-                <button type="button" class="todo" :disabled="exp.busy" @click="setRenew(exp.dSel,'')">Da decidere</button>
-                <button type="button" class="no" :disabled="exp.busy" @click="setRenew(exp.dSel,'no')">Non rinnova</button>
+                <button type="button" class="yes" :disabled="!!(exp.busy)" @click="setRenew(exp.dSel,'yes')">Rinnova</button>
+                <button type="button" class="todo" :disabled="!!(exp.busy)" @click="setRenew(exp.dSel,'')">Da decidere</button>
+                <button type="button" class="no" :disabled="!!(exp.busy)" @click="setRenew(exp.dSel,'no')">Non rinnova</button>
               </div>
-              <button class="btn sm" :disabled="exp.busy" @click="refreshWhois(exp.dSel)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg> Aggiorna WHOIS</button>
+              <button class="btn sm" :disabled="!!(exp.busy)" @click="refreshWhois(exp.dSel)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg> Aggiorna WHOIS</button>
               <button class="btn sm ghost" @click="dSelNone()">Annulla</button>
             </div>
 
@@ -727,16 +727,16 @@
                       </td>
                       <td>
                         <div class="rn">
-                          <button type="button" class="yes" :class="x.renew==='yes'?'on':''" :disabled="exp.busy" @click="setRenew([x.name],'yes')">Rinnova</button>
-                          <button type="button" class="todo" :class="!x.renew?'on':''" :disabled="exp.busy" @click="setRenew([x.name],'')">Da decidere</button>
-                          <button type="button" class="no" :class="x.renew==='no'?'on':''" :disabled="exp.busy" @click="setRenew([x.name],'no')">Non rinnova</button>
+                          <button type="button" class="yes" :class="x.renew==='yes'?'on':''" :disabled="!!(exp.busy)" @click="setRenew([x.name],'yes')">Rinnova</button>
+                          <button type="button" class="todo" :class="!x.renew?'on':''" :disabled="!!(exp.busy)" @click="setRenew([x.name],'')">Da decidere</button>
+                          <button type="button" class="no" :class="x.renew==='no'?'on':''" :disabled="!!(exp.busy)" @click="setRenew([x.name],'no')">Non rinnova</button>
                         </div>
                         <div class="dk-note">
                           <span class="small mut" x-show="x.renew_note" x-text="x.renew_note" translate="no"></span>
                           <a href="#" class="small" @click.prevent="editRenewNote(x)" x-text="x.renew_note ? 'modifica nota' : '+ nota'"></a>
                         </div>
                       </td>
-                      <td><button class="btn sm icon ghost" :disabled="exp.busy" @click="refreshWhois([x.name])"
+                      <td><button class="btn sm icon ghost" :disabled="!!(exp.busy)" @click="refreshWhois([x.name])"
                                   :title="'Aggiorna dal registro · ultimo controllo '+fmtDate(x.checked_at)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button></td>
                     </tr>
                   </template>
@@ -828,8 +828,8 @@
               </select>
               <button class="btn" @click="openTokenLink(() => reportPdfUrl())"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Scarica PDF</button>
               <button class="btn" @click="openDetailReport()" title="Report sito per sito con versioni e cronologia, su un periodo a scelta">📄 Report dettagliato</button>
-              <button class="btn" :disabled="rep.busy" @click="sendReportNow(false)">Invia questo</button>
-              <button class="btn primary" :disabled="rep.busy||!repEnabledCount" @click="sendReportNow(true)"><span class="spinner" x-show="rep.busy"></span> Invia tutti (<span x-text="repEnabledCount"></span>)</button>
+              <button class="btn" :disabled="!!(rep.busy)" @click="sendReportNow(false)">Invia questo</button>
+              <button class="btn primary" :disabled="!!(rep.busy||!repEnabledCount)" @click="sendReportNow(true)"><span class="spinner" x-show="rep.busy"></span> Invia tutti (<span x-text="repEnabledCount"></span>)</button>
             </div>
             <div class="msg ok" x-show="rep.msg" x-text="rep.msg"></div>
             <div class="msg err" x-show="rep.err" x-text="rep.err"></div>
@@ -893,7 +893,7 @@
                 </div>
 
                 <div class="row" style="margin-top:14px">
-                  <button class="btn primary" :disabled="rep.busy||!rep.dirty" @click="saveReportCfg()">Salva impostazioni</button>
+                  <button class="btn primary" :disabled="!!(rep.busy||!rep.dirty)" @click="saveReportCfg()">Salva impostazioni</button>
                   <span class="small mut" x-show="!rep.dirty">Nessuna modifica</span>
                 </div>
                 <div class="card" style="margin-top:14px">
@@ -1049,8 +1049,8 @@
                     </div>
 
                     <div class="row" style="margin-top:14px;flex-wrap:wrap">
-                      <button class="btn primary" :disabled="notif.busy||!notifDirty" @click="saveNotif()">Salva modifiche</button>
-                      <button class="btn" :disabled="notif.busy" @click="testNotif()">Invia test reale</button>
+                      <button class="btn primary" :disabled="!!(notif.busy||!notifDirty)" @click="saveNotif()">Salva modifiche</button>
+                      <button class="btn" :disabled="!!(notif.busy)" @click="testNotif()">Invia test reale</button>
                       <button class="btn ghost" @click="resetNotif()">Ripristina default</button>
                       <div class="sp"></div>
                       <span class="msg ok" style="margin:0" x-show="notif.msg" x-text="notif.msg"></span><span class="msg err" style="margin:0" x-show="notif.err" x-text="notif.err"></span>
@@ -1126,12 +1126,14 @@
                     <div class="field"><label>Chiedi la decisione di rinnovo</label><div class="input-suffix"><input class="input" type="number" min="0" max="3650" x-model.number="prefs.domain_decision_days"><span>giorni prima</span></div><div class="hint">Per i domini ancora "da decidere" arriva un avviso in anticipo, così c'è tempo di sentire il cliente. 0 lo disattiva.</div></div>
                     <div class="field"><label class="check" style="margin-top:26px"><input type="checkbox" :checked="prefs.domain_alert_norenew===1" @change="prefs.domain_alert_norenew=$event.target.checked?1:0"> Avvisa anche per i domini da non rinnovare</label><div class="hint">Utile per ricordare al cliente che quel dominio scadrà e non verrà rinnovato.</div></div>
                     <div class="field"><label>Conserva la cronologia dettagliata per</label><div class="input-suffix"><input class="input" type="number" min="7" max="3650" x-model.number="prefs.history_retention_days"><span>giorni</span></div><div class="hint">Serve al report dettagliato ("dalla versione X alla Y" per ogni aggiornamento). I totali mensili restano per sempre.</div></div>
+                    <div class="field"><label>Email dei report di aggiornamento</label><select class="input" x-model="prefs.email_report_mode"><option value="site" :selected="prefs.email_report_mode==='site'">Un'email per ogni sito</option><option value="cycle" :selected="prefs.email_report_mode==='cycle'">Un riepilogo unico per ciclo</option></select><div class="hint">Con il riepilogo unico arriva una sola email a fine ciclo, con tutti i siti aggiornati, invece di una per sito. Telegram non cambia.</div></div>
+                    <div class="field"><label>Avvisa che un sito non risponde dopo</label><div class="input-suffix"><input class="input" type="number" min="0" max="120" x-model.number="prefs.offline_alert_minutes"><span>minuti</span></div><div class="hint">Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.</div></div>
                     <div class="field"><label>Aggiorna anteprime siti ogni</label><div class="input-suffix"><input class="input" type="number" min="1" max="720" x-model.number="prefs.screenshot_every_hours"><span>ore</span></div>
                       <button class="btn sm" style="margin-top:6px" @click="shootBulk(false)">🖼 Rigenera tutte adesso</button></div>
                     <div class="field"><label>Soglia gialla</label><div class="input-suffix"><input class="input" type="number" min="1" x-model.number="prefs.expiry_warning_days"><span>giorni</span></div></div>
                     <div class="field"><label>Soglia rossa</label><div class="input-suffix"><input class="input" type="number" min="1" x-model.number="prefs.expiry_critical_days"><span>giorni</span></div></div>
                   </div>
-                  <div class="row" style="margin-top:8px"><button class="btn primary" :disabled="prefs.busy" @click="savePrefs()">Salva impostazioni scadenze</button><span class="msg ok" style="margin:0" x-show="prefs.msg" x-text="prefs.msg"></span><span class="msg err" style="margin:0" x-show="prefs.err" x-text="prefs.err"></span></div>
+                  <div class="row" style="margin-top:8px"><button class="btn primary" :disabled="!!(prefs.busy)" @click="savePrefs()">Salva impostazioni scadenze</button><span class="msg ok" style="margin:0" x-show="prefs.msg" x-text="prefs.msg"></span><span class="msg err" style="margin:0" x-show="prefs.err" x-text="prefs.err"></span></div>
                 </div>
                 <div class="card" style="margin-top:16px">
                   <h3>Branding</h3>
@@ -1155,7 +1157,7 @@
                         <div class="small mut" x-show="!c.present">non disponibile</div>
                       </div>
                       <button class="btn sm primary" x-show="c.present" @click="downloadConn(c.kind)">Scarica</button>
-                      <label class="btn sm"><span x-text="c.builtin ? 'Carica una versione tua' : 'Sostituisci'"></span><input type="file" accept=".zip" style="display:none" :disabled="conn.busy" @change="uploadConn(c.kind,$event)"></label>
+                      <label class="btn sm"><span x-text="c.builtin ? 'Carica una versione tua' : 'Sostituisci'"></span><input type="file" accept=".zip" style="display:none" :disabled="!!(conn.busy)" @change="uploadConn(c.kind,$event)"></label>
                       <button class="btn sm ghost" x-show="c.present && !c.builtin" @click="resetConn(c.kind)" title="Torna al pacchetto incluso in Sentinel TD">Usa quello incluso</button>
                     </div>
                   </template>
@@ -1165,10 +1167,31 @@
                   <div class="row">
                     <input class="input" type="url" x-model="conn.hubUrl" placeholder="https://sentinel.tuodominio.it">
                     <button class="btn sm" @click="useCurrentHubUrl()">Usa questo</button>
-                    <button class="btn sm primary" :disabled="!hubDirty" @click="saveHubUrl()">Salva</button>
+                    <button class="btn sm primary" :disabled="!!(!hubDirty)" @click="saveHubUrl()">Salva</button>
                   </div>
 
                   <h3 style="margin-top:20px">Registrazione automatica (WordPress)</h3><div class="small mut" style="margin-bottom:8px">Chiave da mettere nella costante <span class="mono">TDPANOP_HUB_KEY</span> del connettore.</div><div class="row"><input class="input mono small" readonly :value="conn.regKey" onclick="this.select()"><button class="btn sm" @click="copy(conn.regKey)">Copia</button><button class="btn sm" @click="rotateKey()">Rigenera</button></div>
+                </div>
+                <div class="card" style="margin-top:16px">
+                  <h3>Pacchetti per plugin e temi a licenza</h3>
+                  <div class="small mut" style="margin-bottom:10px">Per i prodotti che un sito non riesce a scaricare dal produttore (es. Elementor Pro con licenza non attiva su quel dominio): carica qui lo zip e Sentinel lo installa sopra la versione presente, sui siti che ne hanno una più vecchia. Caricarne uno nuovo sostituisce il precedente.</div>
+                  <template x-for="p in pkg.list" :key="'pk'+p.id">
+                    <div class="row" style="padding:10px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap">
+                      <span class="cms wp" x-text="p.kind==='theme' ? 'TEMA' : 'PLUGIN'"></span>
+                      <div style="flex:1;min-width:160px">
+                        <div><b x-text="p.name" translate="no"></b> <span class="mono small" x-text="p.version"></span></div>
+                        <div class="small mut"><span class="mono" x-text="p.slug" translate="no"></span> · <span x-text="fmtSize(p.size)"></span> · <span x-text="fmtDate(p.uploaded_at)"></span></div>
+                      </div>
+                      <span class="badge" :class="p.pending_sites ? 'warn' : 'ok'" x-text="p.pending_sites ? (p.pending_sites + ' ' + pl(p.pending_sites, 'sito da aggiornare', 'siti da aggiornare')) : 'tutti aggiornati'"></span>
+                      <button class="btn sm primary" x-show="p.pending_sites" :disabled="!!(pkg.busy)" @click="applyPackage(p)">Installa ora</button>
+                      <button class="btn sm ghost" @click="deletePackage(p)" title="Elimina il pacchetto">✕</button>
+                    </div>
+                  </template>
+                  <div class="small mut" x-show="!pkg.list.length" style="padding:6px 0 10px">Nessun pacchetto caricato.</div>
+                  <div class="row" style="margin-top:10px">
+                    <label class="btn sm"><span x-text="pkg.busy ? 'Caricamento…' : 'Carica uno zip'"></span><input type="file" accept=".zip" style="display:none" @change="uploadPackage($event)" :disabled="!!(pkg.busy)"></label>
+                  </div>
+                  <div class="msg ok" x-show="pkg.msg" x-text="pkg.msg"></div><div class="msg err" x-show="pkg.err" x-text="pkg.err"></div>
                 </div>
                 <div class="card" style="margin-top:16px"><h3>Notifiche</h3><div class="row"><div class="small mut" style="flex:1">Testi, HTML, anteprime e canali si modificano nella pagina <a href="#/notifications">Notifiche</a>. SMTP e token Telegram restano nel file <span class="mono">.env</span>.</div><button class="btn sm" @click="telegramTest()">Test Telegram</button></div></div>
               </div>
@@ -1306,7 +1329,7 @@
             <div class="bk-tools">
               <div class="search"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input class="input" x-model="drep.filter" placeholder="Filtra siti…"></div>
               <button type="button" class="btn sm bk-all" @click="drepSelAll()">✓ Seleziona tutti</button>
-              <button type="button" class="btn sm" @click="drepSelNone()" :disabled="!drep.ids.length">Nessuno</button>
+              <button type="button" class="btn sm" @click="drepSelNone()" :disabled="!!(!drep.ids.length)">Nessuno</button>
             </div>
             <div class="bk-sites">
               <template x-for="s in drepSites()" :key="'ds'+s.id">
@@ -1344,7 +1367,7 @@
     <div class="foot bk-foot">
       <div class="bk-summary" :class="drepCanRun?'ready':''" x-text="drepSummary"></div>
       <button class="btn" @click="drawer=null">Chiudi</button>
-      <button class="btn primary" :disabled="!drepCanRun" @click="downloadDetailReport()">
+      <button class="btn primary" :disabled="!!(!drepCanRun)" @click="downloadDetailReport()">
         <span class="spinner" x-show="drep.busy"></span> <span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Scarica</span>
       </button>
     </div>
@@ -1427,7 +1450,7 @@
             <template x-for="r in inst.results" :key="r.type+'|'+r.slug">
               <div class="bk-ext" :class="{ sel: instSelected(r), prot: r.protected }">
                 <label class="bk-ext-main">
-                  <input type="checkbox" :disabled="r.protected" :checked="instSelected(r)" @change="instToggle(r)">
+                  <input type="checkbox" :disabled="!!(r.protected)" :checked="instSelected(r)" @change="instToggle(r)">
                   <div class="bk-ext-info">
                     <div class="bk-ext-title"><b x-text="r.name" translate="no"></b><span class="badge" x-text="r.type"></span><span class="badge" x-show="r.protected">protetto</span></div>
                     <div class="mono small mut" x-text="r.slug"></div>
@@ -1460,7 +1483,7 @@
             <div class="bk-tools">
               <div class="search"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input class="input" x-model="inst.siteFilter" placeholder="Filtra siti…"></div>
               <button type="button" class="btn sm bk-all" @click="instSelAll()">✓ Seleziona tutti</button>
-              <button type="button" class="btn sm" @click="instSelNone()" :disabled="!inst.sel.length">Nessuno</button>
+              <button type="button" class="btn sm" @click="instSelNone()" :disabled="!!(!inst.sel.length)">Nessuno</button>
             </div>
             <div class="chips bk-folders" x-show="instFolders().length>1">
               <span class="small mut">Cartelle:</span>
@@ -1512,7 +1535,7 @@
     <div class="foot bk-foot">
       <div class="bk-summary" :class="instCanRun?'ready':''" x-text="instSummary"></div>
       <button class="btn" @click="drawer=null">Chiudi</button>
-      <button class="btn" :class="inst.mode==='remove'?'danger-solid':'primary'" :disabled="!instCanRun"
+      <button class="btn" :class="inst.mode==='remove'?'danger-solid':'primary'" :disabled="!!(!instCanRun)"
               @click="inst.mode==='install'?runInstall():runRemove()">
         <span class="spinner" x-show="inst.busy"></span>
         <span x-text="inst.mode==='install'?'Installa':'Rimuovi'"></span>

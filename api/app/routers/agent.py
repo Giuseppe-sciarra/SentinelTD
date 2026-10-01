@@ -133,7 +133,7 @@ async def agent_register(request: Request, payload: dict = Body(...)):
                     changed.append("admin_url")
                 if changed:
                     await s.commit()
-                    return {"ok": True, "existed": True, "site_id": site.id,
+                    return {"ok": True, "existed": True, "site_id": site.id, "realigned": changed,
                             "message": "Sito gia' presente: riallineato " + " + ".join(changed) + ". Impostazioni e cartelle non toccate."}
                 return {"ok": True, "existed": True, "site_id": site.id,
                         "message": "Sito gia' presente in Panopticon: nessuna modifica."}

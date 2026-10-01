@@ -22,7 +22,7 @@ from sqlalchemy import select, delete, func
 
 from .config import settings
 from .db import SessionLocal, engine, run_migrations
-from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry
+from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
 from .connectors import apply_status, fetch_status, _category, wp_rest_url
 from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
@@ -612,32 +612,40 @@ async def poll_site(ctx, site_id: int):
         prev_status = site.status
         await apply_status(s, site)
 
-        # --- conferma offline (debounce) ---
-        # Se il check e' fallito MA il sito risultava online, NON dichiararlo subito
-        # offline: un singolo buco (WAF/CrowdSec, 502, timeout, cache del proxy) non deve
-        # generare un falso offline. Ricontrolla fino a OFFLINE_CONFIRM_CHECKS volte a
-        # distanza di OFFLINE_RETRY_DELAY_SECONDS; basta un check OK per annullare l'allarme.
-        # I retry usano fetch_status (solo rete, niente DB) e durante l'attesa la
-        # transazione viene chiusa (rollback) per non tenere una connessione idle aperta.
-        # Scatta sulla transizione verso error da QUALSIASI stato non-error (ok o unknown),
-        # cosi' copre anche un sito appena aggiunto/mai stato ok che non risponde.
-        if site.status == "error" and prev_status != "error" and settings.OFFLINE_CONFIRM_CHECKS > 1:
-            await s.rollback()  # il primo apply_status fallito ha solo letto: niente da perdere
-            recovered = False
-            for _ in range(settings.OFFLINE_CONFIRM_CHECKS - 1):
-                await asyncio.sleep(settings.OFFLINE_RETRY_DELAY_SECONDS)
-                try:
-                    await fetch_status(site)   # solo HTTP: se risponde, il sito e' vivo
-                    recovered = True
-                    break
-                except Exception:              # noqa: BLE001
-                    continue
-            # rifai un apply_status "vero" per scrivere lo stato definitivo e dati freschi:
-            # se recovered -> tornera' ok; altrimenti -> error confermato
-            site = await s.get(Site, site_id)
-            if not site or not site.enabled:
+        # --- conferma "non raggiungibile" (senza bloccare il worker) ---
+        # Siti su server lenti hanno buchi di qualche minuto: l'avviso parte solo dopo
+        # N minuti di errori CONTINUI (Impostazioni → "Avvisa che un sito non risponde dopo").
+        # Prima l'attesa avveniva dormendo DENTRO il job, che teneva occupato uno dei 4 posti
+        # del worker per minuti: con piu' siti giu' insieme si fermava tutto, aggiornamenti
+        # compresi. Ora si segna l'inizio dell'episodio, si programma un ricontrollo fra un
+        # minuto e il posto si libera subito; basta un controllo riuscito per annullare.
+        if site.status == "error" and not site.offline_notified:
+            try:
+                from .settings_store import get_operational_settings
+                window_min = int((await get_operational_settings()).get("offline_alert_minutes", 5))
+            except Exception:  # noqa: BLE001
+                window_min = 5
+            now_c = datetime.now(timezone.utc)
+            since = site.offline_since
+            if window_min > 0 and (since is None or (now_c - since) < timedelta(minutes=window_min)):
+                # non ancora confermato: nel pannello il sito resta com'era
+                await s.rollback()
+                site = await s.get(Site, site_id)
+                if not site:
+                    return
+                if site.offline_since is None:
+                    site.offline_since = now_c
+                    await s.commit()
+                log.info("SITO NON RISPONDE '%s' (id=%s): ricontrollo fra un minuto (avviso dopo %d min)",
+                         site.name, site.id, window_min)
+                # id diverso per ogni minuto: arq tiene occupato un id per un'ora dopo l'esecuzione
+                await ctx["redis"].enqueue_job("poll_site", site_id, _defer_by=60,
+                                               _job_id=f"recheck:{site_id}:{int(now_c.timestamp()) // 60}")
                 return
-            await apply_status(s, site)
+            if site.offline_since is None:
+                site.offline_since = now_c       # avviso immediato (0 minuti)
+        elif site.status == "ok" and site.offline_since is not None:
+            site.offline_since = None            # ha risposto: episodio chiuso
 
         await s.commit()
 
@@ -651,8 +659,9 @@ async def poll_site(ctx, site_id: int):
         #  - una sola notifica per episodio offline (niente spam mentre resta giu')
         #  - quando torna ok -> 🟢 e azzera il flag
         if site.status == "error" and not site.offline_notified and not site.notifications_silenced:
-            _attempts = settings.OFFLINE_CONFIRM_CHECKS
-            _window = round((settings.OFFLINE_CONFIRM_CHECKS - 1) * settings.OFFLINE_RETRY_DELAY_SECONDS / 60)
+            _elapsed = (datetime.now(timezone.utc) - site.offline_since).total_seconds() if site.offline_since else 0
+            _window = max(0, round(_elapsed / 60))
+            _attempts = _window + 1              # un controllo al minuto
             _r = await notify_dispatch("site_offline", {"site_name": site.name, "site_url": site.url,
                                         "reason": site.error or "", "attempts": _attempts, "window_min": _window})
             sent = _r["email"] or _r["telegram"]
@@ -801,10 +810,120 @@ def _visual_attachments(site: Site) -> list:
     return out
 
 
+# --------------------------------------------------------------------------
+# COPPIE GRATUITO + PRO: devono muoversi insieme
+# --------------------------------------------------------------------------
+# Portare solo il gratuito a una nuova versione principale (Elementor 3 -> 4) lasciando il
+# Pro alla vecchia e' la combinazione che rompe i siti: WordPress stesso lo segnala come
+# "avviso compatibilita'". Regola: prima il Pro, poi il gratuito, e solo se il Pro ce l'ha
+# fatta. Gli aggiornamenti minori (4.1 -> 4.3) non vengono trattenuti.
+COUPLED_PAIRS = {"elementor": "elementor-pro"}
+LICENSED_FIRST = ("elementor-pro",)
+
+
+def _major(v: str) -> int:
+    from .routers.packages import version_tuple
+    t = version_tuple(v or "")
+    return t[0] if t else 0
+
+
+def _plan_coupled(queue: list, exts: dict, now=None) -> tuple[list, list, dict]:
+    """Riordina la coda per le coppie gratuito + Pro.
+
+    queue = [(ext, type, slug, name, current)]
+    exts  = {slug: Extension} dei plugin installati sul sito
+    Ritorna (queue, held, wait_for):
+      held     = elementi tolti dalla coda (il Pro e' gia' stato tentato oggi senza esito)
+      wait_for = {slug_gratuito: (slug_pro, versione_principale_richiesta)}, da verificare
+                 dopo il tentativo sul Pro
+
+    Se il Pro e' indietro ma NON risulta da aggiornare, lo si tenta lo stesso, per primo:
+    con la licenza attiva Elementor Pro spesso non mostra la versione nuova finche' non
+    gliela si chiede dal backend, e senza questo tentativo il gratuito resterebbe fermo.
+    """
+    now = now or datetime.now(timezone.utc)
+    held, wait_for = [], {}
+    for free, pro in COUPLED_PAIRS.items():
+        fi = next((q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] == free), None)
+        pe = exts.get(pro)
+        if fi is None or pe is None:
+            continue
+        target = _major(fi[0].new_version)
+        if target <= _major(fi[4]):
+            continue                      # nessun salto di versione principale
+        if _major(pe.current_version) >= target:
+            continue                      # il Pro e' gia' alla versione principale giusta
+        pi = next((q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] == pro), None)
+        if pi is None:
+            # gia' tentato nelle ultime 24 ore senza esito: non insistere, il gratuito aspetta
+            tried = (getattr(pe, "update_manual", False) and pe.update_failed_at is not None
+                     and (now - pe.update_failed_at) < timedelta(hours=24))
+            if tried:
+                queue = [q for q in queue if q is not fi]
+                held.append(fi)
+                continue
+            pi = (pe, "plugin", pro, pe.name, pe.current_version)    # tentativo sul Pro
+        else:
+            queue = [q for q in queue if q is not pi]
+        queue.insert(queue.index(fi), pi)    # prima il Pro…
+        wait_for[free] = (pro, target)       # …poi il gratuito, solo se il Pro e' arrivato alla nuova versione
+    return queue, held, wait_for
+
+
+def _held_reason(name: str, pro_name: str, target: int) -> str:
+    return (f"in attesa: {pro_name} non si è aggiornato su questo sito, e portare {name} alla {target}.x "
+            f"da solo potrebbe rompere il sito. Carica lo zip di {pro_name} in Sentinel "
+            f"(Impostazioni → Pacchetti): si aggiorneranno insieme")
+
+
+def _pkg_newer(pkg_version: str, current: str) -> bool:
+    from .routers.packages import version_gt
+    return bool(pkg_version) and version_gt(pkg_version, current or "0")
+
+
+async def _install_package(site: Site, pkg) -> dict:
+    """Installa lo zip caricato in Sentinel sopra la versione presente sul sito.
+    Non cambia lo stato di attivazione: un plugin attivo resta attivo, uno spento resta spento."""
+    from .routers.install import _install_one
+    from .routers.packages import PACKAGES_DIR
+    try:
+        with open(os.path.join(PACKAGES_DIR, pkg.filename), "rb") as f:
+            content = f.read()
+    except OSError as ex:
+        return {"ok": False, "error": f"file del pacchetto non leggibile: {ex}"}
+    return await _install_one(site, content, f"{pkg.slug}.zip", pkg.kind, False)
+
+
+async def _panel_url() -> str:
+    """Indirizzo pubblico di Sentinel (Impostazioni → Connettori), per i link nei report."""
+    try:
+        from .routers.connectors import _hub_url
+        return await _hub_url()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _folder_label(site: Site) -> str:
+    """Cartelle del sito per i report: "Clienti/Flash Factory" -> "Clienti / Flash Factory"."""
+    tags = [t.strip() for t in (site.tags or "").split(",") if t.strip()]
+    return ", ".join(" / ".join(p.strip() for p in t.split("/") if p.strip()) for t in tags)
+
+
+async def _email_mode() -> str:
+    try:
+        from .settings_store import get_operational_settings
+        return (await get_operational_settings()).get("email_report_mode", "site")
+    except Exception:  # noqa: BLE001
+        return "site"
+
+
 async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
     """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}."""
     headers = {
         "Authorization": f"Bearer {site.token}",
+        # copia del token in un header che nessun hosting filtra: alcuni Apache in
+        # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
+        "X-Sentinel-Token": site.token,
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -813,12 +932,31 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
     try:
         async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
             if site.cms == "wp":
-                r = await client.post(
-                    wp_rest_url(site, "update", f"_={cb}"),
-                    headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or ""},
-                )
-                r.raise_for_status()
-                d = r.json()
+                # 1) dal BACKEND del sito (admin-ajax.php): li' i plugin a licenza come
+                #    Elementor Pro caricano il proprio sistema di aggiornamento, via REST no.
+                # 2) se il connettore e' vecchio (risponde "0") o admin-ajax non e' raggiungibile,
+                #    il percorso REST di sempre.
+                d = None
+                try:
+                    ra = await client.post(
+                        f"{site.url.rstrip('/')}/wp-admin/admin-ajax.php",
+                        params={"action": "tdpanop_update", "_": cb},
+                        headers=headers,
+                        data={"type": ext_type, "slug": slug, "expected": expected or ""},
+                    )
+                    if ra.status_code == 200:
+                        ja = ra.json()
+                        if isinstance(ja, dict) and "ok" in ja:
+                            d = ja
+                except Exception:  # noqa: BLE001
+                    d = None
+                if d is None:
+                    r = await client.post(
+                        wp_rest_url(site, "update", f"_={cb}"),
+                        headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or ""},
+                    )
+                    r.raise_for_status()
+                    d = r.json()
             else:  # joomla via com_ajax
                 params = {
                     "option": "com_ajax", "plugin": "tdpanopticon", "group": "system",
@@ -843,7 +981,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                     d = {"ok": False, "error": "formato risposta non valido", "new": ""}
             return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", "")),
                     "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
-                    "manual": bool(d.get("manual"))}
+                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", ""))}
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -861,6 +999,9 @@ async def _vendor_update_one(site: Site, slug: str) -> dict:
     """Chiama il connettore Joomla task=vendorupdate per un package vendor. {ok, error, new}."""
     headers = {
         "Authorization": f"Bearer {site.token}",
+        # copia del token in un header che nessun hosting filtra: alcuni Apache in
+        # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
+        "X-Sentinel-Token": site.token,
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -888,7 +1029,7 @@ async def _vendor_update_one(site: Site, slug: str) -> dict:
                 d = {"ok": False, "error": "formato risposta non valido", "new": ""}
             return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "new": str(d.get("new", "")),
                     "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
-                    "manual": bool(d.get("manual"))}
+                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", ""))}
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -1056,12 +1197,54 @@ async def update_site(ctx, site_id: int):
                 continue
             queue.append((e, e.type, e.slug, e.name, e.current_version))
 
+        # Pacchetti caricati in Sentinel: con la licenza scaduta spesso il sito NON segnala
+        # nemmeno l'aggiornamento. Se hai caricato una versione piu' nuova di quella
+        # installata, il prodotto va aggiornato comunque.
+        packages = {(p.kind, p.slug): p for p in (await s.execute(select(Package))).scalars().all()}
+        if packages and site.cms == "wp":
+            queued_ids = {q[0].id for q in queue if q[0] is not None}
+            others = (await s.execute(
+                select(Extension).where(Extension.site_id == site.id, Extension.update_available == False)  # noqa: E712
+            )).scalars().all()
+            for e in others:
+                pkg = packages.get((e.type, e.slug))
+                if e.id in queued_ids or not pkg or not _pkg_newer(pkg.version, e.current_version):
+                    continue
+                if e.update_failed_at is not None and e.update_failed_version == pkg.version \
+                        and (now - e.update_failed_at) < cooldown:
+                    skipped.append(e.name)
+                    continue
+                e.new_version = pkg.version          # cosi' il report mostra la versione di arrivo
+                queue.append((e, e.type, e.slug, e.name, e.current_version))
+
         if skipped:
             log.info("Site '%s' (id=%s): %d update saltati per cooldown: %s",
                      site.name, site.id, len(skipped), ", ".join(skipped))
         if skipped_dlkey:
             log.info("Site '%s' (id=%s): %d update saltati per download key mancante: %s",
                      site.name, site.id, len(skipped_dlkey), ", ".join(skipped_dlkey))
+
+        # coppie gratuito + Pro (Elementor / Elementor Pro): prima il Pro, e il gratuito
+        # non salta di versione principale da solo
+        held, wait_for = [], {}
+        installed, names = {}, {}
+        if site.cms == "wp":
+            plugin_exts = {}
+            for e in (await s.execute(select(Extension).where(Extension.site_id == site.id, Extension.type == "plugin"))).scalars().all():
+                installed[e.slug] = e.current_version or ""
+                names[e.slug] = e.name
+                plugin_exts[e.slug] = e
+            queue, held, wait_for = _plan_coupled(queue, plugin_exts, now)
+            # I prodotti a licenza vanno PER PRIMI: subito dopo il controllo i loro dati di
+            # aggiornamento sono freschi, mentre ogni aggiornamento successivo li svuota e
+            # Elementor Pro interroga il proprio server al massimo una volta al minuto.
+            first = [q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] in LICENSED_FIRST]
+            if first:
+                queue = first + [q for q in queue if q not in first]
+            for (e, _t, sl, nm, cur) in held:
+                pro = COUPLED_PAIRS.get(sl, "")
+                log.info("UPDATE IN ATTESA '%s' (id=%s): %s %s -> %s, il Pro (%s) e' gia' stato tentato oggi senza esito",
+                         site.name, site.id, nm, cur, e.new_version, pro)
 
         if not queue:
             return
@@ -1071,7 +1254,17 @@ async def update_site(ctx, site_id: int):
 
         # 3) aggiorna UNA per volta, con pausa; registra successo/fallimento per il cooldown
         results = []
+        done = {}   # slug -> versione dopo un aggiornamento riuscito in questo giro
         for (ext, etype, slug, name, current) in queue:
+            if slug in wait_for:
+                pro_slug, tmaj = wait_for[slug]
+                if _major(done.get(pro_slug, installed.get(pro_slug, ""))) < tmaj:
+                    pro_name = names.get(pro_slug, pro_slug)
+                    log.info("UPDATE IN ATTESA '%s' (id=%s): %s resta a %s, %s non si e' aggiornato",
+                             site.name, site.id, name, current, pro_name)
+                    results.append({"name": name, "from": current, "to": (ext.new_version if ext is not None else ""),
+                                    "ok": False, "held": True, "error": _held_reason(name, pro_name, tmaj)})
+                    continue
             # SEMPRE il task update normale: e' il CONNETTORE a decidere il percorso.
             # Se l'update sta sul canale Joomla lo installa da li' (manifest coerente, riga
             # #__updates rimossa); se il canale non ha nulla e il prodotto e' Balbooa, il
@@ -1084,6 +1277,30 @@ async def update_site(ctx, site_id: int):
             # PRODOTTO A LICENZA che non si aggiorna da remoto (es. Elementor Pro senza
             # pacchetto scaricabile): non e' un guasto, va fatto dal backend del sito.
             # Niente "fallito", niente notifica d'errore, riprova al massimo una volta al giorno.
+            # Messaggio onesto: "licenza non attiva" solo se il connettore l'ha VERIFICATO
+            # (lo dice tra parentesi); altrimenti si riporta solo il fatto. Con la licenza
+            # attiva il file puo' mancare anche per una cache del produttore non ancora aggiornata.
+            if not res["ok"] and res.get("manual") and res.get("reason") == "no_package":
+                err = res.get("error") or ""
+                hint = err[err.find("(") + 1:err.rfind(")")] if ("(" in err and err.rstrip().endswith(")")) else ""
+                res["error"] = "il server del produttore non ha consegnato il file di aggiornamento a questo sito" + (f" ({hint})" if hint else "")
+
+            via_package = False
+            if not res["ok"] and res.get("manual") and site.cms == "wp":
+                pkg = packages.get((etype, slug)) if packages else None
+                if pkg and _pkg_newer(pkg.version, current):
+                    inst = await _install_package(site, pkg)
+                    if inst.get("ok"):
+                        log.info("UPDATE DA PACCHETTO '%s' (id=%s): %s %s -> %s",
+                                 site.name, site.id, name, current, inst.get("new") or pkg.version)
+                        res = {"ok": True, "error": "", "new": inst.get("new") or pkg.version,
+                               "noop": False, "message": "", "manual": False}
+                        via_package = True
+                    else:
+                        res["error"] = (res.get("error") or "") + " · pacchetto caricato non installato: " + (inst.get("error") or "?")
+                elif not pkg:
+                    res["error"] = (res.get("error") or "") + " · carica lo zip in Sentinel (Impostazioni → Pacchetti) e verrà installato in automatico"
+
             if not res["ok"] and res.get("manual"):
                 log.info("UPDATE DA FARE A MANO '%s' (id=%s): %s %s -> %s (prodotto a licenza)",
                          site.name, site.id, name, current, res["new"] or "?")
@@ -1129,8 +1346,10 @@ async def update_site(ctx, site_id: int):
                 await asyncio.sleep(settings.AUTOUPDATE_PAUSE_SECONDS)
                 continue
 
+            if res["ok"] and res["new"]:
+                done[slug] = res["new"]
             results.append({
-                "name": name, "from": current,
+                "name": name + (" (pacchetto Sentinel)" if via_package else ""), "from": current,
                 "to": res["new"] or "", "ok": res["ok"], "error": res["error"],
             })
             # storico (7 giorni): alimenta timeline e dashboard di Sentinel
@@ -1164,6 +1383,11 @@ async def update_site(ctx, site_id: int):
                          site.name, site.id, name, current, res["new"])
             await asyncio.sleep(settings.AUTOUPDATE_PAUSE_SECONDS)
 
+        for (e, _t, sl, nm, cur) in held:
+            pro_slug = COUPLED_PAIRS.get(sl, "")
+            results.append({"name": nm, "from": cur, "to": e.new_version or "", "ok": False, "held": True,
+                            "error": _held_reason(nm, names.get(pro_slug, pro_slug), _major(e.new_version))})
+
         await s.commit()   # persisti lo stato di cooldown prima del re-check
 
         # 4) re-check finale + email report
@@ -1194,12 +1418,15 @@ async def update_site(ctx, site_id: int):
 
         try:
             if not site.notifications_silenced:
-                ctx_report = {"site_name": site.name, "site_url": site.url, "cms": site.cms, "results": results}
+                ctx_report = {"site_name": site.name, "site_url": site.url, "cms": site.cms, "results": results,
+                              "site_id": site.id, "panel_url": await _panel_url(), "folder": _folder_label(site)}
                 if visual:
                     ctx_report["visual"] = visual
                     if visual["status"] in ("warn", "ko"):
                         ctx_report["_attachments"] = _visual_attachments(site)
-                await notify_dispatch("site_report", ctx_report)
+                # modalita' "riepilogo per ciclo": niente email per sito (Telegram per sito resta com'e')
+                per_cycle = (await _email_mode()) == "cycle"
+                await notify_dispatch("site_report", ctx_report, channels={"email": False} if per_cycle else None)
         except Exception as ex:  # noqa: BLE001
             # l'invio email non deve far fallire il job, ma l'errore va tracciato
             log.warning("Invio email report fallito per '%s' (id=%s): %s", site.name, site.id, ex)
@@ -1211,11 +1438,30 @@ async def update_site(ctx, site_id: int):
             if site.notifications_silenced:
                 return
             n_ok = sum(1 for r in results if r["ok"])
-            n_fail = sum(1 for r in results if not r["ok"] and not r.get("manual"))
+            n_fail = sum(1 for r in results if not r["ok"] and not r.get("manual") and not r.get("held"))
             redis = ctx["redis"]
+            # dati strutturati per il riepilogo di ciclo (Telegram ed email per ciclo)
+            held_once = []
+            for r in results:
+                if r.get("held"):
+                    once = f"tg:held:{site.id}:{r['name']}:{r.get('to') or ''}"
+                    if await redis.set(once, "1", ex=86400, nx=True):
+                        held_once.append({"name": r["name"], "error": r.get("error") or ""})
+            report = {
+                "site": site.name, "id": site.id, "folder": _folder_label(site),
+                "ok": [{"name": r["name"], "from": r.get("from") or "", "to": r.get("to") or ""} for r in results if r.get("ok")],
+                "failed": [{"name": r["name"], "error": r.get("error") or ""} for r in results
+                           if not r.get("ok") and not r.get("manual") and not r.get("held")],
+                "manual": [{"name": r["name"], "error": r.get("error") or ""} for r in results if r.get("manual")],
+                "held": held_once,
+                "visual": ({"status": visual["status"], "message": visual["message"]} if visual else None),
+            }
+            await redis.rpush("tg:cycle:report", json.dumps(report, ensure_ascii=False))
             for r in results:
                 if r.get("manual"):
                     await redis.rpush("tg:cycle:manual_detail", f"{site.name}: {r['name']}")
+                elif r.get("held") and any(h["name"] == r["name"] for h in held_once):
+                    await redis.rpush("tg:cycle:manual_detail", f"{site.name}: {r['name']} (in attesa del Pro)")
             if visual:
                 if visual["status"] == "ok":
                     await redis.incr("tg:cycle:visual_ok")
@@ -1242,12 +1488,12 @@ async def update_site(ctx, site_id: int):
             if n_fail:
                 await redis.incrby("tg:cycle:failed", n_fail)
                 for r in results:
-                    if not r["ok"] and not r.get("manual"):
+                    if not r["ok"] and not r.get("manual") and not r.get("held"):
                         await redis.rpush("tg:cycle:failed_detail", f"{site.name}: {r['name']}")
             # TTL di sicurezza: i contatori si autodistruggono dopo 2h se qualcosa va storto
             for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
                       "tg:cycle:failed_detail", "tg:cycle:ok_detail",
-                      "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
+                      "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail", "tg:cycle:report"):
                 await redis.expire(k, 7200)
         except Exception as ex:  # noqa: BLE001
             log.warning("Aggiornamento contatori Telegram fallito: %s", ex)
@@ -1267,7 +1513,7 @@ async def auto_update_cycle(ctx):
         redis = ctx["redis"]
         for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
                   "tg:cycle:failed_detail", "tg:cycle:ok_detail",
-                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
+                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail", "tg:cycle:report"):
             await redis.delete(k)
     except Exception as ex:  # noqa: BLE001
         log.warning("Reset contatori Telegram fallito: %s", ex)
@@ -1315,7 +1561,7 @@ async def mass_update_now(ctx):
         redis = ctx["redis"]
         for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
                   "tg:cycle:failed_detail", "tg:cycle:ok_detail",
-                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
+                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail", "tg:cycle:report"):
             await redis.delete(k)
     except Exception as ex:  # noqa: BLE001
         log.warning("Reset contatori Telegram (mass) fallito: %s", ex)
@@ -1361,7 +1607,7 @@ async def mass_update_selected(ctx, site_ids: list):
         redis = ctx["redis"]
         for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
                   "tg:cycle:failed_detail", "tg:cycle:ok_detail",
-                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail"):
+                  "tg:cycle:manual_detail", "tg:cycle:visual_ok", "tg:cycle:visual_detail", "tg:cycle:report"):
             await redis.delete(k)
     except Exception as ex:  # noqa: BLE001
         log.warning("Reset contatori Telegram (selected) fallito: %s", ex)
@@ -1410,8 +1656,18 @@ async def cycle_summary(ctx):
                 ok_lines += "\n\n🔧 Da aggiornare a mano (licenza): " + str(len(manual_detail))
                 ok_lines += "\n" + "\n".join(f"• {x}" for x in manual_detail[:MAX_ROWS])
             failed_lines = "\n".join(f"• {x}" for x in failed_detail[:MAX_ROWS]) + (f"\n…e altri {len(failed_detail) - MAX_ROWS}" if len(failed_detail) > MAX_ROWS else "")
+            report = []
+            for raw in _dec(await redis.lrange("tg:cycle:report", 0, -1)):
+                try:
+                    report.append(json.loads(raw))
+                except Exception:  # noqa: BLE001
+                    pass
+            per_cycle = (await _email_mode()) == "cycle"
             await notify_dispatch("cycle_summary", {"applied": applied, "sites_touched": sites_touched, "failed": failed,
-                                  "ok_lines": ok_lines, "failed_lines": failed_lines})
+                                  "ok_lines": ok_lines, "failed_lines": failed_lines,
+                                  "report": report, "when": datetime.now().strftime("%H:%M"),
+                                  "panel_url": await _panel_url()},
+                                  channels={"email": True} if per_cycle else None)
     except Exception as ex:  # noqa: BLE001
         log.warning("Riepilogo ciclo Telegram fallito: %s", ex)
 

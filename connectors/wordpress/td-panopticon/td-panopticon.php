@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.17.0
+ * Version: 2.18.3
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -78,6 +78,7 @@ function tdpanop_translations()
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token regenerated. Update it in Sentinel TD as well.',
             'Collegamento fallito: %s' => 'Connection failed: %s',
             'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'This site is ALREADY in Sentinel TD: nothing was changed.',
+            'Sito già presente in Sentinel TD: collegamento aggiornato, il pannello ora usa il token attuale di questo sito.' => 'Site already in Sentinel TD: connection updated, the panel now uses this site\'s current token.',
             'Sito collegato a Sentinel TD.' => 'Site connected to Sentinel TD.',
             'Sito collegato a Sentinel TD nella cartella "%s".' => 'Site connected to Sentinel TD in the folder "%s".',
             'Sito collegato a Sentinel TD con auto-update attivo.' => 'Site connected to Sentinel TD with automatic updates on.',
@@ -113,6 +114,7 @@ function tdpanop_translations()
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Jeton régénéré. Mettez-le aussi à jour dans Sentinel TD.',
             'Collegamento fallito: %s' => 'Échec de la connexion : %s',
             'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'Ce site est DÉJÀ présent dans Sentinel TD : aucune modification effectuée.',
+            'Sito già presente in Sentinel TD: collegamento aggiornato, il pannello ora usa il token attuale di questo sito.' => 'Site déjà présent dans Sentinel TD : connexion mise à jour, le panneau utilise maintenant le jeton actuel de ce site.',
             'Sito collegato a Sentinel TD.' => 'Site connecté à Sentinel TD.',
             'Sito collegato a Sentinel TD nella cartella "%s".' => 'Site connecté à Sentinel TD dans le dossier « %s ».',
             'Sito collegato a Sentinel TD con auto-update attivo.' => 'Site connecté à Sentinel TD avec les mises à jour automatiques activées.',
@@ -148,6 +150,7 @@ function tdpanop_translations()
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token neu erzeugt. Aktualisieren Sie ihn auch in Sentinel TD.',
             'Collegamento fallito: %s' => 'Verbindung fehlgeschlagen: %s',
             'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'Diese Website ist BEREITS in Sentinel TD vorhanden: es wurde nichts geändert.',
+            'Sito già presente in Sentinel TD: collegamento aggiornato, il pannello ora usa il token attuale di questo sito.' => 'Website bereits in Sentinel TD: Verbindung aktualisiert, das Panel verwendet jetzt den aktuellen Token dieser Website.',
             'Sito collegato a Sentinel TD.' => 'Website mit Sentinel TD verbunden.',
             'Sito collegato a Sentinel TD nella cartella "%s".' => 'Website mit Sentinel TD im Ordner „%s“ verbunden.',
             'Sito collegato a Sentinel TD con auto-update attivo.' => 'Website mit Sentinel TD verbunden, automatische Updates aktiv.',
@@ -300,7 +303,10 @@ function tdpanop_admin_page()
             $code = (int) wp_remote_retrieve_response_code($resp);
             $body = json_decode((string) wp_remote_retrieve_body($resp), true);
             if ($code === 200 && !empty($body['ok'])) {
-                if (!empty($body['existed'])) {
+                if (!empty($body['existed']) && !empty($body['realigned'])) {
+                    // il pannello ha riallineato il collegamento (tipico dopo una reinstallazione)
+                    $msg = esc_html(tdpanop__('Sito già presente in Sentinel TD: collegamento aggiornato, il pannello ora usa il token attuale di questo sito.'));
+                } elseif (!empty($body['existed'])) {
                     $msg = esc_html(tdpanop__('Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.'));
                 } elseif ($tag !== '') {
                     $msg = esc_html(sprintf(tdpanop__($auto ? 'Sito collegato a Sentinel TD nella cartella "%s" con auto-update attivo.' : 'Sito collegato a Sentinel TD nella cartella "%s".'), $tag));
@@ -447,11 +453,23 @@ add_action('rest_api_init', function () {
 
 function tdpanop_auth(WP_REST_Request $req)
 {
+    $bearer = '';
     $hdr = $req->get_header('authorization');
-    if (!$hdr || stripos($hdr, 'Bearer ') !== 0) {
+    if ($hdr && stripos($hdr, 'Bearer ') === 0) {
+        $bearer = trim(substr($hdr, 7));
+    }
+    // Alcuni hosting (Apache in CGI/FastCGI configurato male) buttano via l'header
+    // Authorization prima che arrivi a PHP: il token non arriverebbe mai e la risposta
+    // sarebbe sempre 401. Il pannello lo manda anche in X-Sentinel-Token, che nessuno filtra.
+    if ($bearer === '') {
+        $alt = $req->get_header('x_sentinel_token');
+        if ($alt) {
+            $bearer = trim((string) $alt);
+        }
+    }
+    if ($bearer === '') {
         return false;
     }
-    $bearer = trim(substr($hdr, 7));
     if (hash_equals(tdpanop_token(), $bearer)) {
         return true;
     }
@@ -494,6 +512,7 @@ function tdpanop_status($req = null)
         // 12h: se last_checked e' recente NON ricontattano wordpress.org e restituiscono
         // uno stato vecchio. Cancellando prima i transient il throttle non scatta e il
         // refresh e' reale (identico al pulsante "Controlla di nuovo" del backend).
+        tdpanop_wake_premium_updaters();
         delete_site_transient('update_plugins');
         delete_site_transient('update_themes');
         delete_site_transient('update_core');
@@ -681,53 +700,8 @@ function tdpanop_update(WP_REST_Request $req)
     // da "non aggiornabile da qui".
     $panelExpected = trim((string) $req->get_param('expected'));
 
-    // Plugin e temi A LICENZA (Elementor Pro, ACF Pro, WP Rocket, Yoast Premium…) non stanno
-    // su wordpress.org: le loro info di aggiornamento le inserisce il plugin stesso, di
-    // solito solo nel backend. Ricostruendo la cache qui (via REST, fuori dal backend)
-    // sparirebbero, e WordPress risponderebbe "il plugin e' alla sua ultima versione".
-    // Quindi salviamo la voce attuale PRIMA di ricostruire, e se dopo manca la rimettiamo.
-    $savedEntry = null;
-    if ($type === 'plugin' || $type === 'theme') {
-        $prev = get_site_transient($type === 'plugin' ? 'update_plugins' : 'update_themes');
-        if ($type === 'plugin') {
-            $pf = tdpanop_plugin_file_by_slug($slug);
-            if ($pf !== '' && $prev && !empty($prev->response[$pf])) {
-                $savedEntry = $prev->response[$pf];
-            }
-        } elseif ($prev && !empty($prev->response[$slug])) {
-            $savedEntry = $prev->response[$slug];
-        }
-    }
-
-    // refresh transient prima di agire. Con un object cache persistente il transient puo'
-    // essere stantio/vuoto e wp_update_plugins() e' throttlato a 12h: l'upgrader vedrebbe
-    // "up_to_date" (response mancante) e NON applicherebbe nulla. Cancellandolo prima, il
-    // throttle non scatta, il controllo e' reale e l'upgrade parte davvero.
-    delete_site_transient('update_plugins');
-    delete_site_transient('update_themes');
-    delete_site_transient('update_core');
-    wp_update_plugins();
-    wp_update_themes();
-    wp_version_check();
-
-    // rimetti la voce a licenza se la ricostruzione l'ha persa (vedi sopra)
-    $reinjected = false;
-    if ($savedEntry !== null) {
-        $tname = $type === 'plugin' ? 'update_plugins' : 'update_themes';
-        $key   = $type === 'plugin' ? tdpanop_plugin_file_by_slug($slug) : $slug;
-        $cur   = get_site_transient($tname);
-        if (!is_object($cur)) {
-            $cur = new stdClass();
-        }
-        if (!isset($cur->response) || !is_array($cur->response)) {
-            $cur->response = [];
-        }
-        if (empty($cur->response[$key])) {
-            $cur->response[$key] = $savedEntry;
-            set_site_transient($tname, $cur);
-            $reinjected = true;
-        }
-    }
+    // Dati di aggiornamento pronti SENZA distruggere quelli buoni (vedi la funzione).
+    tdpanop_prepare_update_data($type, $slug, false);
 
     $skin = new Automatic_Upgrader_Skin();
     $res  = null;
@@ -780,6 +754,24 @@ function tdpanop_update(WP_REST_Request $req)
 
             $plugins  = get_plugins();
             $verAfter = isset($plugins[$file]['Version']) ? (string) $plugins[$file]['Version'] : '';
+
+            // SECONDO TENTATIVO: la versione non e' salita. Dati ricostruiti da zero (voce
+            // persa, file del produttore scaduto, blocco di Elementor) e si riprova una volta.
+            if (!($verAfter !== '' && $verBefore !== '' && version_compare($verAfter, $verBefore, '>'))
+                && tdpanop_prepare_update_data('plugin', $slug, true)) {
+                $skin = new Automatic_Upgrader_Skin();
+                $up   = new Plugin_Upgrader($skin);
+                add_filter('wp_doing_cron', $force_cron, 999);
+                try {
+                    $res = $up->upgrade($file);
+                } finally {
+                    remove_filter('wp_doing_cron', $force_cron, 999);
+                }
+                wp_cache_delete('alloptions', 'options');
+                wp_clean_plugins_cache(false);
+                $plugins  = get_plugins();
+                $verAfter = isset($plugins[$file]['Version']) ? (string) $plugins[$file]['Version'] : '';
+            }
 
             // RETE DI SICUREZZA (cintura + bretelle): anche se il contesto cron dovrebbe aver
             // evitato la disattivazione, se per qualunque motivo il plugin risulta spento e prima
@@ -902,16 +894,30 @@ function tdpanop_update(WP_REST_Request $req)
             return new WP_REST_Response(['ok' => true, 'noop' => true, 'error' => '', 'new' => $verBefore,
                 'message' => 'già alla versione ' . $verBefore], 200);
         }
-        // Nessun pacchetto scaricabile per questo plugin/tema: tipico dei prodotti a licenza
-        // che si aggiornano solo dal backend del sito. Non e' un guasto: va fatto a mano.
-        $tcheck = get_site_transient($type === 'plugin' ? 'update_plugins' : 'update_themes');
-        $tkey   = $type === 'plugin' ? tdpanop_plugin_file_by_slug($slug) : $slug;
-        $tent   = ($tcheck && !empty($tcheck->response[$tkey])) ? $tcheck->response[$tkey] : null;
-        $pkg    = is_object($tent) ? ($tent->package ?? '') : (is_array($tent) ? ($tent['package'] ?? '') : '');
-        if ($pkg === '' || $res === false) {
+        // NB: NON rileggere qui la cache degli aggiornamenti. Dopo un tentativo WordPress la
+        // svuota da solo: rileggerla adesso dava sempre "dati mancanti" e nascondeva l'errore
+        // vero (download rifiutato, file non copiabile…). Si usa l'esito dell'installazione.
+        $err = is_wp_error($res) ? $res : ((isset($skin->result) && is_wp_error($skin->result)) ? $skin->result : null);
+        $lic = tdpanop_license_hint($slug);
+        if ($err !== null && $err->get_error_code() === 'no_package') {
+            // il produttore non ha consegnato il file: va fatto a mano (o con un pacchetto)
             return new WP_REST_Response(['ok' => false, 'manual' => true, 'current' => $verBefore, 'new' => $expected,
-                'error' => 'aggiornamento non disponibile da remoto: questo prodotto si aggiorna con la propria licenza '
-                         . 'dal backend del sito (Bacheca → Aggiornamenti)'], 200);
+                'reason' => 'no_package',
+                'error' => 'il server del produttore non ha consegnato il file di aggiornamento a questo sito'
+                         . ($lic !== '' ? ' (' . $lic . ')' : '')], 200);
+        }
+        if ($err === null && $res === false) {
+            // WordPress non aveva l'aggiornamento in elenco al momento di installarlo
+            return new WP_REST_Response(['ok' => false, 'manual' => true, 'current' => $verBefore, 'new' => $expected,
+                'reason' => 'no_entry',
+                'error' => 'WordPress non aveva i dati di aggiornamento di questo prodotto al momento di installarlo'
+                         . ($lic !== '' ? ' (' . $lic . ')' : '')], 200);
+        }
+        if ($err !== null) {
+            // errore reale: riportato com'e', con il suo codice per capire cosa e' successo
+            return new WP_REST_Response(['ok' => false, 'current' => $verBefore, 'new' => $expected,
+                'error' => trim(wp_strip_all_tags($err->get_error_message())) . ' [' . $err->get_error_code() . ']'
+                         . ($lic !== '' ? ' (' . $lic . ')' : '')], 200);
         }
     }
 
@@ -948,6 +954,217 @@ function tdpanop_update(WP_REST_Request $req)
     }
 
     return new WP_REST_Response(['ok' => false, 'error' => $reason, 'new' => $expected, 'current' => $verBefore], 200);
+}
+
+/* ---------------------------------------------------------------------------
+ * Aggiornamento nel contesto del BACKEND (admin-ajax.php).
+ * Via REST WordPress gira "da fuori": i plugin a licenza (Elementor Pro, ACF Pro,
+ * Gravity Forms, WP Rocket…) spesso caricano il proprio sistema di aggiornamento solo
+ * nel backend, e il pacchetto non arriva. admin-ajax.php e' backend a tutti gli effetti
+ * (is_admin() vero, admin_init eseguito): li' i loro sistemi di aggiornamento sono attivi.
+ * Stessa autenticazione del REST (token Bearer), stessa logica di tdpanop_update().
+ * ------------------------------------------------------------------------- */
+function tdpanop_ajax_update()
+{
+    $hdr = '';
+    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION'] as $k) {
+        if (!empty($_SERVER[$k])) {
+            $hdr = (string) $_SERVER[$k];
+            break;
+        }
+    }
+    if ($hdr === '' && function_exists('getallheaders')) {
+        foreach ((array) getallheaders() as $hname => $hvalue) {
+            if (strtolower((string) $hname) === 'authorization') {
+                $hdr = (string) $hvalue;
+                break;
+            }
+        }
+    }
+    $req = new WP_REST_Request('POST');
+    $req->set_header('authorization', $hdr);
+    if (!empty($_SERVER['HTTP_X_SENTINEL_TOKEN'])) {
+        $req->set_header('x_sentinel_token', (string) $_SERVER['HTTP_X_SENTINEL_TOKEN']);
+    }
+    if (!tdpanop_auth($req)) {
+        wp_send_json(['ok' => false, 'error' => 'non autorizzato'], 401);
+    }
+    $req->set_param('type', sanitize_key(wp_unslash((string) ($_POST['type'] ?? ''))));
+    $req->set_param('slug', sanitize_text_field(wp_unslash((string) ($_POST['slug'] ?? ''))));
+    $req->set_param('expected', sanitize_text_field(wp_unslash((string) ($_POST['expected'] ?? ''))));
+    $resp = tdpanop_update($req);
+    $data = ($resp instanceof WP_REST_Response) ? (array) $resp->get_data() : (array) $resp;
+    $data['context'] = 'admin';
+    wp_send_json($data, 200);
+}
+add_action('wp_ajax_nopriv_tdpanop_update', 'tdpanop_ajax_update');
+add_action('wp_ajax_tdpanop_update', 'tdpanop_ajax_update');
+
+/**
+ * Prepara i dati di aggiornamento per UN plugin o tema, senza distruggere quelli buoni.
+ *
+ * Prima il connettore buttava via e ricostruiva tutto prima di OGNI aggiornamento. Ma
+ * Elementor Pro (e altri a licenza) interroga il proprio server al massimo una volta al
+ * minuto: su un sito con molti aggiornamenti in fila, al turno di Pro il server era gia'
+ * stato chiamato da poco, Elementor rifiutava di richiamarlo e Pro spariva dall'elenco
+ * ("WordPress non aveva i dati…"). Ora:
+ *  - se l'elemento e' gia' in elenco con il suo file, lo si usa cosi' com'e';
+ *  - altrimenti si ricostruisce, e se la voce buona e' andata persa la si rimette;
+ *  - per Elementor Pro, se manca ancora, si toglie il blocco del minuto e si chiede la
+ *    versione direttamente al suo modulo di licenza.
+ * $force = true ricostruisce comunque (secondo tentativo dopo un fallimento).
+ * Core e traduzioni: ricostruzione completa come sempre.
+ */
+function tdpanop_prepare_update_data($type, $slug, $force = false)
+{
+    tdpanop_wake_premium_updaters();
+    if ($type !== 'plugin' && $type !== 'theme') {
+        delete_site_transient('update_plugins');
+        delete_site_transient('update_themes');
+        delete_site_transient('update_core');
+        wp_update_plugins();
+        wp_update_themes();
+        wp_version_check();
+        return true;
+    }
+    $tname = ($type === 'plugin') ? 'update_plugins' : 'update_themes';
+    $key   = ($type === 'plugin') ? tdpanop_plugin_file_by_slug($slug) : $slug;
+    if ($key === '') {
+        return false;
+    }
+    $entry = tdpanop_update_entry($tname, $key);
+    if (!$force && tdpanop_entry_has_package($entry)) {
+        return true;
+    }
+    $saved = $entry;
+    if ($slug === 'elementor-pro') {
+        delete_option('_elementor_pro_api_requests_lock');
+    }
+    delete_site_transient($tname);
+    if ($type === 'plugin') {
+        wp_update_plugins();
+    } else {
+        wp_update_themes();
+    }
+    $entry = tdpanop_update_entry($tname, $key);
+    if (!tdpanop_entry_has_package($entry) && tdpanop_entry_has_package($saved)) {
+        tdpanop_set_update_entry($tname, $key, $saved);
+        $entry = $saved;
+    }
+    if (!tdpanop_entry_has_package($entry) && $type === 'plugin' && $slug === 'elementor-pro') {
+        $e = tdpanop_elementor_pro_entry($key);
+        if ($e !== null) {
+            tdpanop_set_update_entry($tname, $key, $e);
+            $entry = $e;
+        }
+    }
+    return tdpanop_entry_has_package($entry);
+}
+
+function tdpanop_update_entry($tname, $key)
+{
+    $t = get_site_transient($tname);
+    return ($t && !empty($t->response[$key])) ? $t->response[$key] : null;
+}
+
+function tdpanop_entry_has_package($e)
+{
+    if ($e === null) {
+        return false;
+    }
+    $pkg = is_object($e) ? ($e->package ?? '') : (is_array($e) ? ($e['package'] ?? '') : '');
+    return (string) $pkg !== '';
+}
+
+function tdpanop_set_update_entry($tname, $key, $entry)
+{
+    $cur = get_site_transient($tname);
+    if (!is_object($cur)) {
+        $cur = new stdClass();
+    }
+    if (!isset($cur->response) || !is_array($cur->response)) {
+        $cur->response = [];
+    }
+    $cur->response[$key] = $entry;
+    set_site_transient($tname, $cur);
+}
+
+/**
+ * Versione e file di Elementor Pro chiesti direttamente al suo modulo di licenza, dopo
+ * aver tolto il suo blocco di una richiesta al minuto. null se non disponibili (licenza
+ * non valida, server non raggiungibile, struttura del plugin diversa).
+ */
+function tdpanop_elementor_pro_entry($file)
+{
+    try {
+        delete_option('_elementor_pro_api_requests_lock');
+        $cls = 'ElementorPro\\License\\API';
+        if (!is_callable([$cls, 'get_version'])) {
+            return null;
+        }
+        $info = call_user_func([$cls, 'get_version'], true);
+        if (is_wp_error($info) || (!is_array($info) && !is_object($info))) {
+            return null;
+        }
+        $info = (array) $info;
+        if (empty($info['new_version']) || empty($info['package'])) {
+            return null;
+        }
+        return (object) [
+            'slug'        => 'elementor-pro',
+            'plugin'      => $file,
+            'new_version' => (string) $info['new_version'],
+            'package'     => (string) $info['package'],
+            'url'         => (string) ($info['url'] ?? ''),
+            'tested'      => (string) ($info['tested'] ?? ''),
+        ];
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Alcuni plugin a licenza creano il proprio sistema di aggiornamento solo quando qualcosa
+ * lo chiede, di solito le loro pagine nel backend. Elementor Pro lo crea con
+ * Admin::get_updater_instance(): fuori da li' puo' non esistere, e allora WordPress non sa
+ * ne' che c'e' una versione nuova ne' da dove scaricarla. Chiamarlo prima di ricostruire la
+ * cache degli aggiornamenti lo rende sempre presente. Se il prodotto manca o cambia
+ * struttura, la chiamata viene semplicemente saltata.
+ */
+function tdpanop_wake_premium_updaters()
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    try {
+        if (is_callable(['\\ElementorPro\\License\\Admin', 'get_updater_instance'])) {
+            call_user_func(['\\ElementorPro\\License\\Admin', 'get_updater_instance']);
+        }
+    } catch (\Throwable $e) {
+        // mai bloccare un aggiornamento per questo
+    }
+}
+
+/**
+ * Stato della licenza per i prodotti che lo espongono (oggi: Elementor Pro), cosi' il
+ * report dice PERCHE' il file non arriva invece di un generico "a mano".
+ */
+function tdpanop_license_hint($slug)
+{
+    if ($slug === 'elementor-pro') {
+        $key = (string) get_option('elementor_pro_license_key', '');
+        if ($key === '') {
+            return 'nessuna licenza Elementor Pro inserita su questo sito';
+        }
+        $raw = get_option('_elementor_pro_license_v2_data');
+        $val = is_array($raw) && isset($raw['value']) ? json_decode((string) $raw['value'], true) : null;
+        if (is_array($val) && !empty($val['license']) && $val['license'] !== 'valid') {
+            return 'stato licenza Elementor Pro: ' . sanitize_text_field((string) $val['license']);
+        }
+    }
+    return '';
 }
 
 /* ---------------------------------------------------------------------------

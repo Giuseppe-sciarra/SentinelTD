@@ -44,6 +44,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
     volumes:
+      - packages:/data/packages            # zip di plugin/temi a licenza caricati in Sentinel
       - connectors:/data/connectors
       - branding:/data/branding
       - screenshots:/data/screenshots:ro
@@ -57,7 +58,7 @@ services:
     command: [arq, app.worker.WorkerSettings]
     env_file: .env
     environment: *app-environment
-    volumes: [branding:/data/branding:ro, screenshots:/data/screenshots:ro]   # istantanee prima/dopo per i report
+    volumes: [branding:/data/branding:ro, screenshots:/data/screenshots:ro, packages:/data/packages:ro]   # istantanee prima/dopo per i report
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -67,3 +68,4 @@ volumes:
   screenshots:
   connectors:
   branding:
+  packages:

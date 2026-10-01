@@ -55,6 +55,9 @@ async def run_migrations(conn) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS ux_update_monthly_key
         ON update_monthly (period, site_id, ext_type, slug)
     """))
+    # Sito non raggiungibile: inizio dell'episodio, per avvisare solo dopo N minuti
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS offline_since TIMESTAMPTZ NULL"))
+
     # Estensioni a licenza da aggiornare a mano (es. Elementor Pro senza pacchetto remoto)
     await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS update_manual BOOLEAN NOT NULL DEFAULT FALSE"))
 

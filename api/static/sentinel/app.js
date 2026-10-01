@@ -20,11 +20,12 @@ function sentinel() {
     detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [],
     sec: { summary: null, items: [], loading: false, sev: '' },
     conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false },
+    pkg: { list: [], msg: '', err: '', busy: false },
     brand: { logo_url: '/static/logo.png', favicon_url: '/static/favicon.png', custom_logo: false, custom_favicon: false, busy: false },
     exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, dSort: 'folder' },
     expiryForm: { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 }, expiryEdit: false, expiryErr: '',
     prefsLoaded: false,
-    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, busy: false, msg: '', err: '' },
+    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, offline_alert_minutes: 5, email_report_mode: 'site', busy: false, msg: '', err: '' },
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
@@ -170,7 +171,7 @@ function sentinel() {
       if (this.route.page === 'history') await this.loadHistory();
       if (this.route.page === 'dashboard') { await this.loadHistory(); }
       if (this.route.page === 'stats') { await this.loadStats(); }
-      if (this.route.page === 'settings') { await this.loadConn(); await this.loadPrefs(); }
+      if (this.route.page === 'settings') { await this.loadConn(); await this.loadPrefs(); await this.loadPackages(); }
       if (this.route.page === 'account') { await this.load2fa(); }
       if (this.route.page === 'notifications') { await this.loadNotif(); }
       if (this.route.page === 'reports') { await this.loadReports(); }
@@ -300,8 +301,22 @@ function sentinel() {
     // ---------- site actions ----------
     async check(s) {
       this.busy[s.id] = true;
-      try { const r = await this.api(`/api/sites/${s.id}/refresh`, { method: 'POST' }); if (r.ok) { const d = await r.json(); Object.assign(s, d); if (this.detail && this.detail.id === s.id) this.detail = d; this.say('Check completato: ' + s.name); } }
-      finally { this.busy[s.id] = false; }
+      this.say(`Controllo di ${s.name} in corso…`);
+      try {
+        const r = await this.api(`/api/sites/${s.id}/refresh`, { method: 'POST' });
+        if (r.ok) {
+          const d = await r.json(); Object.assign(s, d); if (this.detail && this.detail.id === s.id) this.detail = d;
+          this.say(d.status === 'ok' ? `${s.name}: online` : `${s.name}: ancora non raggiungibile — ${d.error || 'errore'}`);
+        } else if (r.status === 502 || r.status === 504) {
+          // il proxy ha chiuso la richiesta prima della fine: il controllo prosegue sul server
+          this.say(`${s.name} risponde lentamente: il controllo continua, ricarica la pagina tra un minuto`);
+        } else {
+          const e = await r.json().catch(() => ({}));
+          this.say(`Check non riuscito su ${s.name}: ${e.detail || ('HTTP ' + r.status)}`);
+        }
+      } catch (e) {
+        this.say(`Check non riuscito su ${s.name}: connessione interrotta`);
+      } finally { this.busy[s.id] = false; }
     },
     async checkAll() { this.say('Check di tutti i siti in corso…'); for (const s of this.sites) { try { const r = await this.api(`/api/sites/${s.id}/refresh`, { method: 'POST' }); if (r.ok) Object.assign(s, await r.json()); } catch (e) { } } this.say('Check completato'); },
     async updateNow(s) {
@@ -735,8 +750,8 @@ function sentinel() {
         // (era successo con screenshot_every_hours: il valore non partiva e tornava al default).
         const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'expiry_warning_days',
                           'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days',
-                          'domain_decision_days', 'domain_alert_norenew'];
-        const body = { domain_alert_days: da, component_alert_days: ca };
+                          'domain_decision_days', 'domain_alert_norenew', 'offline_alert_minutes'];
+        const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site' };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
           if (Number.isFinite(v)) body[k] = v;
@@ -785,6 +800,38 @@ function sentinel() {
       this.conn.msg = 'Ora viene usato il pacchetto incluso';
       await this.loadConn();
     },
+    // ---------- pacchetti di plugin/temi a licenza ----------
+    async loadPackages() {
+      try { const r = await this.api('/api/packages'); if (r.ok) this.pkg.list = await r.json(); } catch (e) { }
+    },
+    async uploadPackage(ev) {
+      const f = ev.target.files && ev.target.files[0]; if (!f) return;
+      this.pkg.busy = true; this.pkg.err = ''; this.pkg.msg = '';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch('/api/packages', { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.token }, body: fd });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) {
+          this.pkg.msg = `${d.name} ${d.version} caricato` + (d.pending_sites ? ` · da installare su ${d.pending_sites} ${this.pl(d.pending_sites, 'sito', 'siti')}` : '');
+          await this.loadPackages();
+        } else this.pkg.err = d.detail || 'Caricamento non riuscito';
+      } finally { this.pkg.busy = false; ev.target.value = ''; }
+    },
+    async deletePackage(p) {
+      if (!confirm(`Eliminare il pacchetto ${p.name} ${p.version}?`)) return;
+      const r = await this.api('/api/packages/' + p.id, { method: 'DELETE' });
+      if (r.ok) await this.loadPackages(); else this.say('Eliminazione non riuscita');
+    },
+    async applyPackage(p) {
+      this.pkg.busy = true;
+      try {
+        const r = await this.api(`/api/packages/${p.id}/apply`, { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) this.say(d.queued ? `Aggiornamento avviato su ${d.queued} ${this.pl(d.queued, 'sito', 'siti')}` : 'Nessun sito da aggiornare');
+        else this.say(d.detail || 'Non riuscito');
+      } finally { this.pkg.busy = false; }
+    },
+    fmtSize(b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; },
     async uploadConn(kind, ev) {
       const f = ev.target.files && ev.target.files[0]; if (!f) return; this.conn.busy = true; this.conn.err = ''; this.conn.msg = '';
       try { const fd = new FormData(); fd.append('package', f); const r = await fetch('/api/connectors/' + kind, { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.token }, body: fd }); if (r.ok) { this.conn.msg = 'Connettore caricato'; await this.loadConn(); } else this.conn.err = (await r.json().catch(() => ({}))).detail || 'Upload fallito'; }

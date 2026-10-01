@@ -88,6 +88,9 @@ async def fetch_status(site: Site, timeout: float = 20.0, force: bool = False) -
         endpoint = f"{site.url.rstrip('/')}/index.php?option=com_ajax&plugin=tdpanopticon&group=system&format=json&task={task}&_={cb}"
     headers = {
         "Authorization": f"Bearer {site.token}",
+        # copia del token in un header che nessun hosting filtra: alcuni Apache in
+        # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
+        "X-Sentinel-Token": site.token,
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",

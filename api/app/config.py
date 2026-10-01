@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     # un singolo buco transitorio (WAF/CrowdSec, 502, timeout, risposta cachata dal proxy)
     # non genera falsi offline ne' notifiche Telegram inutili. Il debounce scatta SOLO
     # sulla transizione ok -> error: se il sito era gia' offline si comporta come prima.
-    OFFLINE_CONFIRM_CHECKS: int = 3          # check totali prima di dichiarare offline (1 = nessun retry)
-    OFFLINE_RETRY_DELAY_SECONDS: int = 120   # attesa tra un check e l'altro
+    OFFLINE_CONFIRM_CHECKS: int = 3          # NON PIU' USATA (dalla 2.7.3): Impostazioni → avviso dopo N minuti
+    OFFLINE_RETRY_DELAY_SECONDS: int = 120   # NON PIU' USATA (dalla 2.7.3): ricontrollo ogni minuto
 
     # --- Auto-update schedulato ---
     AUTOUPDATE_ENABLED: bool = False     # interruttore globale

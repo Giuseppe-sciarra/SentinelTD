@@ -11,8 +11,9 @@ Your server, your data, your branding.
 ## Features
 
 **Monitoring**
-- Availability checks with **confirmation before crying wolf**: an outage is announced only
-  after several failed checks, so a hiccup does not wake you up
+- Availability checks with **confirmation before crying wolf**: an outage is announced
+  only when the site stays unreachable for the minutes you choose (5 by default), so a slow
+  server does not wake you up
 - Core, plugin, theme and translation versions for every site, through the included connectors
 - Visual **preview of each site**, refreshed on a schedule, with thumbnails in the list
 - Folders (clients), tags, quick filters, search and CSV export
@@ -27,8 +28,10 @@ Your server, your data, your branding.
   version to which
 - **Homepage check**: a snapshot before and after every update; the report says whether the
   site looks the same, changed noticeably (snapshots attached) or broke
-- Licensed products that only update from the site's own admin (e.g. Elementor Pro) are
-  reported as *to update manually*, not as failures
+- Licensed products (e.g. Elementor Pro) are updated from inside the WordPress admin; when a
+  site cannot download them, Sentinel installs the zip you uploaded once in *Packages*
+- Elementor and Elementor Pro move together: Elementor never jumps to a new major version
+  while Pro is left behind
 
 **Security and renewals**
 - Vulnerability feed matched against the extensions actually installed, with severity and
@@ -141,6 +144,8 @@ no address, no key — so anyone can build their own; see `connectors/README.md`
 |------|-------|
 | Logo, favicon, panel name | Settings → Branding |
 | Rename a folder | pencil next to the folder in the sidebar |
+| Zip of a licensed plugin to install everywhere | Settings → Packages |
+| After how many minutes a silent site is reported | Settings → Report a site as unreachable after |
 | Expiry thresholds, scan frequency, preview refresh, history retention | Settings |
 | Panel address and registration key for the connectors | Settings → Connectors |
 | Text, HTML and channels of every notification | Notifications |
@@ -185,8 +190,11 @@ with them your history and settings.
 
 ## Troubleshooting
 
-- **A site shows as offline but it works** — open its detail page: the connector token may have
-  been regenerated on the site. Copy it again into *Edit*.
+- **A site shows as offline but it works (HTTP 401 `rest_forbidden`)** — the site answers but the
+  connector rejects the token, usually because the connector was removed and reinstalled. On
+  the site, *Settings → Sentinel TD → Connect this site to Sentinel TD* realigns the token by
+  itself; otherwise copy it into *Edit*. Hosts that drop the `Authorization` header are covered
+  since connector 2.18.2, which also accepts the token in `X-Sentinel-Token`.
 - **Updates fail on several sites at once** — it is almost always DNS or the filesystem, not the
   panel. `docker compose logs worker | grep "UPDATE FALLITO"` shows the real reason returned by
   each site.

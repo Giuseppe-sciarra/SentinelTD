@@ -17,6 +17,8 @@ DEFAULTS = {
     "history_retention_days": 400,  # cronologia dettagliata degli update (report dettagliato)
     "domain_decision_days": 60,     # quanti giorni prima chiedere "si rinnova o no?"
     "domain_alert_norenew": 1,      # 1 = avvisa anche per i domini da NON rinnovare
+    "offline_alert_minutes": 5,     # avvisa "non raggiungibile" solo dopo N minuti di errori continui (0 = subito)
+    "email_report_mode": "site",    # "site" = un'email per ogni sito; "cycle" = un riepilogo unico per ciclo
 }
 
 
@@ -42,11 +44,14 @@ def normalize(data: dict | None) -> dict:
         ("history_retention_days", 7, 3650),
         ("domain_decision_days", 0, 3650),
         ("domain_alert_norenew", 0, 1),
+        ("offline_alert_minutes", 0, 120),
     ):
         try:
             out[key] = max(lo, min(hi, int(src.get(key, out[key]))))
         except Exception:
             pass
+    mode = str(src.get("email_report_mode", out["email_report_mode"]) or "").strip().lower()
+    out["email_report_mode"] = mode if mode in ("site", "cycle") else "site"
     if out["expiry_critical_days"] > out["expiry_warning_days"]:
         out["expiry_critical_days"] = out["expiry_warning_days"]
     return out

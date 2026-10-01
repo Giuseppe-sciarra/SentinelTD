@@ -35,21 +35,28 @@ EVENTS: dict[str, dict[str, Any]] = {
         "channels": {"email": True, "telegram": False},
         "vars": {
             "site_name": "Nome del sito", "site_url": "URL del sito", "cms": "WordPress / Joomla",
+            "folder": "Cartella del sito (es. Clienti / Flash Factory)",
+            "outcome_icon": "Icona dell'esito (✅ ⚠️ ❌)", "outcome_text": "Esito in breve (es. 13 aggiornati)",
+            "status_box": "Riquadro controllo home (HTML)", "report_table": "Tabella degli update, problemi in cima (HTML)",
+            "panel_link": "Link al sito in Sentinel (HTML)",
             "ok_count": "Update riusciti", "failed_count": "Update falliti", "date": "Data e ora",
-            "updates_table": "Tabella HTML degli update (per email)",
+            "updates_table": "Tabella HTML degli update (formato precedente)",
             "updates_lines": "Elenco testuale degli update (per Telegram)",
-            "results": "Lista grezza [{name, from, to, ok, manual, error}] per template avanzati",
+            "results": "Lista grezza [{name, from, to, ok, manual, held, error}] per template avanzati",
             "manual_count": "Prodotti da aggiornare a mano (licenza)",
             "visual": "Controllo home prima/dopo: {status: ok|warn|ko|na, message, diff}",
         },
-        "subject": "[Sentinel] {{ site_name }}: {{ ok_count }} aggiornati, {{ failed_count }} falliti",
+        "subject": "[Sentinel] {{ outcome_icon }} {{ site_name }} — {{ outcome_text }}{% if folder %} · {{ folder }}{% endif %}",
         "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
-  <h2 style="margin:0 0 4px">{{ site_name }}</h2>
-  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>
-  {{ updates_table }}
+  <h2 style="margin:0 0 4px">{{ outcome_icon }} {{ site_name }}</h2>
+  <div style="color:#666;margin-bottom:{% if folder %}2px{% else %}14px{% endif %}">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>
+  {% if folder %}<div style="color:#666;margin-bottom:14px">📁 {{ folder }}</div>{% endif %}
+  {{ status_box }}
+  {{ report_table }}
+  {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}
   <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>
 </div>""",
-        "telegram": "🛠 <b>{{ site_name }}</b> — {{ ok_count }} aggiornati, {{ failed_count }} falliti\n{{ updates_lines }}",
+        "telegram": "{{ outcome_icon }} <b>{{ site_name }}</b> — {{ outcome_text }}\n{% if folder %}📁 {{ folder }}\n{% endif %}{{ updates_lines }}",
     },
     "update_failed": {
         "label": "Update fallito",
@@ -64,11 +71,14 @@ EVENTS: dict[str, dict[str, Any]] = {
         "label": "Riepilogo ciclo",
         "desc": "Un messaggio a fine ciclo automatico (solo se c'e' stato qualcosa da applicare).",
         "channels": {"email": False, "telegram": True},
-        "vars": {"applied": "Update applicati", "sites_touched": "Siti coinvolti", "failed": "Update falliti",
+        "vars": {"headline": "Riga di sintesi (es. 58 aggiornamenti su 7 siti)",
+                 "summary": "Riepilogo completo per Telegram: problemi in cima, una riga per sito, dettaglio richiudibile",
+                 "summary_email": "Riepilogo completo per email (HTML)",
+                 "applied": "Update applicati", "sites_touched": "Siti coinvolti", "failed": "Update falliti",
                  "ok_lines": "Elenco successi (una riga per sito)", "failed_lines": "Elenco fallimenti", "date": "Data e ora"},
-        "subject": "[Sentinel] Ciclo completato: {{ applied }} update su {{ sites_touched }} siti",
-        "email": """<h3>Ciclo aggiornamenti completato</h3><p>✅ {{ applied }} update applicati su {{ sites_touched }} siti</p><pre style="font-family:inherit">{{ ok_lines }}</pre>{% if failed %}<p>❌ {{ failed }} falliti</p><pre style="font-family:inherit">{{ failed_lines }}</pre>{% endif %}""",
-        "telegram": "📊 <b>Ciclo aggiornamenti completato</b>\n✅ {{ applied }} update applicati su {{ sites_touched }} siti\n{{ ok_lines }}{% if failed %}\n\n❌ {{ failed }} falliti\n{{ failed_lines }}{% endif %}",
+        "subject": "[Sentinel] {{ headline }}",
+        "email": """{{ summary_email }}""",
+        "telegram": "{{ summary }}",
     },
     "site_offline": {
         "label": "Sito non raggiungibile",
@@ -214,6 +224,11 @@ def _esc(s: Any) -> str:
     return html.escape(str(s or ""))
 
 
+# Modelli predefiniti delle versioni precedenti: una copia salvata IDENTICA a uno di questi non
+# e' una personalizzazione, e' il vecchio default rimasto nel database -> si usa quello nuovo.
+_LEGACY_DEFAULTS = {('cycle_summary', 'subject'): ('[Sentinel] Ciclo completato: {{ applied }} update su {{ sites_touched }} siti',), ('cycle_summary', 'body_email'): ('<h3>Ciclo aggiornamenti completato</h3><p>✅ {{ applied }} update applicati su {{ sites_touched }} siti</p><pre style="font-family:inherit">{{ ok_lines }}</pre>{% if failed %}<p>❌ {{ failed }} falliti</p><pre style="font-family:inherit">{{ failed_lines }}</pre>{% endif %}',), ('cycle_summary', 'body_telegram'): ('📊 <b>Ciclo aggiornamenti completato</b>\n✅ {{ applied }} update applicati su {{ sites_touched }} siti\n{{ ok_lines }}{% if failed %}\n\n❌ {{ failed }} falliti\n{{ failed_lines }}{% endif %}',), ('site_report', 'subject'): ('[Sentinel] {{ site_name }}: {{ ok_count }} aggiornati, {{ failed_count }} falliti', '[Sentinel] {{ outcome_icon }} {{ site_name }} — {{ outcome_text }}'), ('site_report', 'body_email'): ('<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ updates_table }}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>', '<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ outcome_icon }} {{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ status_box }}\n  {{ report_table }}\n  {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>'), ('site_report', 'body_telegram'): ('🛠 <b>{{ site_name }}</b> — {{ ok_count }} aggiornati, {{ failed_count }} falliti\n{{ updates_lines }}', '{{ outcome_icon }} <b>{{ site_name }}</b> — {{ outcome_text }}\n{{ updates_lines }}')}
+
+
 def default_config(event: str, language: str | None = None) -> dict:
     lang = normalize_language(language, DEFAULT_LANGUAGE)
     e = EVENTS[event]
@@ -237,10 +252,277 @@ async def get_config(event: str, language: str | None = None) -> dict:
                 saved = json.loads(row.value)
                 for k in cfg:
                     if k in saved:
+                        olds = _LEGACY_DEFAULTS.get((event, k)) or ()
+                        if saved[k] in olds or saved[k] in tuple(localize_template(o, language) for o in olds):
+                            continue        # vecchio predefinito, non una personalizzazione
                         cfg[k] = saved[k]
     except Exception as ex:  # noqa: BLE001
         log.warning("notify: config %s non leggibile: %s", event, ex)
     return cfg
+
+
+# --------------------------------------------------------------------------
+# Riepiloghi leggibili: report per sito e riepilogo di ciclo (Telegram + email)
+# --------------------------------------------------------------------------
+import re as _re_rep
+
+
+
+def _short(text, n=34):
+    text = str(text or "")
+    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
+def _major_of(v):
+    m = _re_rep.match(r"\s*(\d+)", str(v or ""))
+    return int(m.group(1)) if m else 0
+
+
+def _is_core(name):
+    return str(name or "") in ("WordPress core", "Joomla core")
+
+
+# Prodotti dove un salto di versione principale puo' davvero rompere un sito. Altri plugin
+# (Yoast passa da 27 a 28 ogni mese) cambiano il primo numero senza che significhi nulla:
+# segnalarli toglierebbe valore alla freccia proprio dove serve.
+_MAJOR_WATCH = ("elementor", "elementor pro", "woocommerce", "yootheme", "yootheme pro", "advanced custom fields",
+                "advanced custom fields pro", "acf", "wpml", "wpml multilingual cms", "polylang", "divi", "joomla", "wordpress")
+
+
+def _is_major_jump(r):
+    frm, to = str(r.get("from") or ""), str(r.get("to") or "")
+    name = str(r.get("name") or "").strip().lower()
+    return bool(frm and to) and _major_of(to) > _major_of(frm) and name in _MAJOR_WATCH
+
+
+def _highlights(oks):
+    """Le versioni che contano davvero: core e salti di versione principale."""
+    out = []
+    for r in oks:
+        if _is_core(r.get("name")):
+            out.append(f"{str(r.get('name')).replace(' core', '')} {r.get('to') or ''}".strip())
+        elif _is_major_jump(r):
+            out.append(f"{_short(r.get('name'), 26)} {r.get('to') or ''} ⬆️")
+    if not out and len(oks) == 1:
+        out.append(f"{_short(oks[0].get('name'), 30)} {oks[0].get('to') or ''}".strip())
+    return out[:3]
+
+
+def _site_outcome(results, visual, lang):
+    ok = [r for r in results if r.get("ok")]
+    failed = [r for r in results if not r.get("ok") and not r.get("manual") and not r.get("held")]
+    waiting = [r for r in results if r.get("manual") or r.get("held")]
+    vis = (visual or {}).get("status")
+    n_ok = len(ok)
+    upd = f"{n_ok} {t('aggiornati', lang) if n_ok != 1 else t('aggiornato', lang)}"
+    if failed:
+        return "❌", f"{len(failed)} {t('falliti', lang) if len(failed) != 1 else t('fallito', lang)} " \
+                     f"{t('su', lang)} {len(results)}"
+    if vis in ("ko",):
+        return "🛑", f"{upd}, {t('home con errori', lang)}"
+    if vis in ("warn",):
+        return "⚠️", f"{upd}, {t('home da controllare', lang)}"
+    if waiting:
+        return "⏸", f"{upd}, {len(waiting)} {t('in attesa', lang)}"
+    return "✅", upd
+
+
+def _upd_on(applied, sites, lang, bold=False):
+    """"58 aggiornamenti su 7 siti" con singolare e plurale giusti."""
+    a = f"<b>{applied}</b>" if bold else str(applied)
+    n = f"<b>{sites}</b>" if bold else str(sites)
+    return (f"{a} {t('aggiornamento su', lang) if applied == 1 else t('aggiornamenti su', lang)} "
+            f"{n} {t('sito', lang) if sites == 1 else t('siti', lang)}")
+
+
+def _cycle_numbers(rep):
+    return {
+        "applied": sum(len(x.get("ok") or []) for x in rep),
+        "sites": len([x for x in rep if x.get("ok")]),
+        "failed": sum(len(x.get("failed") or []) for x in rep),
+        "held": sum(len(x.get("held") or []) for x in rep),
+        "manual": sum(len(x.get("manual") or []) for x in rep),
+        "vis_ok": sum(1 for x in rep if (x.get("visual") or {}).get("status") == "ok"),
+        "vis_bad": [x for x in rep if (x.get("visual") or {}).get("status") in ("warn", "ko")],
+    }
+
+
+def _cycle_headline(rep, lang):
+    n = _cycle_numbers(rep)
+    icon = "❌" if n["failed"] else ("⚠️" if (n["vis_bad"] or n["held"] or n["manual"]) else "✅")
+    text = _upd_on(n["applied"], n["sites"], lang)
+    if n["failed"]:
+        text += f", {n['failed']} {t('falliti', lang) if n['failed'] != 1 else t('fallito', lang)}"
+    return f"{icon} {t('Ciclo', lang)} {text}"
+
+
+def _problem_lines(rep, lang, html=True):
+    """Una riga per ogni cosa da guardare: home, falliti, in attesa, a mano."""
+    E = _esc if html else (lambda x: str(x or ""))
+    out = []
+    for x in rep:
+        site = f"<b>{E(x['site'])}</b>" if html else x["site"]
+        if x.get("folder"):
+            site += f" · <i>{E(x['folder'])}</i>" if html else f" · {x['folder']}"
+        v = x.get("visual") or {}
+        if v.get("status") in ("warn", "ko"):
+            msg = t(str(v.get("message") or ""), lang)
+            out.append((site, E(msg.split(":")[0] if v.get("status") == "warn" else msg), ""))
+        for f in x.get("failed") or []:
+            out.append((site, f"{E(_short(f.get('name'), 32))} {t('non aggiornato', lang)}",
+                        E(_short(t(str(f.get("error") or ""), lang), 110))))
+        for h in x.get("held") or []:
+            out.append((site, f"{E(_short(h.get('name'), 32))} {t('in attesa del Pro', lang)}", ""))
+        for m in x.get("manual") or []:
+            out.append((site, f"{E(_short(m.get('name'), 32))} {t('da aggiornare a mano', lang)}", ""))
+    return out
+
+
+def _cycle_telegram(rep, lang, panel_url, when):
+    """Riepilogo di ciclo per Telegram.
+
+    In testa i numeri e cio' che va guardato; poi UN BLOCCO PER SITO: nome in grassetto e,
+    in una cornice che lo separa dal sito successivo, un elemento aggiornato per riga.
+    Le cornici con piu' di 6 righe partono chiuse e si aprono al tocco. I blocchi sono
+    separati da una riga vuota: se il messaggio e' troppo lungo, l'invio lo divide li'.
+    """
+    n = _cycle_numbers(rep)
+    problems = _problem_lines(rep, lang)
+    head = [f"🔄 <b>{t('Ciclo aggiornamenti', lang)} · {_esc(when)}</b>"]
+    line = "✅ " + _upd_on(n["applied"], n["sites"], lang, bold=True)
+    if not problems:
+        line += f" · {t('tutto ok', lang)}"
+    head.append(line)
+    extra = []
+    if n["failed"]:
+        extra.append(f"❌ {n['failed']} {t('falliti', lang) if n['failed'] != 1 else t('fallito', lang)}")
+    if n["held"]:
+        extra.append(f"⏸ {n['held']} {t('in attesa', lang)}")
+    if n["manual"]:
+        extra.append(f"🔧 {n['manual']} {t('a mano', lang)}")
+    if extra:
+        head.append(" · ".join(extra))
+    if n["vis_ok"] or n["vis_bad"]:
+        head.append(f"🖼 {t('Home', lang)}: {n['vis_ok']} ok" +
+                    (f" · ⚠️ {len(n['vis_bad'])} {t('da guardare', lang)}" if n["vis_bad"] else ""))
+    blocks = ["\n".join(head)]
+
+    if problems:
+        pl = [f"⚠️ <b>{t('Da guardare', lang)}</b>"]
+        for site, what, why in problems:
+            pl.append(f"• {site} — {what}")
+            if why:
+                pl.append(f"   <i>{why}</i>")
+        blocks.append("\n".join(pl))
+
+    MAX_LINES = 60
+    for x in sorted([x for x in rep if x.get("ok")], key=lambda x: -len(x["ok"])):
+        # prima il core, poi le nuove versioni principali: si vedono anche con la cornice chiusa
+        items = sorted(x["ok"], key=lambda r: 0 if _is_core(r.get("name")) else (1 if _is_major_jump(r) else 2))
+        rows = []
+        for r in items[:MAX_LINES]:
+            row = f"{_esc(_short(r.get('name'), 40))}  {_esc(r.get('from') or '')} → {_esc(r.get('to') or '')}"
+            if _is_core(r.get("name")) or _is_major_jump(r):
+                row = f"<b>{row}</b>" + (" ⬆️" if _is_major_jump(r) else "")
+            rows.append(row)
+        if len(items) > MAX_LINES:
+            rows.append(f"<i>…{t('e altri', lang)} {len(items) - MAX_LINES}</i>")
+        cnt = len(items)
+        title = (f"🌐 <b>{_esc(x['site'])}</b> · {cnt} "
+                 f"{t('aggiornamento', lang) if cnt == 1 else t('aggiornamenti', lang)}")
+        if x.get("folder"):
+            title += f"\n📁 {_esc(x['folder'])}"
+        tag = "<blockquote expandable>" if cnt > 6 else "<blockquote>"
+        blocks.append(title + "\n" + tag + "\n".join(rows) + "</blockquote>")
+
+    if panel_url:
+        blocks.append(f"🔗 <a href=\"{_esc(panel_url)}/#/history\">{t('Apri in Sentinel', lang)}</a>")
+    return "\n\n".join(blocks)
+
+
+def _cycle_email(rep, lang, panel_url, when):
+    n = _cycle_numbers(rep)
+    td = 'style="padding:6px 10px;border-bottom:1px solid #eee"'
+    h = ['<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:680px">',
+         f'<h2 style="margin:0 0 6px">{t("Ciclo aggiornamenti", lang)} · {_esc(when)}</h2>',
+         f'<p style="margin:0 0 4px">✅ {_upd_on(n["applied"], n["sites"], lang, bold=True)}</p>']
+    bits = []
+    if n["failed"]:
+        bits.append(f'❌ {n["failed"]} {t("falliti", lang) if n["failed"] != 1 else t("fallito", lang)}')
+    if n["held"]:
+        bits.append(f'⏸ {n["held"]} {t("in attesa", lang)}')
+    if n["manual"]:
+        bits.append(f'🔧 {n["manual"]} {t("a mano", lang)}')
+    if n["vis_ok"] or n["vis_bad"]:
+        bits.append(f'🖼 {t("Home", lang)}: {n["vis_ok"]} ok' + (f' · ⚠️ {len(n["vis_bad"])} {t("da guardare", lang)}' if n["vis_bad"] else ""))
+    if bits:
+        h.append(f'<p style="margin:0 0 14px;color:#555">{" · ".join(bits)}</p>')
+    problems = _problem_lines(rep, lang)
+    if problems:
+        h.append('<div style="margin:0 0 16px;padding:10px 14px;border:1px solid #f0c36d;background:#fff8e6;border-radius:8px">')
+        h.append(f'<b>⚠️ {t("Da guardare", lang)}</b><ul style="margin:6px 0 0;padding-left:18px">')
+        for site, what, why in problems:
+            h.append(f'<li>{site} — {what}' + (f'<br><span style="color:#888">{why}</span>' if why else '') + '</li>')
+        h.append('</ul></div>')
+    h.append('<table style="border-collapse:collapse;width:100%;font-size:14px">')
+    for x in sorted([x for x in rep if x.get("ok")], key=lambda x: -len(x["ok"])):
+        link = (f' <a href="{_esc(panel_url)}/#/site/{int(x.get("id") or 0)}" style="font-weight:400;font-size:12px">'
+                f'{t("apri", lang)}</a>') if panel_url and x.get("id") else ""
+        folder = (f'<br><span style="color:#888;font-weight:400;font-size:12px">📁 {_esc(x["folder"])}</span>'
+                  if x.get("folder") else "")
+        h.append(f'<tr><td colspan="2" style="padding:14px 10px 6px;font-weight:600;border-bottom:2px solid #ddd">'
+                 f'{_esc(x["site"])} <span style="color:#888;font-weight:400">· {len(x["ok"])}</span>{link}{folder}</td></tr>')
+        for r in x["ok"]:
+            name = _esc(r.get("name"))
+            if _is_core(r.get("name")) or _is_major_jump(r):
+                name = f"<b>{name}</b>" + (' <span style="color:#b26a00">⬆ ' + t("nuova versione principale", lang) + '</span>' if _is_major_jump(r) else "")
+            h.append(f'<tr><td {td}>{name}</td><td {td} style="font-family:monospace;white-space:nowrap">'
+                     f'{_esc(r.get("from") or "")} &rarr; {_esc(r.get("to") or "")}</td></tr>')
+    h.append('</table>')
+    if panel_url:
+        h.append(f'<p style="margin-top:16px"><a href="{_esc(panel_url)}/#/history">{t("Apri in Sentinel", lang)}</a></p>')
+    h.append(f'<p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {_esc(when)}</p></div>')
+    return "".join(h)
+
+
+def _site_report_extras(out, lang):
+    """Variabili nuove del report per sito: esito, riquadro home, tabella con i problemi in cima."""
+    results = out.get("results") or []
+    vis = out.get("visual") or {}
+    out["outcome_icon"], out["outcome_text"] = _site_outcome(results, vis, lang)
+    box = ""
+    if vis.get("status"):
+        icon, color, bg = {"ok": ("✅", "#1a7f4b", "#eef8f2"), "warn": ("⚠️", "#b26a00", "#fff8e6"),
+                           "ko": ("🛑", "#b00020", "#fdeeee"), "na": ("ℹ️", "#666", "#f6f7f9")}.get(vis["status"], ("ℹ️", "#666", "#f6f7f9"))
+        extra = (" " + t("Le istantanee prima e dopo sono allegate.", lang)) if vis["status"] in ("warn", "ko") else ""
+        box = (f'<p style="margin:0 0 14px;padding:10px 12px;border-radius:8px;background:{bg};color:{color}">'
+               f'{icon} <b>{t("Controllo home", lang)}:</b> {_esc(t(str(vis.get("message") or ""), lang))}{_esc(extra)}</p>')
+    out["status_box"] = box
+    td = 'style="padding:6px 10px;border-bottom:1px solid #eee"'
+    def rank(r):
+        if r.get("ok"):
+            return 3
+        return 0 if not (r.get("manual") or r.get("held")) else 1
+    rows = []
+    for r in sorted(results, key=rank):
+        name, frm, to = _esc(r.get("name")), _esc(r.get("from")), _esc(r.get("to"))
+        if r.get("ok"):
+            if _is_core(r.get("name")) or _is_major_jump(r):
+                name = f"<b>{name}</b>" + (' <span style="color:#b26a00;font-size:12px">⬆ ' + t("nuova versione principale", lang) + '</span>' if _is_major_jump(r) else "")
+            badge = '<span style="color:#1a7f4b;font-weight:600">' + t("aggiornato", lang) + "</span>"
+        elif r.get("held"):
+            badge = '<span style="color:#b26a00;font-weight:600">' + t("in attesa", lang) + '</span> <span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>"
+        elif r.get("manual"):
+            badge = '<span style="color:#b26a00;font-weight:600">' + t("da aggiornare a mano", lang) + '</span> <span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>"
+        else:
+            badge = '<span style="color:#b00020;font-weight:600">' + t("fallito", lang) + '</span> <span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>"
+        ver = f"{frm} &rarr; {to}" if to and to != frm else frm
+        rows.append(f'<tr><td {td}>{name}</td><td {td} style="font-family:monospace;white-space:nowrap">{ver}</td><td {td}>{badge}</td></tr>')
+    out["report_table"] = ('<table style="border-collapse:collapse;width:100%;font-size:14px"><thead><tr style="text-align:left;color:#888;font-size:12px">'
+                           f'<th style="padding:6px 10px">{t("Elemento", lang)}</th><th style="padding:6px 10px">{t("Versione", lang)}</th>'
+                           f'<th style="padding:6px 10px">{t("Esito", lang)}</th></tr></thead><tbody>{"".join(rows)}</tbody></table>')
+    panel, sid = str(out.get("panel_url") or "").rstrip("/"), out.get("site_id")
+    out["panel_link"] = f'<a href="{_esc(panel)}/#/site/{int(sid)}">{t("Apri in Sentinel", lang)}</a>' if panel and sid else ""
 
 
 def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = None) -> dict:
@@ -262,12 +544,17 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
         results = out.get("results") or []
         out["ok_count"] = sum(1 for r in results if r.get("ok"))
         # i prodotti da aggiornare a mano (licenza) NON sono falliti
-        out["failed_count"] = sum(1 for r in results if not r.get("ok") and not r.get("manual"))
+        out["failed_count"] = sum(1 for r in results if not r.get("ok") and not r.get("manual") and not r.get("held"))
         out["manual_count"] = sum(1 for r in results if r.get("manual"))
         rows, lines = [], []
         for r in results:
             name, frm, to = _esc(r.get("name")), _esc(r.get("from")), _esc(r.get("to"))
-            if r.get("manual"):
+            if r.get("held"):
+                badge = ('<span style="color:#b26a00;font-weight:600">' + t("in attesa", lang) + "</span> "
+                         '<span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>")
+                ver = f"{frm} &rarr; {to}" if to and to != frm else frm
+                lines.append(f"⏸ {name} {frm}→{to} — " + t("in attesa", lang))
+            elif r.get("manual"):
                 badge = ('<span style="color:#b26a00;font-weight:600">' + t("da aggiornare a mano", lang) + "</span> "
                          '<span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>")
                 ver = f"{frm} &rarr; {to}" if to and to != frm else frm
@@ -307,13 +594,21 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
             lines.append(f"\n{icon} {t('Controllo home', lang)}: {msg}")
         out["updates_lines"] = "\n".join(lines)
         out["cms"] = "WordPress" if str(out.get("cms", "")).lower() in ("wp", "wordpress") else ("Joomla" if out.get("cms") else "")
+        _site_report_extras(out, lang)
+
+    if event == "cycle_summary" and isinstance(out.get("report"), list):
+        when = str(out.get("when") or out.get("date") or "")
+        panel = str(out.get("panel_url") or "").rstrip("/")
+        out["headline"] = _cycle_headline(out["report"], lang)
+        out["summary"] = _cycle_telegram(out["report"], lang, panel, when)
+        out["summary_email"] = _cycle_email(out["report"], lang, panel, when)
 
     if not escape:
         return out
     for k in (
         "site_name", "site_url", "item", "reason", "ext_name", "ext_version", "cve_id", "title", "url",
         "ok_lines", "failed_lines", "version_fixed", "kind", "platform", "provider", "expires_on", "notes",
-        "period_label", "scope_label", "top_lines",
+        "period_label", "scope_label", "top_lines", "folder",
     ):
         if k in out and isinstance(out[k], str):
             out[k] = _esc(out[k])
@@ -335,8 +630,9 @@ def render(event: str, cfg: dict, ctx: dict, language: str | None = None) -> dic
     return res
 
 
-async def dispatch(event: str, ctx: dict) -> dict:
-    """Send a background event using DEFAULT_UI_LANGUAGE or a saved custom template."""
+async def dispatch(event: str, ctx: dict, channels: dict | None = None) -> dict:
+    """Send a background event using DEFAULT_UI_LANGUAGE or a saved custom template.
+    channels: forza l'invio su un canale ({"email": False}) a prescindere dalla configurazione."""
     sent = {"email": False, "telegram": False}
     if event not in EVENTS:
         return sent
@@ -347,6 +643,8 @@ async def dispatch(event: str, ctx: dict) -> dict:
     cfg = await get_config(event, lang)
     if not cfg.get("enabled", True):
         return sent
+    for k, v in (channels or {}).items():
+        cfg[k] = bool(v)
     r = render(event, cfg, ctx, lang)
     if r["error"]:
         log.warning("notify %s: template non valido (%s) — uso i default", event, r["error"])

@@ -89,7 +89,7 @@
     <span style="color:var(--mut);font-size:13px" x-show="summary.last_scan">
       Ultima scansione: <span x-text="fmtDate(summary.last_scan)"></span>
     </span>
-    <button class="btn primary" @click="scanNow()" :disabled="scanning">
+    <button class="btn primary" @click="scanNow()" :disabled="!!(scanning)">
       <span x-show="!scanning">🔄 Scansiona ora</span>
       <span x-show="scanning">Scansione in corso…</span>
     </button>

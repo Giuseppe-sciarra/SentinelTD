@@ -33,27 +33,65 @@ def _enabled() -> bool:
     )
 
 
+_TG_MAX = 3900   # Telegram accetta 4096 caratteri: margine per i tag HTML
+
+
+def _plain(html_text: str) -> str:
+    """Toglie i tag lasciando le entita' (&amp; ecc.): resta HTML valido senza tag."""
+    import re
+    return re.sub(r"<[^>]+>", "", html_text)
+
+
+def split_message(text: str, limit: int = _TG_MAX) -> list[str]:
+    """Divide un messaggio lungo nelle righe vuote tra un blocco e l'altro.
+
+    Prima il messaggio veniva tagliato a 4000 caratteri: se il taglio cadeva dentro un
+    tag, Telegram rifiutava tutto e non arrivava niente. I blocchi (testa, problemi, un
+    sito alla volta) non contengono righe vuote, quindi dividendo li' ogni pezzo resta
+    HTML valido. Un blocco da solo piu' lungo del limite viene ridotto a testo semplice
+    e accorciato, sempre senza tag spezzati.
+    """
+    if len(text) <= limit:
+        return [text]
+    out, cur = [], ""
+    for part in text.split("\n\n"):
+        if len(part) > limit:
+            part = _plain(part)[: limit - 1].rsplit("\n", 1)[0] + "\n…"
+        cand = f"{cur}\n\n{part}" if cur else part
+        if len(cand) <= limit:
+            cur = cand
+        else:
+            out.append(cur)
+            cur = part
+    if cur:
+        out.append(cur)
+    return out
+
+
 async def send_telegram(text: str) -> bool:
     """
     Invia un messaggio HTML al chat configurato. Ritorna True se inviato.
+    I messaggi lunghi partono in piu' pezzi, divisi tra un blocco e l'altro.
     Non solleva mai: in caso di errore logga e ritorna False.
     """
     if not _enabled():
         return False
     url = f"{_API}/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": settings.TELEGRAM_CHAT_ID,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-        "text": text[:4000],   # limite Telegram 4096; tronco con margine
-    }
+    ok = True
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(url, data=payload)
-            if r.status_code != 200:
-                log.warning("Telegram sendMessage HTTP %s: %s", r.status_code, r.text[:200])
-                return False
-            return True
+            for piece in split_message(text):
+                payload = {
+                    "chat_id": settings.TELEGRAM_CHAT_ID,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                    "text": piece,
+                }
+                r = await client.post(url, data=payload)
+                if r.status_code != 200:
+                    log.warning("Telegram sendMessage HTTP %s: %s", r.status_code, r.text[:200])
+                    ok = False
+        return ok
     except Exception as ex:  # noqa: BLE001
         log.warning("Invio Telegram fallito: %s", ex)
         return False

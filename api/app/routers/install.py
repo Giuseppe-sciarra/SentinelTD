@@ -46,6 +46,9 @@ async def _install_one(site: Site, content: bytes, filename: str, kind: str, act
     """Invia lo zip al connettore del sito. Ritorna l'esito normalizzato (non solleva)."""
     headers = {
         "Authorization": f"Bearer {site.token}",
+        # copia del token in un header che nessun hosting filtra: alcuni Apache in
+        # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
+        "X-Sentinel-Token": site.token,
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
@@ -159,6 +162,9 @@ async def _uninstall_one(site: Site, ext_type: str, slug: str) -> dict:
     """Chiede al connettore di rimuovere un'estensione. Ritorna l'esito (non solleva)."""
     headers = {
         "Authorization": f"Bearer {site.token}",
+        # copia del token in un header che nessun hosting filtra: alcuni Apache in
+        # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
+        "X-Sentinel-Token": site.token,
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",

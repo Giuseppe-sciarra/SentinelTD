@@ -12,7 +12,8 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 
 **Monitoraggio**
 - Controlli di raggiungibilità con **conferma prima di gridare al lupo**: un sito risulta
-  offline solo dopo più check falliti, così un singolo intoppo non ti sveglia di notte
+  offline solo se non risponde per tutti i minuti che decidi tu (5 di base), così un server
+  lento non ti sveglia di notte
 - Versioni di core, plugin, temi e traduzioni per ogni sito, tramite i connettori inclusi
 - **Anteprima visiva di ogni sito**, rigenerata a intervalli, con le miniature nell'elenco
 - Cartelle (clienti), tag, filtri rapidi, ricerca ed esportazione CSV
@@ -27,8 +28,11 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   da quale versione a quale
 - **Controllo della home**: un'istantanea prima e dopo ogni aggiornamento; il report dice se
   il sito è uguale, se è cambiato vistosamente (istantanee allegate) o se si è rotto
-- I prodotti a licenza che si aggiornano solo dal backend del sito (es. Elementor Pro)
-  risultano *da aggiornare a mano*, non falliti
+- I prodotti a licenza (es. Elementor Pro) si aggiornano dall'interno del backend di
+  WordPress; quando un sito non riesce a scaricarli, Sentinel installa lo zip che hai
+  caricato una volta in *Pacchetti*
+- Elementor ed Elementor Pro si muovono insieme: Elementor non salta mai a una nuova
+  versione principale lasciando indietro il Pro
 
 **Sicurezza e scadenze**
 - Vulnerabilità note confrontate con le estensioni realmente installate, con gravità e
@@ -144,6 +148,8 @@ vedi `connectors/README.md`.
 |------|------|
 | Logo, favicon, nome del pannello | Impostazioni → Branding |
 | Rinominare una cartella | matita accanto alla cartella nella barra laterale |
+| Zip di un plugin a licenza da installare ovunque | Impostazioni → Pacchetti |
+| Dopo quanti minuti avvisare che un sito non risponde | Impostazioni → Avvisa che un sito non risponde dopo |
 | Soglie di scadenza, frequenza scansioni, anteprime, conservazione cronologia | Impostazioni |
 | Indirizzo del pannello e chiave di registrazione per i connettori | Impostazioni → Connettori |
 | Testi, HTML e canali di ogni notifica | Notifiche |
@@ -188,8 +194,11 @@ con loro storico e impostazioni.
 
 ## Se qualcosa non va
 
-- **Un sito risulta offline ma funziona** — apri il suo dettaglio: può essere stato rigenerato
-  il token del connettore sul sito. Ricopialo in *Modifica*.
+- **Un sito risulta offline ma funziona (HTTP 401 `rest_forbidden`)** — il sito risponde ma il
+  connettore rifiuta il token, di solito perché è stato rimosso e reinstallato. Sul sito,
+  *Impostazioni → Sentinel TD → Collega questo sito a Sentinel TD* riallinea il token da solo;
+  in alternativa ricopialo in *Modifica*. Gli hosting che scartano l'header `Authorization`
+  sono coperti dal connettore 2.18.2, che accetta il token anche in `X-Sentinel-Token`.
 - **Gli aggiornamenti falliscono su più siti insieme** — quasi sempre è DNS o filesystem, non il
   pannello. `docker compose logs worker | grep "UPDATE FALLITO"` mostra il motivo vero
   restituito da ogni sito.

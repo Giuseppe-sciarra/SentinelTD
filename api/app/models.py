@@ -31,6 +31,8 @@ class Site(Base):
     # stato rilevato in ritardo (worker fermo al momento esatto della transizione).
     # Si azzera quando il sito torna ok.
     offline_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # primo errore dell'episodio in corso: l'avviso parte solo dopo N minuti di errori continui
+    offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # silenzia gli avvisi del singolo sito senza interrompere monitoraggio/update
     notifications_silenced: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -276,3 +278,22 @@ class UpdateMonthly(Base):
     # versione PRIMA del primo aggiornamento del mese: con last_version da' il "dalla X alla Y"
     first_version: Mapped[str] = mapped_column(String(64), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Package(Base):
+    """Zip di un plugin o tema caricato in Sentinel.
+
+    Serve ai prodotti a licenza quando il sito non riceve il file dal produttore (licenza
+    non attiva o scaduta): Sentinel installa questo zip sopra la versione presente, che
+    e' quello che fa WordPress con "Sostituisci la versione installata".
+    Un solo pacchetto per prodotto: caricarne uno nuovo sostituisce il precedente.
+    """
+    __tablename__ = "packages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10), default="plugin")      # plugin | theme
+    slug: Mapped[str] = mapped_column(String(200), index=True)
+    name: Mapped[str] = mapped_column(String(300), default="")
+    version: Mapped[str] = mapped_column(String(60), default="")
+    filename: Mapped[str] = mapped_column(String(300), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

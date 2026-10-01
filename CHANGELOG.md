@@ -1,5 +1,169 @@
 # Changelog
 
+## 2.8.2
+
+### Added
+- Reports show the folder each site belongs to. Telegram: a 📁 line under every site and the
+  folder next to the site name in *To check*. Per-site email: the folder under the address
+  and at the end of the subject, so mail rules can sort reports by client. Cycle email:
+  the folder under each site. Subfolders read as a path (*Clients / Flash Factory*), several
+  folders are separated by commas, and sites without a folder simply show none
+- Saved copies of the 2.8.0–2.8.1 report templates are recognised as old defaults too
+
+## 2.8.1
+
+### Changed
+- Telegram cycle summary: one block per site — the site name, then every updated plugin and
+  theme on its own line inside a frame that sets it apart from the next site. Core updates
+  and new major versions come first and in bold; frames longer than six lines start
+  collapsed and open with a tap. The per-site summary line and the single detail block at
+  the bottom are gone
+
+### Fixed
+- Long Telegram messages were cut at 4000 characters: when the cut fell inside an HTML tag
+  Telegram rejected the whole message and nothing arrived. Long messages are now split
+  into several, always between one block and the next, so every piece stays valid and no
+  site is ever cut in half
+
+## 2.8.0
+
+### Changed
+- **Telegram cycle summary rewritten.** Totals first, then a *To check* section with
+  everything that needs attention (failed updates with their reason, items on hold or to
+  update manually, homepages that changed), then one line per site with only the versions
+  that matter — WordPress or Joomla core, and new major versions of the products that can
+  break a site (Elementor, WooCommerce, YOOtheme, ACF, WPML, Polylang, Divi). The full list,
+  version by version, sits in a collapsible block, with a link to Sentinel at the bottom.
+  When everything went fine the message says so in its second line
+- **Per-site report emails**: the subject tells the outcome before opening it
+  (*✅ 13 updated*, *❌ 1 failed of 9*, *⚠️ homepage to check*); the homepage check comes
+  first, failed and waiting items come before the rest, core and major versions stand out,
+  and there is a link to the site in Sentinel
+
+### Added
+- *Settings → Update report emails*: one email per site (as before) or a single summary per
+  cycle with every updated site, laid out like the Telegram message
+- Saved notification templates identical to the previous defaults are recognised and
+  replaced by the new ones; templates you actually customised stay as they are
+
+## 2.7.8
+
+### Fixed
+- *Check now*, the check icon in the sites list and *Refresh preview* could never be
+  clicked. Their state was written as `:disabled="busy[detail.id]"`: when an Alpine binding
+  gets `undefined` from an expression containing a dot it turns it into an empty string on
+  purpose, and an empty string sets `disabled`. The buttons were born disabled and stayed
+  so, since the only thing that would have reset them was clicking them. Every `:disabled`
+  in the panel now evaluates to a real true/false
+
+## 2.7.7
+
+### Fixed
+- *Check now* on a site marked offline ran the full refresh, where the site contacts
+  wordpress.org and every vendor again: on a slow host the button stayed grey for minutes
+  without saying anything, and when the proxy cut the request nothing was shown at all. On an
+  offline site it now runs the quick check, which is all that is needed to know whether it
+  answers; the full refresh stays for sites that are online
+- *Check now* tells what is happening: a message when it starts, the outcome when it ends
+  (online, or still unreachable with the reason), and a clear message when the request is
+  cut or fails
+
+## 2.7.6
+
+### Fixed
+- Elementor Pro failing at random with "WordPress did not have the update data". Elementor
+  Pro asks its own server at most once a minute, and the connector threw away and rebuilt
+  the update data before every single update — while every completed update empties it too.
+  On a site with many updates in a row, by Pro's turn Elementor had called its server less
+  than a minute earlier, refused to call again, and Pro vanished from the list. Whether it
+  worked depended on the seconds in between, not on the Pro version. WordPress connector
+  2.18.3:
+  - keeps update data that is already good instead of rebuilding it every time
+  - when it has to rebuild, restores a good entry that got lost
+  - for Elementor Pro, clears Elementor's one-minute lock and, if needed, asks its licence
+    module for the version and the download directly
+  - tries a second time with fresh data when the first attempt does not raise the version
+- Elementor Pro now goes first in each site's queue, right after the check, while its data
+  is fresh
+
+## 2.7.5
+
+### Fixed
+- Sites on hosts that drop the `Authorization` header before PHP (some Apache CGI/FastCGI
+  setups) answered every request with 401 `rest_forbidden`. The panel now sends the token in
+  `X-Sentinel-Token` as well, and WordPress connector 2.18.2 accepts it — over REST and from
+  the admin — when `Authorization` does not arrive
+- After *Connect this site to Sentinel TD* on a site that was already registered, the
+  connector said "nothing was changed" even when the panel had just realigned its token
+  (the typical fix after reinstalling the connector). It now says the connection was updated
+
+## 2.7.4
+
+### Fixed
+- WordPress connector 2.18.1: after an update attempt WordPress clears its update cache by
+  itself, and the connector read that cache right afterwards to explain a failure — so every
+  failure looked like "the plugin did not provide its update data", and the real WordPress
+  error (download refused, file not copied…) was never shown. The outcome now comes from the
+  installation itself: real errors are reported as they are, with their code, and *to update
+  manually* is used only when the vendor really did not deliver the file
+- Elementor Pro creates its update system only when something asks for it, usually its own
+  admin pages. The connector now asks for it before rebuilding the update data, both when
+  updating and when checking, so WordPress knows about the new Pro version and where to
+  download it from
+
+## 2.7.3
+
+### Changed
+- *Settings → Report a site as unreachable after N minutes* (5 by default, 0 = immediately).
+  A site that does not answer is checked again every minute and reported only if it stays
+  unreachable for the whole time; meanwhile it does not turn red in the panel. Replaces the
+  `OFFLINE_CONFIRM_CHECKS` and `OFFLINE_RETRY_DELAY_SECONDS` variables, which are no longer read
+
+### Fixed
+- The confirmation used to wait by sleeping inside the job, holding one of the worker's four
+  slots for minutes per silent site: with several sites down at once everything else,
+  updates included, stalled. Each recheck is now a separate short job one minute apart
+
+## 2.7.2
+
+### Fixed
+- With an active licence, Elementor Pro often does not show its new version until it is
+  asked for from the WordPress admin. 2.7.1 held Elementor back whenever Pro was not
+  reported as updatable, which on such sites meant waiting forever. Sentinel now always
+  tries Pro first — from the admin, even when it is not reported — and holds Elementor only
+  if that attempt does not bring Pro to the new major version; a failed attempt is retried
+  at most once a day
+- Reports no longer claim "licence not active or expired" when a vendor withholds the update
+  file: the licence is mentioned only when the connector actually found it missing or not
+  valid
+
+## 2.7.1
+
+### Changed
+- Elementor and Elementor Pro now move together. When Elementor jumps to a new major
+  version (3 → 4), Elementor Pro is updated first and Elementor follows only if Pro made it;
+  if Pro cannot be updated on that site (no licence and no uploaded package) Elementor waits
+  instead of running a major version ahead of Pro, which is the combination WordPress itself
+  flags as incompatible and that breaks sites. Minor updates are not held back. The report
+  shows the item as *on hold* with the reason, it is not counted as a failure, and Telegram
+  mentions it at most once a day
+
+## 2.7.0
+
+### Added
+- **Packages** (*Settings → Packages for licensed plugins and themes*): upload the zip of a
+  licensed product once — Elementor Pro, ACF Pro, a premium theme — and Sentinel installs it
+  over the current version on every site where the vendor does not hand over the update
+  file, typically because the licence is not active or has expired on that domain. It also
+  covers sites that do not even report the update. The activation state is preserved, the
+  report marks those lines as *Sentinel package*, and *Install now* starts right away on the
+  sites that need it
+- WordPress connector 2.18.0 runs updates inside the WordPress admin (`admin-ajax.php`),
+  where licensed plugins load their own update system; over REST alone they often did not.
+  The panel falls back to REST with older connectors
+- When the vendor withholds the file, the report says why — licence not active or expired,
+  and for Elementor Pro whether a licence key is entered at all
+
 ## 2.6.1
 
 ### Added
