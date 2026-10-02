@@ -5,6 +5,38 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 
+# File che WordPress non esegue mai e che hosting, traduzioni e strumenti toccano di continuo:
+# nella verifica dei file del core sono solo rumore. Filtrati anche qui, nel pannello, cosi'
+# spariscono subito anche dai risultati salvati con un connettore vecchio.
+_CORE_HARMLESS = {"wp-config-sample.php", "readme.html", "license.txt", "licenza.html", "liesmich.html", "licence.txt"}
+
+
+def _core_noise(path: str) -> bool:
+    import re as _re
+    p = str(path or "")
+    name = p.rsplit("/", 1)[-1].lower()
+    return (p in _CORE_HARMLESS or name in _CORE_HARMLESS
+            or bool(_re.search(r"(^|/)(error_log|php_errorlog|php_error_log|\.user\.ini|php\.ini|\.htaccess|web\.config|\.ds_store|thumbs\.db|desktop\.ini)$", p, _re.I))
+            or name.endswith(".log"))
+
+
+def clean_core_check(core: dict) -> dict:
+    """Toglie i file innocui dalla verifica dei file del core e ricalcola conteggi e stato."""
+    if not isinstance(core, dict) or core.get("status") not in ("ok", "issues"):
+        return core
+    out = dict(core)
+    for key in ("modified", "missing", "extra"):
+        raw = out.get(key) or []
+        items = [x for x in raw if not _core_noise(x if isinstance(x, str) else (x or {}).get("file", ""))]
+        dropped = len(raw) - len(items)
+        out[key] = items
+        cnt = f"{key}_count"
+        if cnt in out:
+            out[cnt] = max(0, int(out.get(cnt) or 0) - dropped)
+    out["status"] = "issues" if any(int(out.get(f"{k}_count", len(out.get(k) or [])) or 0) for k in ("modified", "missing", "extra")) else "ok"
+    return out
+
+
 class Site(Base):
     __tablename__ = "sites"
 
@@ -43,6 +75,9 @@ class Site(Base):
     # componenti bloccati alla versione installata ("plugin:slug", "theme:slug"), JSON. Sta nel
     # sito e non nelle estensioni perche' le righe delle estensioni si ricreano a ogni controllo
     locked_items: Mapped[str] = mapped_column(Text, default="")
+    # versione del connettore che gira sul sito (dichiarata dal connettore dalla WP 2.23 / Joomla 1.32;
+    # per i WP piu' vecchi ricavata dal plugin td-panopticon nell'elenco delle estensioni)
+    connector_version: Mapped[str] = mapped_column(String(32), default="")
 
     @property
     def locked_set(self) -> set[str]:
@@ -59,9 +94,12 @@ class Site(Base):
     @property
     def diag(self) -> dict | None:
         try:
-            return json.loads(self.diag_json) if self.diag_json else None
+            d = json.loads(self.diag_json) if self.diag_json else None
         except Exception:  # noqa: BLE001
             return None
+        if isinstance(d, dict) and isinstance(d.get("core"), dict):
+            d["core"] = clean_core_check(d["core"])
+        return d
 
     # silenzia gli avvisi del singolo sito senza interrompere monitoraggio/update
     notifications_silenced: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -283,6 +321,9 @@ class UpdateHistory(Base):
     ok: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    # copia della versione precedente fatta dal connettore prima dell'aggiornamento (WP 2.26+):
+    # nome dello zip sul sito, per il pulsante Ripristina. "" = nessuna copia
+    backup_file: Mapped[str] = mapped_column(String(255), default="")
 
 
 class UpdateMonthly(Base):
@@ -365,3 +406,24 @@ class ClientSite(Base):
     __tablename__ = "client_sites"
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True)
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), primary_key=True, index=True)
+
+
+class PluginCatalog(Base):
+    """Scheda di ogni plugin WordPress del parco presa da wordpress.org: ultimo aggiornamento
+    dell'autore, versione corrente, "testato fino a", se e' stato chiuso. Serve a vedere i
+    plugin ABBANDONATI (fermi da anni) prima che un aggiornamento di PHP o WordPress li rompa.
+    Rinfrescata una volta a settimana; chi non e' su wordpress.org (prodotti a licenza) resta
+    con found=False."""
+    __tablename__ = "plugin_catalog"
+    slug: Mapped[str] = mapped_column(String(190), primary_key=True)
+    name: Mapped[str] = mapped_column(String(190), default="")
+    found: Mapped[bool] = mapped_column(Boolean, default=False)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    closed_date: Mapped[str] = mapped_column(String(32), default="")
+    closed_reason: Mapped[str] = mapped_column(String(190), default="")
+    last_updated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tested: Mapped[str] = mapped_column(String(32), default="")
+    latest_version: Mapped[str] = mapped_column(String(64), default="")
+    active_installs: Mapped[int] = mapped_column(Integer, default=0)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str] = mapped_column(String(190), default="")

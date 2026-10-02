@@ -11,6 +11,7 @@ la funzione degrada invece di rompersi.
 """
 import base64
 import hashlib
+import html
 import json
 import logging
 import mimetypes
@@ -22,7 +23,8 @@ from jinja2 import Environment, BaseLoader, TemplateError
 from sqlalchemy import bindparam, select, func, text
 
 from .db import SessionLocal
-from .models import AppSetting, UpdateMonthly, Site, SiteExpiry, SiteSize, Client, ClientSite
+from .models import AppSetting, UpdateMonthly, Site, SiteExpiry, SiteSize, Client, ClientSite, Extension
+from .problems import LABELS as PROBLEM_LABELS, failed_by_site, site_problems
 from .config import settings
 
 from .i18n import t, template as localize_template
@@ -93,7 +95,7 @@ def client_id_of(scope: str) -> int:
 # Impronte dei modelli predefiniti delle versioni precedenti: una copia salvata IDENTICA non e'
 # una personalizzazione, e' il vecchio default rimasto nel database -> si usa quello nuovo
 # (che ha in piu' la sezione "Stato dei siti").
-_LEGACY_TEMPLATE_HASHES = {"e6a0d240b2555349529d2f6f3ca8c34be80f1018bd7990e69407850013c87381", "1815888d7299da0ab27e1ffcfcf59aefb419fbbda23a4a76e9f26e3c8b0f38e3"}
+_LEGACY_TEMPLATE_HASHES = {"e6a0d240b2555349529d2f6f3ca8c34be80f1018bd7990e69407850013c87381", "1815888d7299da0ab27e1ffcfcf59aefb419fbbda23a4a76e9f26e3c8b0f38e3", "633d8df19d1ed79cb7063d00f185375e8aea88d3f0df92ffa35b013ecff10030", "d44068bb751e54a79759fe390483e4fd9ca8c178b4e6fd058309b516dee18c90"}
 
 # ---------------------------------------------------------------- template
 DEFAULT_TEMPLATE = """<!doctype html>
@@ -132,6 +134,8 @@ DEFAULT_TEMPLATE = """<!doctype html>
   .foot { margin-top: 22px; padding-top: 10px; border-top: 1px solid #e1e4e8; color: #8a949e; font-size: 9.5px; }
   .st td { font-size: 10px; }
   .st tr { page-break-inside: avoid; }
+  .st tr.prob td { border-top: 0; padding-top: 0; font-size: 9.5px; }
+  h3.srvh { font-size: 11.5px; margin: 14px 0 4px; color: #444; }
   .sm { font-size: 9px; margin-top: 1px; }
 </style></head><body>
 
@@ -228,10 +232,14 @@ DEFAULT_TEMPLATE = """<!doctype html>
 
 {% if cfg.show_site_stats and site_stats %}
 <h2>Stato dei siti</h2>
+{% set _probs = site_stats | selectattr("problems") | list %}
+<p class="mut">{% if _probs %}{{ _probs | length }} {% if _probs | length == 1 %}sito ha{% else %}siti hanno{% endif %} qualcosa da guardare, indicato sotto il sito.{% else %}Nessun problema rilevato sui siti.{% endif %}</p>
+{% for grp in site_stat_groups %}
+{% if site_stat_groups | length > 1 or grp.server %}<h3 class="srvh">Server {{ grp.server or "non rilevato" }} · {{ grp.sites | length }} {% if grp.sites | length == 1 %}sito{% else %}siti{% endif %}{% if grp.problems %} · <span class="ko">{{ grp.problems }} con problemi</span>{% endif %}</h3>{% endif %}
 <table class="st">
   <thead><tr><th>Sito</th><th>Versioni</th><th>Dominio</th><th>Peso</th><th>Spazio libero</th><th>File del core</th></tr></thead>
   <tbody>
-  {% for x in site_stats %}
+  {% for x in grp.sites %}
     <tr>
       <td><b>{{ x.name }}</b><div class="sm mut">{{ x.url }}</div></td>
       <td>{{ x.cms_label }} {{ x.core or '' }}<div class="sm{% if x.php_state == 'fuori supporto' %} ko{% else %} mut{% endif %}">PHP {{ x.php or '—' }}{% if x.php_state %} · {{ x.php_state }}{% endif %}</div></td>
@@ -240,9 +248,11 @@ DEFAULT_TEMPLATE = """<!doctype html>
       <td>{% if x.space %}<span class="{% if x.space_low %}ko{% endif %}">{{ x.space }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
       <td>{% if x.core_files %}<span class="{% if x.core_issues %}ko{% endif %}">{{ x.core_files }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
     </tr>
+    {% if x.problems %}<tr class="prob"><td colspan="6"><span class="ko">⚠ {{ x.problems | join(" · ") }}</span></td></tr>{% endif %}
   {% endfor %}
   </tbody>
 </table>
+{% endfor %}
 <div class="mut">Peso: file e database del sito. Spazio libero: quanto si riesce davvero a scrivere sul sito, misurato con l'ultima diagnostica.</div>
 {% endif %}
 
@@ -551,12 +561,45 @@ def _fmt_bytes(b) -> str:
     return f"{max(0, round(b / 1024))} KB"
 
 
+def _group_by_server(rows: list[dict]) -> list[dict]:
+    """Stato dei siti diviso per server, i server con piu' siti prima."""
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r.get("server") or "", []).append(r)
+    return [{"server": k, "sites": v, "problems": sum(1 for x in v if x["problems"])}
+            for k, v in sorted(groups.items(), key=lambda t: (-len(t[1]), t[0]))]
+
+
 async def _site_stats(s, sites: list) -> list[dict]:
     """Una riga per sito: versioni, PHP, dominio, peso e crescita, spazio scrivibile, file del core."""
     if not sites:
         return []
     ids = [x.id for x in sites]
     since = (datetime.now() - timedelta(days=45)).date()
+    fails = await failed_by_site(s, ids)
+    # server di ogni sito (IP del dominio) col nome dato in Impostazioni, per dividere la sezione
+    servers: dict[int, str] = {}
+    try:
+        from redis.asyncio import from_url
+        from .config import settings as _settings
+        from .servers import server_of
+        from .settings_store import get_operational_settings
+        labels = (await get_operational_settings()).get("server_labels") or {}
+        r = from_url(_settings.REDIS_URL)
+        try:
+            ip_of = {x.id: (await server_of(r, x.url) or "?") for x in sites}
+        finally:
+            await r.aclose()
+        # server con lo STESSO nome = un gruppo solo, con i suoi IP tra parentesi
+        ips_by_label: dict[str, set] = {}
+        for ip in ip_of.values():
+            if labels.get(ip):
+                ips_by_label.setdefault(labels[ip], set()).add(ip)
+        for sid, ip in ip_of.items():
+            lab = labels.get(ip)
+            servers[sid] = f"{lab} ({', '.join(sorted(ips_by_label[lab]))})" if lab else ip
+    except Exception:  # noqa: BLE001
+        pass
     hist: dict[int, list] = {}
     for r in (await s.execute(select(SiteSize).where(SiteSize.site_id.in_(ids), SiteSize.day >= since)
                               .order_by(SiteSize.day))).scalars().all():
@@ -587,6 +630,11 @@ async def _site_stats(s, sites: list) -> list[dict]:
         core = diag.get("core") or {}
         core_txt = {"ok": "integri", "issues": "da controllare"}.get(core.get("status"), "")
         dexp = getattr(x, "domain_expires_at", None)
+        # problemi: la stessa definizione di dashboard e Stato server
+        probs = []
+        for pr in site_problems(x, fails.get(x.id), now):
+            lab = PROBLEM_LABELS.get(pr["kind"], "")
+            probs.append(pr["text"] if pr["kind"] in ("php", "domain", "logs") else f"{lab}: {pr['text']}")
         out.append({
             "name": x.name, "url": (x.url or "").replace("https://", "").replace("http://", "").rstrip("/"),
             "cms_label": "WordPress" if x.cms == "wp" else "Joomla", "core": x.core_current or "",
@@ -597,6 +645,7 @@ async def _site_stats(s, sites: list) -> list[dict]:
             "size": size, "growth": growth, "growth_days": growth_days, "db": db,
             "space": space, "space_low": bool(sp) and not sp.get("ok"),
             "core_files": core_txt, "core_issues": core.get("status") == "issues",
+            "problems": probs, "server": servers.get(x.id, ""),
         })
     return out
 
@@ -644,7 +693,7 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
                 "components": [], "total": 0,
             })
             entry["components"].append({
-                "name": r.ext_name or r.slug, "type_label": _TYPE_LABELS.get(r.ext_type, (r.ext_type or "").capitalize() or "Altro"),
+                "name": html.unescape(r.ext_name or r.slug), "type_label": _TYPE_LABELS.get(r.ext_type, (r.ext_type or "").capitalize() or "Altro"),
                 "count": r.ok_count, "last_version": r.last_version,
             })
             entry["total"] += r.ok_count
@@ -657,14 +706,14 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
         for r in rows:
             if r.ok_count <= 0:
                 continue
-            key = (r.ext_name or r.slug).lower()
-            a = agg.setdefault(key, {"name": r.ext_name or r.slug, "count": 0, "sites": 0})
+            key = (html.unescape(r.ext_name or r.slug)).lower()
+            a = agg.setdefault(key, {"name": html.unescape(r.ext_name or r.slug), "count": 0, "sites": 0})
             a["count"] += r.ok_count
             a["sites"] += 1
         top_items = sorted(agg.values(), key=lambda a: (-a["count"], a["name"].lower()))[:15]
 
         # --- falliti ---
-        failed_items = [{"site": r.site_name, "name": r.ext_name or r.slug, "count": r.fail_count}
+        failed_items = [{"site": r.site_name, "name": html.unescape(r.ext_name or r.slug), "count": r.fail_count}
                         for r in rows if r.fail_count > 0]
         failed_items.sort(key=lambda f: -f["count"])
 
@@ -738,6 +787,7 @@ async def gather(period: str, cfg: dict | None = None, scope: str = "") -> dict:
         "is_global": not only,
         "is_client": client,
         "site_stats": site_stats,
+        "site_stat_groups": _group_by_server(site_stats),
         "generated_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
         "total_updates": total_updates,
         "total_failed": sum(f["count"] for f in failed_items),

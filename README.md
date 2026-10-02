@@ -25,6 +25,10 @@ Your server, your data, your branding.
   extra files in `wp-admin` and `wp-includes`, with a notification when the result changes
 - **Site size history**: files by category (media, plugins, themes, core, the rest) and database,
   collected every night and kept for two years, with a chart and the 30-day trend
+- **Space and logs watch**: the nightly diagnostics writes a 50 MB test on every site and lists the
+  logs over 10 MB, inside the site and in the account folder next to it (where cPanel keeps
+  `~/logs`). One notification per site when space runs low or a large log appears, then only
+  when something changes
 
 **Updates**
 - Update one site, a selection or the whole fleet — by hand or with the **hourly automatic
@@ -47,6 +51,11 @@ Your server, your data, your branding.
   version to which
 - **Homepage check**: a snapshot before and after every update; the report says whether the
   site looks the same, changed noticeably (snapshots attached) or broke
+- **Copy before the update, restore with one click** (WordPress): before updating a plugin or
+  theme the connector zips the current version into `uploads/sentinel-backups/` (last two per
+  item, 14 days). The site history shows *Restore x.y* on every update that has a copy. And if
+  the homepage breaks after an update — an error or a 5xx that was not there before — Sentinel
+  **rolls back by itself**, locks those components to the restored version and tells you
 - Licensed products (e.g. Elementor Pro) are updated from inside the WordPress admin; when a
   site cannot download them, Sentinel installs the zip you uploaded once in *Packages*
 - **Take a licensed package from a site**: search a plugin or theme by name across your
@@ -73,6 +82,9 @@ Your server, your data, your branding.
 **Security and renewals**
 - Vulnerability feed matched against the extensions actually installed, with severity and
   the version that fixes each issue
+- **Abandoned plugins**: every WordPress plugin of the fleet with the author's last update, the
+  tested-up-to version and the closures taken from wordpress.org (refreshed weekly) — closed
+  plugins and plugins idle for years, with the sites that still run them
 - **Domain expiry** through RDAP with WHOIS fallback, with reminders at your own thresholds
 - For every domain: **where it is registered** (registrar and nameservers) and a **renewal
   decision** — to decide, renew, do not renew — set one by one or in bulk, with folders and
@@ -106,6 +118,10 @@ Your server, your data, your branding.
   any range of months, with the full history of every update
 - Statistics with daily, monthly and month-against-month views, rankings of the most updated
   sites and components
+- **Server status**: one card per server (or per client folder) with its sites, PHP versions, load
+  and disk from the nightly diagnostics, pending and failed updates, total size with a 30-day
+  trend, updates per month, the list of problems (offline, low space, large logs, failures, core
+  files, unsupported PHP) and the brake switch
 
 **Administration**
 - **The panel updates itself**: dots, badges and the open site page follow the real state within
@@ -115,6 +131,9 @@ Your server, your data, your branding.
 - Branding: your logo and favicon in the panel, in the PDFs and in the emails
 - Interface in **Italian, English, French and German**, connectors included
 - Connector packages built by the panel itself, already carrying your address and key
+- **Connector kept up to date by itself**: every night the panel installs the connector it ships on
+  the sites that run an older one (one site at a time on braked servers), and *Settings →
+  Connectors* shows which sites are behind, with *Update on the sites* for right now
 
 ---
 

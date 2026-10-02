@@ -437,6 +437,8 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
     prefs = await get_operational_settings()
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=prefs["domain_scan_days"])
+    soon = now + timedelta(days=30)      # in scadenza: si ricontrolla ogni giorno
+    daily = now - timedelta(hours=20)    # il giro e' quotidiano (07:15): margine per gli orari
 
     async with SessionLocal() as s:
         sites = (await s.execute(select(Site))).scalars().all()
@@ -473,6 +475,10 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
                 x.domain_checked_at is None
                 or x.domain_checked_at < cutoff
                 or (x.domain_name or "").strip(".").lower() != domain
+                # scaduti o in scadenza entro 30 giorni: ogni giorno, non ogni domain_scan_days.
+                # Sono quelli che cambiano (rinnovo), e con la frequenza normale un dominio
+                # rinnovato restava "scaduto" nel pannello fino a una settimana.
+                or (x.domain_expires_at is not None and x.domain_expires_at <= soon and x.domain_checked_at < daily)
                 for x in members
             )
             if not due:
@@ -834,7 +840,7 @@ def _major(v: str) -> int:
     return t[0] if t else 0
 
 
-def _plan_coupled(queue: list, exts: dict, now=None, retry: bool = False) -> tuple[list, list, dict]:
+def _plan_coupled(queue: list, exts: dict, now=None, retry: bool = False, locked: set | None = None) -> tuple[list, list, dict]:
     """Riordina la coda per le coppie gratuito + Pro.
 
     queue = [(ext, type, slug, name, current)]
@@ -849,10 +855,22 @@ def _plan_coupled(queue: list, exts: dict, now=None, retry: bool = False) -> tup
     gliela si chiede dal backend, e senza questo tentativo il gratuito resterebbe fermo.
     """
     now = now or datetime.now(timezone.utc)
+    locked = locked or set()
     held, wait_for = [], {}
     for free, pro in COUPLED_PAIRS.items():
-        fi = next((q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] == free), None)
+        fe = exts.get(free)
         pe = exts.get(pro)
+        # Il gratuito e' BLOCCATO alla sua versione: il Pro non deve superarne la versione
+        # principale da solo (Pro 4 su Elementor 3 rompe il sito quanto il contrario)
+        if fe is not None and f"plugin:{free}" in locked:
+            pi = next((q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] == pro), None)
+            if pi is not None and _major(pi[0].new_version) > _major(fe.current_version):
+                queue = [q for q in queue if q is not pi]
+                pi[0]._hold_reason = (f"in attesa: {fe.name} è bloccato alla {fe.current_version} e portare {pi[3]} alla "
+                                      f"{_major(pi[0].new_version)}.x da solo potrebbe rompere il sito. Sblocca {fe.name} "
+                                      f"per aggiornarli insieme")
+                held.append(pi)
+        fi = next((q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] == free), None)
         if fi is None or pe is None:
             continue
         target = _major(fi[0].new_version)
@@ -860,6 +878,13 @@ def _plan_coupled(queue: list, exts: dict, now=None, retry: bool = False) -> tup
             continue                      # nessun salto di versione principale
         if _major(pe.current_version) >= target:
             continue                      # il Pro e' gia' alla versione principale giusta
+        # Il Pro e' BLOCCATO: non si tenta (il blocco vale anche qui) e il gratuito aspetta
+        if f"plugin:{pro}" in locked:
+            queue = [q for q in queue if q is not fi]
+            fi[0]._hold_reason = (f"in attesa: {pe.name} è bloccato alla {pe.current_version} e portare {fi[3]} alla "
+                                  f"{target}.x da solo potrebbe rompere il sito. Sblocca {pe.name} per aggiornarli insieme")
+            held.append(fi)
+            continue
         pi = next((q for q in queue if q[0] is not None and q[1] == "plugin" and q[2] == pro), None)
         if pi is None:
             # gia' tentato nelle ultime 24 ore senza esito: non insistere, il gratuito aspetta
@@ -923,6 +948,34 @@ async def _email_mode() -> str:
         return (await get_operational_settings()).get("email_report_mode", "site")
     except Exception:  # noqa: BLE001
         return "site"
+
+
+async def rollback_item(site: Site, ext_type: str, slug: str, backup_file: str) -> dict:
+    """Chiede al connettore WordPress di rimettere la copia fatta prima dell'aggiornamento.
+    Ritorna {ok, error, from, to}."""
+    headers = {"Authorization": f"Bearer {site.token}", "X-Sentinel-Token": site.token}
+    try:
+        async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+            r = await client.post(wp_rest_url(site, "rollback"), headers=headers,
+                                  json={"type": ext_type, "slug": slug, "file": backup_file})
+            r.raise_for_status()
+            d = r.json()
+            return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "from": str(d.get("from", "")), "to": str(d.get("to", ""))}
+    except Exception as ex:  # noqa: BLE001
+        return {"ok": False, "error": str(ex)[:300], "from": "", "to": ""}
+
+
+async def record_rollback(s, site: Site, ext_type: str, name: str, slug: str, res: dict, how: str) -> None:
+    """Riga nello storico + blocco del componente alla versione ripristinata, cosi' il ciclo
+    successivo non lo riaggiorna alla versione che ha rotto il sito."""
+    import json as _json
+    s.add(UpdateHistory(site_id=site.id, site_name=site.name, cms=site.cms, ext_type=ext_type, ext_name=name, slug=slug,
+                        from_version=res.get("from") or "", to_version=res.get("to") or "", ok=bool(res.get("ok")),
+                        error=(("ripristino " + how) if res.get("ok") else f"ripristino {how} non riuscito: {res.get('error') or ''}")[:2000]))
+    if res.get("ok") and ext_type in ("plugin", "theme"):
+        items = site.locked_set
+        items.add(f"{ext_type}:{slug}")
+        site.locked_items = _json.dumps(sorted(items))
 
 
 async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
@@ -989,7 +1042,8 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                     d = {"ok": False, "error": "formato risposta non valido", "new": ""}
             return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "new": str(d.get("new", "")),
                     "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
-                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", ""))}
+                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", "")),
+                    "backup": str(d.get("backup") or ""), "backup_error": str(d.get("backup_error") or "")}
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -1037,7 +1091,8 @@ async def _vendor_update_one(site: Site, slug: str) -> dict:
                 d = {"ok": False, "error": "formato risposta non valido", "new": ""}
             return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "new": str(d.get("new", "")),
                     "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
-                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", ""))}
+                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", "")),
+                    "backup": str(d.get("backup") or ""), "backup_error": str(d.get("backup_error") or "")}
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -1304,7 +1359,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 installed[e.slug] = e.current_version or ""
                 names[e.slug] = e.name
                 plugin_exts[e.slug] = e
-            queue, held, wait_for = _plan_coupled(queue, plugin_exts, now, retry=manual)
+            queue, held, wait_for = _plan_coupled(queue, plugin_exts, now, retry=manual, locked=locked)
             # I prodotti a licenza vanno PER PRIMI: subito dopo il controllo i loro dati di
             # aggiornamento sono freschi, mentre ogni aggiornamento successivo li svuota e
             # Elementor Pro interroga il proprio server al massimo una volta al minuto.
@@ -1432,6 +1487,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             results.append({
                 "name": name + (" (pacchetto Sentinel)" if via_package else ""), "from": current,
                 "to": res["new"] or "", "ok": res["ok"], "error": res["error"],
+                "type": etype, "slug": slug, "backup": res.get("backup") or "",
             })
             # storico (7 giorni): alimenta timeline e dashboard di Sentinel
             s.add(UpdateHistory(
@@ -1439,6 +1495,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 ext_type=etype, ext_name=name, slug=slug,
                 from_version=current or "", to_version=(res["new"] or ""),
                 ok=bool(res["ok"]), error=(res["error"] or "")[:2000],
+                backup_file=(res.get("backup") or "")[:255],
             ))
             # rollup mensile (conservato per sempre: alimenta il report mensile in PDF)
             await _roll_monthly(s, site, etype, name, slug, res, frm=current or "")
@@ -1468,7 +1525,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
         for (e, _t, sl, nm, cur) in held:
             pro_slug = COUPLED_PAIRS.get(sl, "")
             results.append({"name": nm, "from": cur, "to": e.new_version or "", "ok": False, "held": True,
-                            "error": _held_reason(nm, names.get(pro_slug, pro_slug), _major(e.new_version))})
+                            "error": getattr(e, "_hold_reason", None) or _held_reason(nm, names.get(pro_slug, pro_slug), _major(e.new_version))})
 
         if failures and not site.notifications_silenced:
             first = failures[0]
@@ -1518,6 +1575,32 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             visual = _visual_verdict(shot_before, shot_after, cmp)
             lvl = log.warning if visual["status"] in ("warn", "ko") else log.info
             lvl("CONTROLLO HOME '%s' (id=%s): %s — %s", site.name, site.id, visual["status"], visual["message"])
+
+            # RIPRISTINO AUTOMATICO: la home si e' ROTTA (errore o 5xx che prima non c'erano) e
+            # ci sono copie fatte prima degli aggiornamenti -> si rimettono, dall'ultimo al
+            # primo, e si bloccano alla versione ripristinata. Poi si riguarda la home.
+            prefs_rb = await get_operational_settings()
+            restorable = [r for r in results if r.get("ok") and r.get("backup") and r.get("type") in ("plugin", "theme")]
+            # solo se la home PRIMA e' stata davvero vista sana: senza quella foto (servizio delle
+            # schermate giu') un sito gia' rotto prima risulterebbe rotto dall'aggiornamento
+            healthy_before = bool(shot_before) and int((shot_before or {}).get("http_status") or 0) < 500 \
+                and not (shot_before or {}).get("error_text")
+            if visual["status"] == "ko" and site.cms == "wp" and restorable and healthy_before and prefs_rb.get("auto_rollback", True):
+                rolled = []
+                for r in reversed(restorable):
+                    rb = await rollback_item(site, r["type"], r["slug"], r["backup"])
+                    await record_rollback(s, site, r["type"], r["name"], r["slug"], rb, "automatico")
+                    rolled.append({"name": r["name"], "from": r["to"], "to": rb.get("to") or r["from"], "ok": rb["ok"], "error": rb.get("error") or ""})
+                    log.warning("RIPRISTINO AUTOMATICO '%s' (id=%s): %s %s -> %s: %s", site.name, site.id, r["name"], r["to"], rb.get("to"), "ok" if rb["ok"] else rb.get("error"))
+                await s.commit()
+                shot_fixed = await _visual_shot(site, "after")
+                fixed = _visual_verdict(shot_before, shot_fixed, None)
+                visual = {"status": fixed["status"], "message": "ripristino automatico: " + ("la home è tornata a rispondere" if fixed["status"] != "ko" else "la home è ancora in errore") + " — " + fixed["message"]}
+                if not site.notifications_silenced:
+                    await notify_dispatch("auto_rollback", {
+                        "site_name": site.name, "site_url": site.url, "folder": _folder_label(site), "site_id": site.id,
+                        "items": rolled, "fixed": fixed["status"] != "ko", "home_message": fixed["message"], "panel_url": await _panel_url(),
+                    })
 
         try:
             if not site.notifications_silenced:
@@ -2063,6 +2146,71 @@ async def diag_site(ctx, site_id: int, space_mb: int = 0):
                 "site_name": site.name, "site_url": site.url, "folder": _folder_label(site),
                 "core": diag.get("core") or {}, "site_id": site.id, "panel_url": await _panel_url(),
             })
+        await _notify_space(ctx, site, diag)
+
+
+async def _notify_space(ctx, site: Site, diag: dict) -> None:
+    """Spazio quasi esaurito o log grandi: UNA notifica per sito, e di nuovo solo se la
+    situazione cambia (altro log, log cresciuto di molto, spazio finito o tornato). La
+    memoria di cosa e' gia' stato segnalato sta in Redis, per un anno."""
+    sp = diag.get("space") or {}
+    logs = (diag.get("sizes") or {}).get("big_logs") or []
+    low = bool(sp) and not sp.get("ok")
+    # firma: spazio basso si'/no + i log a scaglioni di 50 MB (un log che cresce piano non rinnova l'avviso)
+    sig = ("low" if low else "ok") + "|" + ",".join(sorted(f"{l['path']}:{int(l['bytes']) // (50 * 1048576)}" for l in logs))
+    key = f"diag:space:{site.id}"
+    try:
+        r = ctx.get("redis") if isinstance(ctx, dict) else None
+        prev = await r.get(key) if r is not None else None
+        prev = prev.decode() if isinstance(prev, (bytes, bytearray)) else (prev or "")
+        if prev == sig:
+            return
+        if r is not None:
+            await r.set(key, sig, ex=365 * 86400)
+    except Exception:  # noqa: BLE001
+        return
+    if not (low or logs) or site.notifications_silenced:
+        return
+    await notify_dispatch("site_space", {
+        "site_name": site.name, "site_url": site.url, "folder": _folder_label(site), "site_id": site.id,
+        "space_low": low, "space_written_mb": sp.get("written_mb"), "space_tested_mb": sp.get("tested_mb"),
+        "logs": [{"path": l.get("path", ""), "mb": round(int(l.get("bytes", 0)) / 1048576), "outside": bool(l.get("outside"))} for l in logs],
+        "panel_url": await _panel_url(),
+    })
+
+
+async def connector_rollout(ctx):
+    """Ogni notte: il connettore consegnato dal pannello sui siti che ne hanno uno piu' vecchio,
+    con i lavori dell'installazione in blocco (un sito per lavoro, posti sui server rispettati).
+    Si spegne da Impostazioni -> Connettori."""
+    from .routers.connectors import KINDS, connector_package, outdated_sites, shipped_version
+    from .routers.install import start_install_job
+    prefs = await get_operational_settings()
+    if not prefs.get("connector_auto_update", True):
+        return
+    for kind in KINDS:
+        async with SessionLocal() as s:
+            targets = await outdated_sites(kind, s)
+        if not targets:
+            continue
+        try:
+            content, name = await connector_package(kind)
+        except Exception as ex:  # noqa: BLE001
+            log.warning("Connettore %s: pacchetto non pronto, distribuzione saltata: %s", kind, ex)
+            continue
+        res = await start_install_job(targets, content, name, "wp" if kind == "wp" else "joomla", "plugin", True,
+                                      label=f"connettore {kind} {shipped_version(kind)} (notturno)")
+        log.info("Connettore %s %s: distribuzione notturna su %s siti (lavoro %s)", kind, shipped_version(kind), len(targets), res["job"])
+
+
+async def plugin_catalog_scan(ctx, force: bool = False):
+    """Catalogo dei plugin da wordpress.org: ogni settimana, o subito dal pulsante."""
+    from .plugin_catalog import scan
+    try:
+        res = await scan(force=force)
+        log.info("Catalogo plugin aggiornato: %s", res)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("Catalogo plugin: scansione non riuscita: %s", ex)
 
 
 async def diag_all(ctx):
@@ -2071,15 +2219,17 @@ async def diag_all(ctx):
         ids = [sid for (sid,) in (await s.execute(select(Site.id).where(Site.enabled == True))).all()]  # noqa: E712
         await prune_sizes(s)
         await s.commit()
+    # prova di spazio leggera (50 MB): quanto serve a un aggiornamento medio. Se non ci stanno
+    # nemmeno quelli, il sito e' di fatto bloccato e vale la pena saperlo prima che fallisca
     for i, sid in enumerate(ids):
-        await ctx["redis"].enqueue_job("diag_site", sid, 0, _defer_by=i * 20)
+        await ctx["redis"].enqueue_job("diag_site", sid, 50, _defer_by=i * 20)
     log.info("diag_all: accodate %d diagnostiche", len(ids))
 
 
 class WorkerSettings:
     functions = [poll_site, shoot_site, update_site, cycle_summary, mass_update_now,
                  mass_update_selected, security_scan, vendor_scan, domain_expiry_scan, monthly_report,
-                 diag_site, diag_all, install_site]
+                 diag_site, diag_all, connector_rollout, plugin_catalog_scan, install_site]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
@@ -2088,6 +2238,8 @@ class WorkerSettings:
         cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True),  # reminder giornalieri; registry max 1 volta/7gg
         cron(monthly_report, minute=set(range(0, 60, 5))),   # ogni 5 minuti: invia quando giorno e orario sono arrivati
         cron(diag_all, hour={3}, minute={40}),   # diagnostica notturna: peso dei siti e verifica del core
+        cron(connector_rollout, hour={4}, minute={30}),   # connettore nuovo sui siti che ne hanno uno vecchio
+        cron(plugin_catalog_scan, weekday={6}, hour={5}, minute={0}, run_at_startup=True),   # catalogo plugin da wordpress.org: la domenica, e al primo avvio
     ]
     on_startup = _startup
     redis_settings = _redis_settings()

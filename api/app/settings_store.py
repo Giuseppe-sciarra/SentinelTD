@@ -22,6 +22,9 @@ DEFAULTS = {
     "server_parallel": 1,           # siti in contemporanea sullo stesso server
     "server_pause_seconds": 30,     # riposo del server dopo un sito dove si e' installato/aggiornato qualcosa
     "server_item_pause_seconds": 5, # pausa tra un aggiornamento e l'altro sullo stesso sito (server col freno)
+    "connector_auto_update": True,  # ogni notte installa il connettore nuovo sui siti che ne hanno uno vecchio
+    "auto_rollback": True,          # se la home si rompe dopo un aggiornamento, rimette le copie e blocca
+    "server_labels": {},            # nome dato a ogni server (IP -> nome), mostrato ovunque accanto all'IP
     "server_limited": [],           # server (IP) con il freno; di base nessuno, si lavora come sempre
 }
 
@@ -62,6 +65,10 @@ def normalize(data: dict | None) -> dict:
     out["server_limited"] = sorted({str(x).strip() for x in (raw if isinstance(raw, list) else []) if str(x).strip()})[:200]
     mode = str(src.get("email_report_mode", out["email_report_mode"]) or "").strip().lower()
     out["email_report_mode"] = mode if mode in ("site", "cycle") else "site"
+    out["connector_auto_update"] = bool(src.get("connector_auto_update", out["connector_auto_update"]))
+    out["auto_rollback"] = bool(src.get("auto_rollback", out["auto_rollback"]))
+    labels = src.get("server_labels", out["server_labels"])
+    out["server_labels"] = {str(k)[:64]: str(v).strip()[:60] for k, v in (labels.items() if isinstance(labels, dict) else []) if str(v).strip()}
     if out["expiry_critical_days"] > out["expiry_warning_days"]:
         out["expiry_critical_days"] = out["expiry_warning_days"]
     return out

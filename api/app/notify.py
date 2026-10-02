@@ -79,6 +79,58 @@ EVENTS: dict[str, dict[str, Any]] = {
 </div>""",
         "telegram": "❌ <b>{{ site_name }}</b> — {{ failures_head }}{% if folder %}\n📁 {{ folder }}{% endif %}\n{{ failures_lines }}",
     },
+    "auto_rollback": {
+        "label": "Ripristino automatico dopo un aggiornamento",
+        "desc": "La home si è rotta dopo un aggiornamento (errore o 5xx che prima non c'erano): Sentinel ha rimesso le copie fatte prima e ha bloccato quei componenti alla versione ripristinata.",
+        "channels": {"email": True, "telegram": True},
+        "vars": {
+            "site_name": "Nome del sito", "site_url": "URL del sito", "folder": "Cartella del sito",
+            "fixed": "La home è tornata a rispondere (vero/falso)", "home_message": "Esito del controllo della home dopo il ripristino",
+            "items_lines": "Componenti ripristinati (testo)", "items_html": "Componenti ripristinati (HTML)", "items_count": "Quanti",
+            "panel_url": "Indirizzo del pannello", "date": "Data e ora",
+        },
+        "subject": "[Sentinel] ⏪ {{ site_name }} — ripristino automatico{% if not fixed %}, home ancora in errore{% endif %}",
+        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
+  <h2 style="margin:0 0 6px"><a href="{{ site_url }}">{{ site_name }}</a></h2>
+  {% if folder %}<p style="margin:0 0 10px;color:#666">📁 {{ folder }}</p>{% endif %}
+  <p>Dopo l'aggiornamento la home non rispondeva più. Sentinel ha rimesso la versione precedente di:</p>
+  {{ items_html }}
+  <p>{% if fixed %}<b>La home è tornata a rispondere.</b>{% else %}<b style="color:#b00020">La home è ancora in errore: va guardata a mano.</b>{% endif %} {{ home_message }}</p>
+  <p>I componenti ripristinati sono <b>bloccati</b> alla versione precedente: il ciclo non li riaggiorna finché non li sblocchi dalla pagina del sito.</p>
+  <p style="color:#666">{% if panel_url %}<a href="{{ panel_url }}">{{ panel_url }}</a>{% endif %}</p>
+</div>""",
+        "telegram": """⏪ <b>{{ site_name }}</b> — ripristino automatico
+{% if folder %}📁 {{ folder }}
+{% endif %}La home non rispondeva dopo l'aggiornamento. Rimessa la versione precedente di:
+{{ items_lines }}
+{% if fixed %}✅ La home è tornata a rispondere.{% else %}🛑 La home è ancora in errore: va guardata a mano.{% endif %}
+🔒 Componenti bloccati alla versione precedente finché non li sblocchi.""",
+    },
+    "site_space": {
+        "label": "Spazio e log del sito",
+        "desc": "Dalla diagnostica notturna: spazio scrivibile quasi esaurito (meno di 50 MB) o log oltre i 10 MB, dentro il sito o nella cartella dell'account. Una volta per sito, poi solo se cambia qualcosa.",
+        "channels": {"email": False, "telegram": True},
+        "vars": {
+            "site_name": "Nome del sito", "site_url": "URL del sito", "folder": "Cartella del sito",
+            "space_low": "Spazio quasi esaurito (vero/falso)", "space_written_mb": "MB che si sono riusciti a scrivere",
+            "space_tested_mb": "MB della prova", "logs_lines": "Elenco dei log grandi (testo)", "logs_html": "Elenco dei log grandi (HTML)",
+            "logs_count": "Quanti log grandi", "panel_url": "Indirizzo del pannello", "date": "Data e ora",
+        },
+        "subject": "[Sentinel] 💾 {{ site_name }} — {% if space_low %}spazio quasi esaurito{% else %}log grandi{% endif %}",
+        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
+  <h2 style="margin:0 0 6px"><a href="{{ site_url }}">{{ site_name }}</a></h2>
+  {% if folder %}<p style="margin:0 0 10px;color:#666">📁 {{ folder }}</p>{% endif %}
+  {% if space_low %}<p><b>Spazio quasi esaurito:</b> sul sito si riescono a scrivere solo <b>{{ space_written_mb }} MB</b> (prova da {{ space_tested_mb }} MB). Gli aggiornamenti più grandi falliranno finché non si libera spazio.</p>{% endif %}
+  {% if logs_count %}<p><b>Log grandi ({{ logs_count }}):</b> occupano spazio e crescono da soli, di solito per un plugin che scrive avvisi a raffica o una tabella del database rotta.</p>{{ logs_html }}{% endif %}
+  <p style="color:#666">Dettagli nella diagnostica del sito{% if panel_url %}: <a href="{{ panel_url }}">{{ panel_url }}</a>{% endif %}</p>
+</div>""",
+        "telegram": """💾 <b>{{ site_name }}</b> — {% if space_low %}spazio quasi esaurito{% else %}log grandi{% endif %}
+{% if folder %}📁 {{ folder }}
+{% endif %}{% if space_low %}Si riescono a scrivere solo <b>{{ space_written_mb }} MB</b> (prova da {{ space_tested_mb }} MB): gli aggiornamenti grandi falliranno.
+{% endif %}{% if logs_count %}Log grandi ({{ logs_count }}):
+{{ logs_lines }}
+{% endif %}""",
+    },
     "core_integrity": {
         "label": "File del core da controllare",
         "desc": "La verifica notturna dei file di WordPress ha trovato file modificati, mancanti o in più (solo quando cambia qualcosa). Spento di base: il risultato resta nella pagina del sito e nei report.",
@@ -266,6 +318,12 @@ SAMPLE: dict[str, dict[str, Any]] = {
                       "failed_lines": "• Sito D: ACF 6.8.7→6.8.8"},
     "site_offline": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "reason": "HTTP 503", "attempts": 3, "window_min": 12},
     "site_online": {"site_name": "Sito di prova", "site_url": "https://esempio.it"},
+    "auto_rollback": {"site_name": "Confartigianato Belluno", "site_url": "https://www.confartigianatobelluno.eu", "folder": "3.Clienti Flash Factory",
+                      "fixed": True, "home_message": "home ok", "items": [{"name": "Hello Elementor", "from": "3.5.1", "to": "2.9.0", "ok": True, "error": ""}]},
+    "site_space": {"site_name": "Pubblicità Belluno", "site_url": "https://www.pubblicitabelluno.it", "folder": "3.Clienti Flash Factory",
+                   "space_low": True, "space_written_mb": 12.4, "space_tested_mb": 50,
+                   "logs": [{"path": "/home/pubblicitabellun/logs/pubblicitabelluno_it.php.error.log", "mb": 427, "outside": True},
+                            {"path": "/home/pubblicitabellun/public_html/wp-admin/error_log", "mb": 38, "outside": False}]},
     "client_report": {"client_name": "Hotel Esempio", "period_label": "settembre 2026", "company": "Tastiere Digitali",
                       "sites_total": 1, "sites_names": "hotelesempio.it", "total_updates": 14, "sites_touched": 1,
                       "attachment": "report-2026-09-cliente-hotel-esempio.pdf"},
@@ -611,6 +669,32 @@ def _failures_vars(out: dict, lang: str) -> None:
     out["failures_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
 
 
+def _rollback_vars(out: dict, lang: str) -> None:
+    items = out.get("items") or []
+    out["items_count"] = len(items)
+    tg, em = [], []
+    for it in items:
+        ok = bool(it.get("ok"))
+        line = f"{_esc(str(it.get('name', '')))} {_esc(str(it.get('from', '')))} → {_esc(str(it.get('to', '')))}" + ("" if ok else f" — {t('non riuscito', lang)}: {_esc(str(it.get('error', '')))}")
+        tg.append(("• " if ok else "• ❌ ") + line)
+        em.append("<li>" + line + "</li>")
+    out["items_lines"] = "\n".join(tg)
+    out["items_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
+
+
+def _space_vars(out: dict, lang: str) -> None:
+    """Spazio e log del sito: elenco dei log grandi in testo e in HTML."""
+    logs = out.get("logs") or []
+    out["logs_count"] = len(logs)
+    tg, em = [], []
+    for l in logs:
+        where = f" ({t('fuori dal sito', lang)})" if l.get("outside") else ""
+        tg.append(f"• <code>{_esc(str(l.get('path', '')))}</code> — <b>{l.get('mb', 0)} MB</b>{_esc(where)}")
+        em.append(f"<li><code>{_esc(str(l.get('path', '')))}</code> — <b>{l.get('mb', 0)} MB</b>{_esc(where)}</li>")
+    out["logs_lines"] = "\n".join(tg)
+    out["logs_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
+
+
 def _core_vars(out: dict, lang: str) -> None:
     """Avviso sui file del core: sintesi ed elenco dei file (i modificati e i mancanti per primi)."""
     c = out.get("core") or {}
@@ -707,6 +791,10 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
 
     if event == "update_failed":
         _failures_vars(out, lang)
+    if event == "site_space":
+        _space_vars(out, lang)
+    if event == "auto_rollback":
+        _rollback_vars(out, lang)
     if event == "core_integrity":
         _core_vars(out, lang)
 

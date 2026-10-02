@@ -134,11 +134,14 @@ async def mass_install(
     content = await package.read()
     if not content:
         raise HTTPException(422, "Pacchetto vuoto")
+    return await start_install_job(targets, content, fname, cms, kind, bool(activate))
 
-    # In sottofondo (2.9.4): prima l'installazione girava tutta dentro questa richiesta, un
-    # sito dopo l'altro, e la pagina restava ferma finche' non finiva l'ultimo (con 30 siti,
-    # decine di minuti). Ora lo zip va su disco, il worker installa un sito per lavoro
-    # rispettando i posti sui server, e la pagina legge l'avanzamento da /jobs/{id}.
+
+async def start_install_job(targets: list, content: bytes, fname: str, cms: str, kind: str, activate: bool,
+                            label: str = "") -> dict:
+    """Avvia un'installazione in blocco in sottofondo: lo zip su disco, un lavoro del worker per
+    sito (rispetta i posti sui server), avanzamento leggibile da /api/install/jobs/{id}.
+    Usata dall'installazione in blocco e dalla distribuzione del connettore."""
     import json
     import os
     import uuid
@@ -154,7 +157,7 @@ async def mass_install(
     with open(path, "wb") as f:
         f.write(content)
     meta = {"job": job, "filename": fname, "cms": cms, "kind": kind, "activate": bool(activate), "path": path,
-            "total": len(targets), "site_ids": [t.id for t in targets], "created": int(time.time())}
+            "total": len(targets), "site_ids": [t.id for t in targets], "created": int(time.time()), "label": label}
     pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
     try:
         await pool.set(f"inst:{job}", json.dumps(meta), ex=86400)

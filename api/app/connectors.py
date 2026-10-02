@@ -15,6 +15,7 @@ Contratto JSON atteso (uguale per WP e Joomla):
 Vengono restituite TUTTE le estensioni installate (update true/false); i contatori
 per categoria li calcola qui il backend.
 """
+import html
 import logging
 import time
 import re
@@ -170,6 +171,15 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             core_known = True
         unverified = not (core_known and all(known_cat.values()))
 
+        # versione del connettore sul sito: dichiarata (WP 2.23+/Joomla 1.32+) o ricavata dal plugin
+        declared = str(data.get("connector") or "").strip()
+        if declared:
+            site.connector_version = declared
+        else:
+            for e in data.get("extensions") or []:
+                if str(e.get("slug", "")).lower() in ("td-panopticon", "tdpanopticon"):
+                    site.connector_version = str(e.get("current") or "").strip()
+                    break
         site.core_current = str(core.get("current", ""))
         if core_known:
             site.core_latest = str(core.get("latest", core.get("current", "")))
@@ -255,7 +265,7 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             session.add(Extension(
                 site_id=site.id,
                 type=etype,
-                name=str(e.get("name", "")),
+                name=html.unescape(str(e.get("name", ""))),   # "&#8211;" -> "–"
                 slug=eslug,
                 current_version=ecur,
                 new_version=enew,

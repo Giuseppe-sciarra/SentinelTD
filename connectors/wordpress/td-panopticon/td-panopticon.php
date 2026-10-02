@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.22.0
+ * Version: 2.26.1
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -16,6 +16,14 @@
 
 if (!defined('ABSPATH')) {
     exit;
+}
+
+if (!defined('TDPANOP_VERSION')) {
+    // la versione letta dall'intestazione del plugin stesso: vive in un posto solo
+    define('TDPANOP_VERSION', (static function () {
+        $head = (string) @file_get_contents(__FILE__, false, null, 0, 2048);
+        return preg_match('/^\s*\*\s*Version:\s*(\S+)/m', $head, $m) ? $m[1] : '0';
+    })());
 }
 
 if (defined('TDPANOP_LOADED')) {
@@ -459,7 +467,300 @@ add_action('rest_api_init', function () {
         'callback' => 'tdpanop_package_export',
         'permission_callback' => 'tdpanop_auth',
     ]);
+    register_rest_route('tdpanopticon/v1', '/backups', [
+        'methods'  => 'GET',
+        'callback' => 'tdpanop_backups_list',
+        'permission_callback' => 'tdpanop_auth',
+    ]);
+    register_rest_route('tdpanopticon/v1', '/rollback', [
+        'methods'  => 'POST',
+        'callback' => 'tdpanop_rollback',
+        'permission_callback' => 'tdpanop_auth',
+    ]);
 });
+
+/* ---------------------------------------------------------------------------
+ * Copia prima dell'aggiornamento e ripristino.
+ * Prima di aggiornare un plugin o un tema, la sua cartella viene zippata in
+ * wp-content/uploads/sentinel-backups/ ({tipo}-{slug}-{versione}-{data}.zip). Il pannello
+ * puo' poi RIPRISTINARE quella versione con un clic, o da solo se la home si rompe dopo
+ * l'aggiornamento. Limiti: niente copia oltre i 300 MB (temi e plugin con dentro media) e
+ * se lo spazio non basta; si tengono le ultime 2 copie per elemento e niente oltre 14 giorni.
+ * Senza copia l'aggiornamento parte comunque: la risposta dice perche' manca.
+ * ------------------------------------------------------------------------- */
+if (!defined('TDPANOP_BACKUP_MAX_BYTES')) {
+    define('TDPANOP_BACKUP_MAX_BYTES', 300 * 1048576);
+    define('TDPANOP_BACKUP_KEEP', 2);
+    define('TDPANOP_BACKUP_DAYS', 14);
+}
+
+function tdpanop_backup_dir(): string
+{
+    $up  = wp_upload_dir(null, false);
+    $dir = rtrim((string) ($up['basedir'] ?? WP_CONTENT_DIR . '/uploads'), '/') . '/sentinel-backups';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    if (is_dir($dir)) {
+        if (!is_file($dir . '/index.php')) {
+            @file_put_contents($dir . '/index.php', "<?php\n// Silence is golden.\n");
+        }
+        if (!is_file($dir . '/.htaccess')) {
+            @file_put_contents($dir . '/.htaccess', "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nDeny from all\n</IfModule>\n");
+        }
+    }
+    return $dir;
+}
+
+function tdpanop_item_dir(string $type, string $slug): string
+{
+    $slug = basename($slug);
+    if ($type === 'plugin') {
+        return rtrim(WP_PLUGIN_DIR, '/') . '/' . $slug;
+    }
+    if ($type === 'theme') {
+        return rtrim(get_theme_root(), '/') . '/' . $slug;
+    }
+    return '';
+}
+
+function tdpanop_item_version(string $type, string $slug): string
+{
+    $slug = basename($slug);
+    if ($type === 'plugin') {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        $file = tdpanop_plugin_file_by_slug($slug);
+        if ($file && is_file(WP_PLUGIN_DIR . '/' . $file)) {
+            $d = get_plugin_data(WP_PLUGIN_DIR . '/' . $file, false, false);
+            return (string) ($d['Version'] ?? '');
+        }
+        return '';
+    }
+    $t = wp_get_theme($slug);
+    return $t->exists() ? (string) $t->get('Version') : '';
+}
+
+/** Ultima copia fatta in questa richiesta: finisce nella risposta dell'aggiornamento. */
+function tdpanop_backup_fields(?array $set = null): array
+{
+    static $last = null;
+    if ($set !== null) {
+        $last = $set;
+    }
+    return ['backup' => $last['file'] ?? null, 'backup_error' => $last['error'] ?? ''];
+}
+
+function tdpanop_backup_item(string $type, string $slug): array
+{
+    $src = tdpanop_item_dir($type, $slug);
+    $out = ['file' => null, 'error' => ''];
+    if ($src === '' || !is_dir($src)) {
+        $out['error'] = 'cartella non trovata';
+        tdpanop_backup_fields($out);
+        return $out;
+    }
+    $dir = tdpanop_backup_dir();
+    if (!is_dir($dir) || !wp_is_writable($dir)) {
+        $out['error'] = 'cartella delle copie non scrivibile';
+        tdpanop_backup_fields($out);
+        return $out;
+    }
+    // peso della cartella: oltre il limite niente copia (temi e plugin con dentro media)
+    $bytes = 0;
+    try {
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD);
+        foreach ($it as $f) {
+            if ($f->isFile()) {
+                $bytes += (int) $f->getSize();
+                if ($bytes > TDPANOP_BACKUP_MAX_BYTES) {
+                    $out['error'] = 'cartella oltre ' . (TDPANOP_BACKUP_MAX_BYTES / 1048576) . ' MB';
+                    tdpanop_backup_fields($out);
+                    return $out;
+                }
+            }
+        }
+    } catch (\Throwable $e) {
+        $out['error'] = 'cartella non leggibile';
+        tdpanop_backup_fields($out);
+        return $out;
+    }
+    // Spazio VERO dell'account (prova di scrittura, con cache di 15 minuti), non il disco del
+    // server: su un hosting con quota la copia non deve mangiarsi lo spazio che serve
+    // all'aggiornamento. Serve posto per la copia e per scaricare ed estrarre la versione nuova.
+    $need = (int) min(300, ceil($bytes * 2.5 / 1048576) + 20);
+    $sp = tdpanop_space_check($need);
+    if (empty($sp['ok'])) {
+        $out['error'] = 'spazio dell\'account insufficiente: niente copia, lo spazio resta all\'aggiornamento';
+        tdpanop_backup_fields($out);
+        return $out;
+    }
+    $ver  = preg_replace('/[^0-9A-Za-z._-]/', '_', tdpanop_item_version($type, $slug) ?: 'x');
+    $name = sprintf('%s-%s-%s-%s.zip', $type, basename($slug), $ver, gmdate('Ymd-His'));
+    $path = $dir . '/' . $name;
+    $okZip = false;
+    try {
+        if (class_exists('ZipArchive')) {
+            $z = new ZipArchive();
+            if ($z->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
+                $base = basename($src);
+                $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+                foreach ($it as $f) {
+                    $rel = $base . '/' . ltrim(substr($f->getPathname(), strlen($src)), '/\\');
+                    $f->isDir() ? $z->addEmptyDir($rel) : $z->addFile($f->getPathname(), $rel);
+                }
+                $okZip = $z->close();
+            }
+        } else {
+            require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
+            $z = new PclZip($path);
+            $okZip = (bool) $z->create($src, PCLZIP_OPT_REMOVE_PATH, dirname($src));
+        }
+    } catch (\Throwable $e) {
+        $okZip = false;
+    }
+    if (!$okZip || !is_file($path) || filesize($path) < 100) {
+        @unlink($path);
+        $out['error'] = 'zip non riuscito';
+        tdpanop_backup_fields($out);
+        return $out;
+    }
+    $out['file'] = $name;
+    $out['bytes'] = (int) filesize($path);
+    tdpanop_backup_fields($out);
+    tdpanop_backups_prune($type, $slug);
+    return $out;
+}
+
+/** Tiene le ultime N copie per elemento e niente oltre TDPANOP_BACKUP_DAYS giorni. */
+function tdpanop_backups_prune(string $type, string $slug): void
+{
+    $dir = tdpanop_backup_dir();
+    $all = tdpanop_backups_for($type, $slug);
+    foreach (array_slice($all, TDPANOP_BACKUP_KEEP) as $b) {
+        @unlink($dir . '/' . $b['file']);
+    }
+    foreach ((array) glob($dir . '/*.zip') as $f) {
+        if (filemtime($f) < time() - TDPANOP_BACKUP_DAYS * 86400) {
+            @unlink($f);
+        }
+    }
+}
+
+/** Copie di un elemento, dalla piu' recente. */
+function tdpanop_backups_for(string $type, string $slug): array
+{
+    $dir = tdpanop_backup_dir();
+    $prefix = $type . '-' . basename($slug) . '-';
+    $out = [];
+    foreach ((array) glob($dir . '/' . str_replace(['[', ']'], ['\\[', '\\]'], $prefix) . '*.zip') as $f) {
+        $name = basename($f);
+        if (!preg_match('/^' . preg_quote($prefix, '/') . '(.+)-(\d{8}-\d{6})\.zip$/', $name, $m)) {
+            continue;
+        }
+        $out[] = ['file' => $name, 'version' => $m[1], 'at' => gmdate('c', filemtime($f)), 'bytes' => (int) filesize($f)];
+    }
+    usort($out, static function ($a, $b) { return strcmp($b['at'], $a['at']); });
+    return $out;
+}
+
+function tdpanop_backups_list(WP_REST_Request $req)
+{
+    $type = (string) $req->get_param('type');
+    $slug = (string) $req->get_param('slug');
+    if (!in_array($type, ['plugin', 'theme'], true) || $slug === '') {
+        return new WP_REST_Response(['ok' => false, 'error' => 'type e slug obbligatori'], 400);
+    }
+    return new WP_REST_Response(['ok' => true, 'backups' => tdpanop_backups_for($type, $slug),
+                                 'keep' => TDPANOP_BACKUP_KEEP, 'days' => TDPANOP_BACKUP_DAYS], 200);
+}
+
+/**
+ * Ripristina una copia: la cartella attuale viene messa da parte, lo zip estratto al suo posto,
+ * e solo se tutto e' andato bene la vecchia cartella viene cancellata. In caso di errore si
+ * rimette com'era.
+ */
+function tdpanop_rollback(WP_REST_Request $req)
+{
+    $type = (string) $req->get_param('type');
+    $slug = basename((string) $req->get_param('slug'));
+    $file = basename((string) $req->get_param('file'));
+    if (!in_array($type, ['plugin', 'theme'], true) || $slug === '' || $file === '') {
+        return new WP_REST_Response(['ok' => false, 'error' => 'type, slug e file obbligatori'], 400);
+    }
+    $known = array_column(tdpanop_backups_for($type, $slug), 'file');
+    if (!in_array($file, $known, true)) {
+        return new WP_REST_Response(['ok' => false, 'error' => 'copia non trovata sul sito'], 404);
+    }
+    $dir  = tdpanop_backup_dir();
+    $zip  = $dir . '/' . $file;
+    $dest = tdpanop_item_dir($type, $slug);
+    $tmp  = $dir . '/.restore-' . $slug . '-' . gmdate('His');
+    $old  = $dest . '.sentinel-old';
+    $before = tdpanop_item_version($type, $slug);
+    @mkdir($tmp, 0755, true);
+    $okZip = false;
+    try {
+        if (class_exists('ZipArchive')) {
+            $z = new ZipArchive();
+            if ($z->open($zip) === true) {
+                $okZip = $z->extractTo($tmp);
+                $z->close();
+            }
+        } else {
+            require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
+            $z = new PclZip($zip);
+            $okZip = (bool) $z->extract(PCLZIP_OPT_PATH, $tmp);
+        }
+    } catch (\Throwable $e) {
+        $okZip = false;
+    }
+    $extracted = $tmp . '/' . $slug;
+    if (!$okZip || !is_dir($extracted)) {
+        tdpanop_rmdir($tmp);
+        return new WP_REST_Response(['ok' => false, 'error' => 'estrazione della copia non riuscita'], 200);
+    }
+    // scambio: attuale -> .sentinel-old, copia -> al suo posto
+    if (is_dir($old)) {
+        tdpanop_rmdir($old);
+    }
+    if (is_dir($dest) && !@rename($dest, $old)) {
+        tdpanop_rmdir($tmp);
+        return new WP_REST_Response(['ok' => false, 'error' => 'impossibile mettere da parte la cartella attuale'], 200);
+    }
+    if (!@rename($extracted, $dest)) {
+        if (is_dir($old)) {
+            @rename($old, $dest);   // si rimette com'era
+        }
+        tdpanop_rmdir($tmp);
+        return new WP_REST_Response(['ok' => false, 'error' => 'impossibile rimettere la copia al suo posto'], 200);
+    }
+    tdpanop_rmdir($old);
+    tdpanop_rmdir($tmp);
+    if ($type === 'plugin') {
+        wp_clean_plugins_cache(true);
+    } else {
+        wp_clean_themes_cache(false);
+    }
+    update_option('tdpanop_flush_caches', time(), true);   // cache da svuotare alla richiesta dopo
+    $after = tdpanop_item_version($type, $slug);
+    return new WP_REST_Response(['ok' => true, 'error' => '', 'from' => $before, 'to' => $after, 'file' => $file], 200);
+}
+
+function tdpanop_rmdir(string $dir): void
+{
+    if (!is_dir($dir)) {
+        return;
+    }
+    try {
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($it as $f) {
+            $f->isDir() && !$f->isLink() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
+        }
+    } catch (\Throwable $e) {
+        // best effort
+    }
+    @rmdir($dir);
+}
 
 function tdpanop_auth(WP_REST_Request $req)
 {
@@ -690,6 +991,7 @@ function tdpanop_status($req = null)
 
     return new WP_REST_Response([
         'cms'  => 'wp',
+        'connector' => TDPANOP_VERSION,   // il pannello sa quale versione gira su ogni sito
         'core' => ['current' => $core_cur, 'latest' => $core_latest, 'update' => $core_update, 'known' => $core_known],
         'php'  => PHP_VERSION,
         'extensions' => $extensions,
@@ -781,6 +1083,7 @@ function tdpanop_update(WP_REST_Request $req)
                 $expected = (string) $upd->response[$file]->new_version;
             }
 
+            tdpanop_backup_item('plugin', $slug);   // copia della versione attuale, per il ripristino
             $up  = new Plugin_Upgrader($skin);
 
             // IMPORTANTE: Plugin_Upgrader disattiva il plugin PRIMA dell'upgrade quando NON
@@ -849,6 +1152,7 @@ function tdpanop_update(WP_REST_Request $req)
                 $expected = (string) $upd->response[$slug]['new_version'];
             }
 
+            tdpanop_backup_item('theme', $slug);   // copia della versione attuale, per il ripristino
             $up  = new Theme_Upgrader($skin);
             $res = $up->upgrade($slug);
 
@@ -944,7 +1248,7 @@ function tdpanop_update(WP_REST_Request $req)
     // arrivano a una versione diversa da quella annunciata (prima risultavano "falliti").
     if ($type === 'plugin' || $type === 'theme') {
         if ($verAfter !== '' && $verBefore !== '' && version_compare($verAfter, $verBefore, '>')) {
-            $out = ['ok' => true, 'error' => '', 'new' => $verAfter];
+            $out = ['ok' => true, 'error' => '', 'new' => $verAfter] + tdpanop_backup_fields();
             if ($reactivated !== null) {
                 $out['reactivated'] = (bool) $reactivated;
             }
@@ -1000,7 +1304,7 @@ function tdpanop_update(WP_REST_Request $req)
     $reached = ($expected === '' || $verAfter === $expected || version_compare($verAfter, $expected, '>='));
 
     if ($changed && $reached) {
-        $out = ['ok' => true, 'error' => '', 'new' => $verAfter];
+        $out = ['ok' => true, 'error' => '', 'new' => $verAfter] + tdpanop_backup_fields();
         if ($reactivated !== null) {
             $out['reactivated'] = (bool) $reactivated;
         }
@@ -1683,6 +1987,76 @@ function tdpanop_db_size(): int
  * Peso del sito in un solo passaggio sui file, diviso per parti. Si ferma dopo $budget
  * secondi (siti con centinaia di migliaia di file): in quel caso complete = false.
  */
+
+/**
+ * Un file e' un log "grande"? Nomi dei log di PHP e WordPress, oltre i 10 MB.
+ */
+function tdpanop_is_big_log(string $name, int $size): bool
+{
+    if ($size < 10 * 1048576) {
+        return false;
+    }
+    $n = strtolower($name);
+    return $n === 'error_log' || $n === 'php_errorlog' || $n === 'php_error_log' || $n === 'debug.log'
+        || substr($n, -4) === '.log' || substr($n, -10) === '.error.log';
+}
+
+/**
+ * Log grandi FUORI dal sito ma dello stesso account: la home dell'utente e la sua cartella
+ * "logs" (cPanel): e' li' che finiscono i log degli errori PHP, invisibili dal sito. Solo il
+ * primo livello, solo se leggibile.
+ */
+function tdpanop_outside_logs(string $abs): array
+{
+    $out = [];
+    $home = dirname($abs);
+    foreach ([$home, $home . '/logs'] as $dir) {
+        if ($dir === '' || $dir === '/' || !is_dir($dir) || !is_readable($dir)) {
+            continue;
+        }
+        foreach ((array) @scandir($dir) as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $p = $dir . '/' . $name;
+            if (!is_file($p) || is_link($p)) {
+                continue;
+            }
+            $sz = (int) @filesize($p);
+            if (tdpanop_is_big_log($name, $sz)) {
+                $out[] = ['path' => $p, 'bytes' => $sz, 'outside' => true];
+            }
+        }
+    }
+    return $out;
+}
+
+/**
+ * Numeri del server per la pagina "Stato server" del pannello: carico medio (1, 5, 15 minuti),
+ * disco del server (totale e libero: su un hosting condiviso e' il disco di tutti, non la
+ * quota dell'account, che si misura con la prova di scrittura), software e PHP.
+ */
+function tdpanop_server_info(): array
+{
+    $load = function_exists('sys_getloadavg') ? @sys_getloadavg() : false;
+    $cores = 0;
+    if (is_readable('/proc/cpuinfo')) {
+        $cores = (int) preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo'));
+    }
+    $total = @disk_total_space(ABSPATH);
+    $free  = @disk_free_space(ABSPATH);
+    return [
+        'load'       => is_array($load) ? array_map(static fn($x) => round((float) $x, 2), array_slice($load, 0, 3)) : null,
+        'cores'      => $cores ?: null,
+        'disk_total' => $total ? (int) $total : null,
+        'disk_free'  => $free ? (int) $free : null,
+        'software'   => isset($_SERVER['SERVER_SOFTWARE']) ? substr((string) $_SERVER['SERVER_SOFTWARE'], 0, 80) : '',
+        'sapi'       => PHP_SAPI,
+        'os'         => PHP_OS_FAMILY,
+        'hostname'   => (string) @gethostname(),
+    ];
+}
+
 function tdpanop_sizes(float $budget = 25.0): array
 {
     $t0      = microtime(true);
@@ -1720,6 +2094,7 @@ function tdpanop_sizes(float $budget = 25.0): array
     };
     $complete = true;
     $files    = 0;
+    $big_logs = [];   // log grandi dentro il sito: riempiono lo spazio in silenzio
     foreach (array_unique($roots) as $root) {
         try {
             $it = new RecursiveIteratorIterator(
@@ -1741,11 +2116,21 @@ function tdpanop_sizes(float $budget = 25.0): array
                     continue;
                 }
                 $b[$bucket(wp_normalize_path($f->getPathname()))] += $sz;
+                if (count($big_logs) < 20 && tdpanop_is_big_log($f->getFilename(), $sz)) {
+                    $big_logs[] = ['path' => wp_normalize_path($f->getPathname()), 'bytes' => $sz, 'outside' => false];
+                }
             }
         } catch (\Throwable $e) {
             $complete = false;
         }
     }
+    foreach (tdpanop_outside_logs($abs) as $l) {
+        if (count($big_logs) < 30) {
+            $big_logs[] = $l;
+        }
+    }
+    usort($big_logs, static function ($x, $y) { return $y['bytes'] <=> $x['bytes']; });
+    $b['big_logs']    = $big_logs;
     $b['db']          = tdpanop_db_size();
     $b['files_total'] = $b['uploads'] + $b['plugins'] + $b['themes'] + $b['content_other'] + $b['core'];
     $b['total']       = $b['files_total'] + $b['db'];
@@ -1879,6 +2264,7 @@ function tdpanop_diagnostics(WP_REST_Request $req)
         'temp_custom'        => defined('WP_TEMP_DIR'),
         'temp_writable'      => wp_is_writable($tmp),
         'content_writable'   => wp_is_writable(WP_CONTENT_DIR),
+        'server'             => tdpanop_server_info(),   // carico, disco, software: per la pagina Stato server
         'upgrade_writable'   => is_dir($upg) ? wp_is_writable($upg) : wp_is_writable(WP_CONTENT_DIR),
         'file_mods_allowed'  => !(defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS),
         'disk_free'          => function_exists('disk_free_space') ? (float) @disk_free_space(WP_CONTENT_DIR) : null,

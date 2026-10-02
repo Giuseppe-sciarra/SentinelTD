@@ -268,6 +268,32 @@ async def get_site(site_id: int, s: AsyncSession = Depends(get_session)):
     return site
 
 
+@router.post("/{site_id}/rollback")
+async def rollback_now(site_id: int, payload: dict, s: AsyncSession = Depends(get_session)):
+    """Rimette la copia fatta prima di un aggiornamento (dallo Storico del sito). Dopo, il
+    componente resta bloccato alla versione ripristinata e lo stato del sito viene riletto."""
+    from ..worker import record_rollback, rollback_item
+    site = await s.get(Site, site_id)
+    if not site:
+        raise HTTPException(404)
+    if site.cms != "wp":
+        raise HTTPException(422, "Il ripristino è disponibile solo sui siti WordPress")
+    etype, slug, f = str(payload.get("type") or ""), str(payload.get("slug") or "").strip(), str(payload.get("file") or "").strip()
+    if etype not in ("plugin", "theme") or not slug or not f:
+        raise HTTPException(422, "Servono tipo, slug e file della copia")
+    res = await rollback_item(site, etype, slug, f)
+    await record_rollback(s, site, etype, str(payload.get("name") or slug), slug, res, "a mano")
+    await s.commit()
+    if not res["ok"]:
+        raise HTTPException(400, res.get("error") or "Ripristino non riuscito")
+    try:
+        await apply_status(s, site, force=True)
+        await s.commit()
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "from": res.get("from"), "to": res.get("to")}
+
+
 @router.post("/{site_id}/lock", response_model=SiteDetailOut)
 async def lock_component(site_id: int, payload: dict, s: AsyncSession = Depends(get_session)):
     """Blocca (o sblocca) un plugin o tema alla versione installata: il pannello non lo

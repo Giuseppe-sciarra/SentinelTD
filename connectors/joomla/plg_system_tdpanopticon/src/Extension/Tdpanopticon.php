@@ -83,6 +83,72 @@ final class Tdpanopticon extends CMSPlugin
         $this->markYoothemeFlush();
     }
 
+    private function connectorVersion(): string
+    {
+        // dal manifest del plugin, cosi' la versione vive in un posto solo
+        $xml = dirname(__DIR__, 2) . '/tdpanopticon.xml';
+        $raw = is_file($xml) ? (string) @file_get_contents($xml) : '';
+        return preg_match('/<version>\s*([^<\s]+)\s*<\/version>/', $raw, $m) ? $m[1] : '0';
+    }
+
+    /** Numeri del server per la pagina "Stato server": carico medio, disco del server, software. */
+    private function serverInfo(): array
+    {
+        $load = function_exists('sys_getloadavg') ? @sys_getloadavg() : false;
+        $cores = 0;
+        if (is_readable('/proc/cpuinfo')) {
+            $cores = (int) preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo'));
+        }
+        $total = @disk_total_space(JPATH_ROOT);
+        $free  = @disk_free_space(JPATH_ROOT);
+        return [
+            'load'       => is_array($load) ? array_map(static fn($x) => round((float) $x, 2), array_slice($load, 0, 3)) : null,
+            'cores'      => $cores ?: null,
+            'disk_total' => $total ? (int) $total : null,
+            'disk_free'  => $free ? (int) $free : null,
+            'software'   => isset($_SERVER['SERVER_SOFTWARE']) ? substr((string) $_SERVER['SERVER_SOFTWARE'], 0, 80) : '',
+            'sapi'       => PHP_SAPI,
+            'os'         => PHP_OS_FAMILY,
+            'hostname'   => (string) @gethostname(),
+        ];
+    }
+
+    private function isBigLog(string $name, int $size): bool
+    {
+        if ($size < 10 * 1048576) {
+            return false;
+        }
+        $n = strtolower($name);
+        return $n === 'error_log' || $n === 'php_errorlog' || $n === 'php_error_log'
+            || substr($n, -4) === '.log' || substr($n, -10) === '.error.log' || substr($n, -8) === '.log.php';
+    }
+
+    /** Log grandi fuori dal sito ma dello stesso account: home dell'utente e sua cartella "logs" (cPanel). */
+    private function outsideLogs(string $root): array
+    {
+        $out = [];
+        $home = dirname(rtrim($root, '/'));
+        foreach ([$home, $home . '/logs'] as $dir) {
+            if ($dir === '' || $dir === '/' || !is_dir($dir) || !is_readable($dir)) {
+                continue;
+            }
+            foreach ((array) @scandir($dir) as $name) {
+                if ($name === '.' || $name === '..') {
+                    continue;
+                }
+                $p = $dir . '/' . $name;
+                if (!is_file($p) || is_link($p)) {
+                    continue;
+                }
+                $sz = (int) @filesize($p);
+                if ($this->isBigLog($name, $sz)) {
+                    $out[] = ['path' => $p, 'bytes' => $sz, 'outside' => true];
+                }
+            }
+        }
+        return $out;
+    }
+
     private function yoothemeFlushFlag(): string
     {
         return rtrim((string) Factory::getApplication()->get('tmp_path', JPATH_ROOT . '/tmp'), '/\\') . '/tdpanop_flush_yootheme.flag';
@@ -339,6 +405,7 @@ final class Tdpanopticon extends CMSPlugin
 
         return [
             'cms'  => 'joomla',
+            'connector' => $this->connectorVersion(),   // il pannello sa quale versione gira su ogni sito
             'core' => ['current' => $core_current, 'latest' => $core_latest, 'update' => $core_update],
             'php'  => PHP_VERSION,
             'extensions' => $extensions,
@@ -1274,6 +1341,7 @@ final class Tdpanopticon extends CMSPlugin
             'temp_dir'           => $tmp,
             'temp_writable'      => is_dir($tmp) && is_writable($tmp),
             'content_writable'   => is_writable(JPATH_ROOT),
+            'server'             => $this->serverInfo(),   // carico, disco, software: per la pagina Stato server
             'disk_free'          => function_exists('disk_free_space') ? (float) @disk_free_space(JPATH_ROOT) : null,
             'core'               => ['status' => 'unsupported'],
         ];
@@ -1383,6 +1451,7 @@ final class Tdpanopticon extends CMSPlugin
         });
         $b        = ['uploads' => 0, 'plugins' => 0, 'themes' => 0, 'content_other' => 0, 'core' => 0];
         $complete = true;
+        $bigLogs = [];   // log grandi dentro il sito: riempiono lo spazio in silenzio
         $files    = 0;
         try {
             $it = new \RecursiveIteratorIterator(
@@ -1412,10 +1481,20 @@ final class Tdpanopticon extends CMSPlugin
                     }
                 }
                 $b[$key] += $sz;
+                if (count($bigLogs) < 20 && $this->isBigLog($f->getFilename(), $sz)) {
+                    $bigLogs[] = ['path' => str_replace('\\', '/', $f->getPathname()), 'bytes' => $sz, 'outside' => false];
+                }
             }
         } catch (\Throwable $e) {
             $complete = false;
         }
+        foreach ($this->outsideLogs($root) as $l) {
+            if (count($bigLogs) < 30) {
+                $bigLogs[] = $l;
+            }
+        }
+        usort($bigLogs, static function ($x, $y) { return $y['bytes'] <=> $x['bytes']; });
+        $b['big_logs'] = $bigLogs;
         $b['db']          = $this->dbSize();
         $b['files_total'] = $b['uploads'] + $b['plugins'] + $b['themes'] + $b['content_other'] + $b['core'];
         $b['total']       = $b['files_total'] + $b['db'];

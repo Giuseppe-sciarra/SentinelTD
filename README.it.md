@@ -27,6 +27,10 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 - **Storico del peso dei siti**: file per categoria (media, plugin, temi, core, il resto) e
   database, raccolti ogni notte e conservati due anni, con grafico e andamento degli ultimi 30
   giorni
+- **Spazio e log sotto controllo**: la diagnostica notturna scrive una prova da 50 MB su ogni sito ed
+  elenca i log oltre i 10 MB, dentro il sito e nella cartella dell'account accanto (dove cPanel
+  tiene `~/logs`). Una notifica per sito quando lo spazio scarseggia o compare un log grande, poi
+  solo se cambia qualcosa
 
 **Aggiornamenti**
 - Aggiorni un sito, una selezione o tutto il parco — a mano o con il **ciclo automatico
@@ -51,6 +55,12 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   da quale versione a quale
 - **Controllo della home**: un'istantanea prima e dopo ogni aggiornamento; il report dice se
   il sito è uguale, se è cambiato vistosamente (istantanee allegate) o se si è rotto
+- **Copia prima dell'aggiornamento e ripristino con un clic** (WordPress): prima di aggiornare un
+  plugin o un tema il connettore zippa la versione attuale in `uploads/sentinel-backups/` (le
+  ultime due per elemento, 14 giorni). Lo storico del sito mostra *Ripristina la x.y* su ogni
+  aggiornamento con una copia. E se la home si rompe dopo un aggiornamento — un errore o un 5xx
+  che prima non c'erano — Sentinel **ripristina da solo**, blocca quei componenti alla versione
+  rimessa e te lo dice
 - I prodotti a licenza (es. Elementor Pro) si aggiornano dall'interno del backend di
   WordPress; quando un sito non riesce a scaricarli, Sentinel installa lo zip che hai
   caricato una volta in *Pacchetti*
@@ -80,6 +90,9 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 **Sicurezza e scadenze**
 - Vulnerabilità note confrontate con le estensioni realmente installate, con gravità e
   versione che risolve
+- **Plugin abbandonati**: tutti i plugin WordPress del parco con l'ultimo aggiornamento dell'autore,
+  la versione "testato fino a" e le chiusure prese da wordpress.org (aggiornate ogni settimana) —
+  plugin chiusi e plugin fermi da anni, con i siti che li usano ancora
 - **Scadenza dei domini** via RDAP con ripiego su WHOIS, e avvisi alle soglie che decidi tu
 - Per ogni dominio: **dove è registrato** (registrar e nameserver) e la **decisione di
   rinnovo** — da decidere, si rinnova, non si rinnova — anche in blocco, con le cartelle e
@@ -113,6 +126,10 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   intervallo di mesi a scelta, con la cronologia di ogni singolo aggiornamento
 - Statistiche con viste giornaliera, mensile e confronto fra due mesi, classifiche dei siti e
   dei componenti più aggiornati
+- **Stato server**: una scheda per server (o per cartella cliente) con i suoi siti, le versioni PHP,
+  carico e disco dalla diagnostica notturna, aggiornamenti in sospeso e falliti, peso totale con
+  l'andamento di 30 giorni, aggiornamenti per mese, l'elenco dei problemi (offline, spazio, log,
+  fallimenti, file del core, PHP fuori supporto) e l'interruttore del freno
 
 **Amministrazione**
 - **Il pannello si aggiorna da solo**: pallini, etichette e la pagina del sito aperto seguono lo
@@ -122,6 +139,9 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 - Personalizzazione: il tuo logo e la tua favicon nel pannello, nei PDF e nelle email
 - Interfaccia in **italiano, inglese, francese e tedesco**, connettori compresi
 - Pacchetti dei connettori generati dal pannello stesso, già col tuo indirizzo e la tua chiave
+- **Connettore aggiornato da solo**: ogni notte il pannello installa il connettore che consegna sui
+  siti che ne hanno uno più vecchio (un sito alla volta sui server col freno), e *Impostazioni →
+  Connettori* mostra quali siti sono indietro, con *Aggiorna sui siti* per farlo subito
 
 ---
 

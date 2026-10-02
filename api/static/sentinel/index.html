@@ -82,6 +82,12 @@
         <a :class="route.page==='stats'?'on':''" href="#/stats">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M7 21V10M12 21V4M17 21v-7"/></svg>
           <span class="txt">Statistiche</span></a>
+        <a :class="route.page==='plugins'?'on':''" href="#/plugins">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z"/><path d="M12 6v6l4 2"/></svg>
+          <span class="txt">Plugin abbandonati</span></a>
+        <a :class="route.page==='servers'?'on':''" href="#/servers">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>
+          <span class="txt">Stato server</span></a>
 
         <div class="lbl">Cartelle</div>
         <template x-for="f in folderTree" :key="f.name">
@@ -209,15 +215,12 @@
               </div>
               <div class="card">
                 <h3>Da tenere d'occhio</h3>
-                <div class="timeline">
+                <div class="issues-rows dash-rows">
                   <template x-for="(a,i) in attention" :key="i">
-                    <div class="ev" style="grid-template-columns:18px 1fr">
-                      <span class="dot" :class="a.kind" style="margin-top:6px"></span>
-                      <div>
-                        <a x-show="a.site" :href="'#/site/'+(a.site&&a.site.id)" x-text="a.site&&a.site.name"></a>
-                        <a x-show="a.link" :href="'#/'+a.link">Centro sicurezza</a>
-                        <div class="small" x-text="a.text"></div>
-                      </div>
+                    <div class="issue-line dash-line" :class="'sev-' + (a.kind === 'err' ? 'err' : (a.kind === 'warn' ? 'warn' : 'info'))">
+                      <a x-show="a.site" :href="'#/site/'+(a.site&&a.site.id)" x-text="a.site&&a.site.name" translate="no"></a>
+                      <a x-show="a.link" :href="'#/'+a.link">Centro sicurezza</a>
+                      <div class="issue-card-chips"><span class="issue-tag" :class="'sev-' + (a.kind === 'err' ? 'err' : 'warn')" x-text="a.text"></span></div>
                     </div>
                   </template>
                   <div class="empty" x-show="!attention.length">Tutto tranquillo ✨</div>
@@ -638,6 +641,9 @@
                       <div><span class="badge" :class="detail.diag.content_writable ? 'ok' : 'err'" x-text="detail.diag.content_writable ? 'scrivibili' : 'non scrivibili'"></span> <span class="badge err" x-show="detail.diag.file_mods_allowed === false">modifiche ai file bloccate</span></div>
                       <div class="k">PHP</div>
                       <div><span class="mono" x-text="detail.diag.php"></span> · memoria <span class="mono" x-text="detail.diag.memory_limit"></span> · tempo massimo <span class="mono" x-text="(detail.diag.max_execution_time || 0) + 's'"></span></div>
+                      <div class="k" x-show="detail.diag.sizes && (detail.diag.sizes.big_logs||[]).length">Log grandi</div>
+                      <div x-show="detail.diag.sizes && (detail.diag.sizes.big_logs||[]).length"><div class="small warn">Occupano spazio e crescono da soli: di solito un plugin che scrive avvisi a raffica o una tabella del database rotta. Si svuotano via FTP o dal pannello dell'hosting.</div>
+                        <template x-for="l in (detail.diag.sizes ? detail.diag.sizes.big_logs : [])" :key="l.path"><div class="small"><span class="mono" x-text="l.path" translate="no"></span> · <b x-text="Math.round(l.bytes/1048576) + ' MB'"></b><span class="mut" x-show="l.outside"> · fuori dal sito, nella cartella dell'account</span></div></template></div>
                       <div class="k">Modulo zip</div>
                       <div><span class="badge" :class="detail.diag.zip ? 'ok' : 'warn'" x-text="detail.diag.zip ? 'presente' : 'assente'"></span></div>
                       <div class="k">File del core</div>
@@ -690,9 +696,9 @@
             <template x-if="route.tab==='ext'">
               <div class="tbl-wrap site-tab">
                 <table class="tbl">
-                  <thead><tr><th>Estensione</th><th>Tipo</th><th>Installata</th><th>Disponibile</th><th>Stato</th><th></th></tr></thead>
+                  <thead><tr><th class="sortable" @click="tSort('ext','name')">Estensione<span x-text="tMark('ext','name')"></span></th><th class="sortable" @click="tSort('ext','type')">Tipo<span x-text="tMark('ext','type')"></span></th><th class="sortable" @click="tSort('ext','cur')">Installata<span x-text="tMark('ext','cur')"></span></th><th class="sortable" @click="tSort('ext','avail')">Disponibile<span x-text="tMark('ext','avail')"></span></th><th class="sortable" @click="tSort('ext','state')">Stato<span x-text="tMark('ext','state')"></span></th><th></th></tr></thead>
                   <tbody>
-                    <template x-for="e in [...detail.extensions].sort((a,b)=>((b.update_available&&!isLocked(b))-(a.update_available&&!isLocked(a)))||(isLocked(b)-isLocked(a))||a.name.localeCompare(b.name))" :key="e.type+e.slug">
+                    <template x-for="e in tSorted('ext', [...detail.extensions].sort((a,b)=>((b.update_available&&!isLocked(b))-(a.update_available&&!isLocked(a)))||(isLocked(b)-isLocked(a))||a.name.localeCompare(b.name)))" :key="e.type+e.slug">
                       <tr><td><div class="name" x-text="e.name" translate="no"></div><div class="url mono" x-text="e.slug"></div></td><td><span class="badge" x-text="e.type"></span></td><td class="mono" x-text="e.current_version||'—'"></td><td class="mono" x-text="e.update_available?e.new_version:'—'"></td><td><span class="badge" x-show="isLocked(e)" title="Bloccato alla versione installata: Sentinel non lo aggiorna">🔒 bloccato</span><span class="badge" x-show="!isLocked(e)" :class="e.update_available?'warn':'ok'" x-text="e.update_available?'update':'ok'"></span></td><td class="lock-cell"><button class="btn sm ghost" x-show="e.type==='plugin'||e.type==='theme'" @click="toggleLock(e)" :disabled="!!(busy['lock'+e.type+e.slug])" :title="isLocked(e) ? 'Sblocca: torna ad aggiornarsi normalmente' : 'Blocca alla versione installata: Sentinel non lo aggiornerà finché non lo sblocchi'" x-text="isLocked(e) ? 'Sblocca' : 'Blocca'"></button></td></tr>
                     </template>
                   </tbody>
@@ -704,7 +710,7 @@
             <template x-if="route.tab==='history'">
               <div class="card site-tab"><div class="timeline">
                 <template x-for="h in siteHistory" :key="h.id">
-                  <div class="ev"><span class="dot" :class="h.ok?'ok':'err'" style="margin-top:6px"></span><div><b x-text="h.name" translate="no"></b> <span class="badge" x-text="h.type"></span> <span class="mono small mut" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok" x-text="h.error"></div></div><div class="when" x-text="fmtDate(h.at)"></div></div>
+                  <div class="ev"><span class="dot" :class="h.ok?'ok':'err'" style="margin-top:6px"></span><div><b x-text="h.name" translate="no"></b> <span class="badge" x-text="h.type"></span> <span class="mono small mut" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok" x-text="h.error"></div><div class="small mut" x-show="h.ok && h.error" x-text="h.error"></div><button class="btn sm ghost" style="margin-top:4px" x-show="h.ok && h.backup && h.from && (h.type==='plugin'||h.type==='theme')" :disabled="!!(busy['rb'+h.id])" @click="rollbackItem(h)" :title="'Rimette la ' + h.from + ' dalla copia fatta prima dell\'aggiornamento (' + h.backup + ')'" x-text="'⏪ Ripristina la ' + h.from"></button></div><div class="when" x-text="fmtDate(h.at)"></div></div>
                 </template>
                 <div class="empty" x-show="!siteHistory.length">Nessun update negli ultimi 7 giorni</div>
               </div></div>
@@ -771,7 +777,7 @@
             <!-- elenco: per cartella, per fornitore, per nome o per scadenza -->
             <div class="tbl-wrap"><table class="tbl responsive dk-tbl"><thead><tr>
               <th style="width:36px"><input type="checkbox" :checked="domainRows().length && domainRows().every(d=>exp.dSel.includes(d.name))" @change="$event.target.checked ? dSelAll() : dSelNone()" title="Seleziona tutti quelli mostrati"></th>
-              <th>Dominio</th><th>Sito</th><th>Scadenza</th><th>Rinnovo</th><th style="width:44px"></th></tr></thead>
+              <th class="sortable" @click="tSort('dom','name')">Dominio<span x-text="tMark('dom','name')"></span></th><th class="sortable" @click="tSort('dom','site')">Sito<span x-text="tMark('dom','site')"></span></th><th class="sortable" @click="tSort('dom','exp')">Scadenza<span x-text="tMark('dom','exp')"></span></th><th class="sortable" @click="tSort('dom','renew')">Rinnovo<span x-text="tMark('dom','renew')"></span></th><th style="width:44px"></th></tr></thead>
               <template x-for="g in domainGroups()" :key="'g'+g.name">
                 <tbody>
                   <tr class="dk-group" x-show="g.name"><td colspan="6">
@@ -780,7 +786,7 @@
                     <b x-text="g.name" :translate="g.system ? 'yes' : 'no'"></b><span class="mut"> · <span x-text="g.rows.length"></span> <span x-text="pl(g.rows.length,'dominio','domini')"></span></span>
                     <span class="badge warn" x-show="g.rows.filter(x=>!x.renew).length"><span x-text="g.rows.filter(x=>!x.renew).length"></span> da decidere</span>
                   </td></tr>
-                  <template x-for="x in g.rows" :key="g.name+x.id">
+                  <template x-for="x in tSorted('dom', g.rows)" :key="g.name+x.id">
                     <tr :class="exp.dSel.includes(x.name)?'sel':''">
                       <td><input type="checkbox" :checked="exp.dSel.includes(x.name)" @change="dToggle(x.name)"></td>
                       <td><div class="dk-name mono" x-text="x.name" translate="no"></div>
@@ -827,8 +833,8 @@
               <div class="card kpi err"><div class="k">Scadute</div><div class="v" x-text="exp.components.filter(x=>x.days!==null&&x.days<0).length"></div></div>
               <div class="card kpi ok"><div class="k">Oltre soglia</div><div class="v" x-text="exp.components.filter(x=>x.days!==null&&x.days>prefs.expiry_warning_days).length"></div></div>
             </div>
-            <div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>Plugin / tema / licenza</th><th>Piattaforma</th><th>Fornitore</th><th>Data scadenza</th><th>Tempo residuo</th><th>Note</th><th></th></tr></thead><tbody>
-              <template x-for="x in exp.components" :key="x.id"><tr><td><b x-text="x.name" translate="no"></b></td><td><span class="badge" :class="x.platform==='wp'?'wp':(x.platform==='joomla'?'joomla':'')" x-text="platformLabel(x.platform)"></span></td><td x-text="x.provider||'—'" translate="no"></td><td><b x-text="fmtDay(x.expires_at)"></b><div class="small mut" x-text="x.recur_label"></div></td><td><span class="badge" :class="expiryDaysClass(x.days)" x-text="expiryDaysText(x.days)"></span></td><td class="small mut" x-text="x.notes||'—'" translate="no"></td><td><div class="acts" style="opacity:1"><button class="btn sm primary" x-show="x.recur_months>0" @click="renewExpiry(x)" title="Sposta la scadenza avanti di un periodo">↻ Rinnovata</button><button class="btn sm" @click="editExpiry(x)">Modifica</button><button class="btn sm danger" @click="deleteExpiry(x)">Elimina</button></div></td></tr></template>
+            <div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th class="sortable" @click="tSort('comp','name')">Plugin / tema / licenza<span x-text="tMark('comp','name')"></span></th><th class="sortable" @click="tSort('comp','platform')">Piattaforma<span x-text="tMark('comp','platform')"></span></th><th class="sortable" @click="tSort('comp','provider')">Fornitore<span x-text="tMark('comp','provider')"></span></th><th class="sortable" @click="tSort('comp','date')">Data scadenza<span x-text="tMark('comp','date')"></span></th><th class="sortable" @click="tSort('comp','left')">Tempo residuo<span x-text="tMark('comp','left')"></span></th><th>Note</th><th></th></tr></thead><tbody>
+              <template x-for="x in tSorted('comp', exp.components)" :key="x.id"><tr><td><b x-text="x.name" translate="no"></b></td><td><span class="badge" :class="x.platform==='wp'?'wp':(x.platform==='joomla'?'joomla':'')" x-text="platformLabel(x.platform)"></span></td><td x-text="x.provider||'—'" translate="no"></td><td><b x-text="fmtDay(x.expires_at)"></b><div class="small mut" x-text="x.recur_label"></div></td><td><span class="badge" :class="expiryDaysClass(x.days)" x-text="expiryDaysText(x.days)"></span></td><td class="small mut" x-text="x.notes||'—'" translate="no"></td><td><div class="acts" style="opacity:1"><button class="btn sm primary" x-show="x.recur_months>0" @click="renewExpiry(x)" title="Sposta la scadenza avanti di un periodo">↻ Rinnovata</button><button class="btn sm" @click="editExpiry(x)">Modifica</button><button class="btn sm danger" @click="deleteExpiry(x)">Elimina</button></div></td></tr></template>
             </tbody></table><div class="empty" x-show="!exp.loadingComponents&&!exp.components.length">Nessuna licenza registrata.</div></div>
           </div>
         </template>
@@ -849,11 +855,11 @@
             </div>
             <div class="tbl-wrap">
               <table class="tbl responsive">
-                <thead><tr><th>Sev.</th><th>Sito</th><th>Estensione</th><th>CVE</th><th>Installata</th><th>Fix in</th><th></th></tr></thead>
+                <thead><tr><th class="sortable" @click="tSort('sec','sev')">Sev.<span x-text="tMark('sec','sev')"></span></th><th class="sortable" @click="tSort('sec','site')">Sito<span x-text="tMark('sec','site')"></span></th><th class="sortable" @click="tSort('sec','ext')">Estensione<span x-text="tMark('sec','ext')"></span></th><th class="sortable" @click="tSort('sec','cve')">CVE<span x-text="tMark('sec','cve')"></span></th><th class="sortable" @click="tSort('sec','cur')">Installata<span x-text="tMark('sec','cur')"></span></th><th class="sortable" @click="tSort('sec','fix')">Fix in<span x-text="tMark('sec','fix')"></span></th><th></th></tr></thead>
                 <tbody>
-                  <template x-for="m in sec.items.filter(x=>!sec.sev||x.severity===sec.sev)" :key="m.match_id">
-                    <tr>
-                      <td><span class="badge" :class="m.severity==='critical'?'err':(m.severity==='high'?'warn':'')" x-text="m.severity"></span> <span class="badge err" x-show="m.exploited">exploited</span></td>
+                  <template x-for="m in tSorted('sec', sec.items.filter(x=>!sec.sev||x.severity===sec.sev))" :key="m.match_id">
+                    <tr class="sec-row" :class="'sev-' + secSev(m.severity)">
+                      <td><span class="badge sev-badge" :class="'sev-' + secSev(m.severity)" x-text="m.severity"></span> <span class="badge err" x-show="m.exploited">exploited</span></td>
                       <td><a :href="'#/site/'+m.site_id" x-text="m.site_name" translate="no"></a></td>
                       <td><span x-text="m.ext_name||m.ext_slug"></span></td>
                       <td><a :href="m.url" target="_blank" class="mono" x-text="m.cve_id"></a><div class="small mut" x-text="m.title"></div></td>
@@ -874,16 +880,231 @@
           <div>
             <h1 class="page-title">Storico aggiornamenti</h1>
             <div class="page-sub">Ultimi 7 giorni · <span x-text="histSummary?histSummary.ok:0"></span> riusciti · <span x-text="histSummary?histSummary.failed:0"></span> falliti</div>
-            <div class="card" style="margin-top:16px"><div class="timeline">
-              <template x-for="h in history" :key="h.id">
-                <div class="ev"><span class="dot" :class="h.ok?'ok':'err'" style="margin-top:6px"></span><div><a :href="'#/site/'+h.site_id" x-text="h.site_name" translate="no"></a> · <b x-text="h.name" translate="no"></b> <span class="badge" x-text="h.type"></span> <span class="mono small mut" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok" x-text="h.error"></div></div><div class="when" x-text="fmtDate(h.at)"></div></div>
+            <div class="card" style="margin-top:16px">
+              <div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:12px">
+                <input class="input" style="flex:1;min-width:240px" x-model="histQ" placeholder="Cerca per sito, plugin o tema">
+                <div class="seg">
+                  <button :class="!histType ? 'on' : ''" @click="histType=''">Tutti</button><button :class="histType==='plugin' ? 'on' : ''" @click="histType='plugin'">Plugin</button><button :class="histType==='theme' ? 'on' : ''" @click="histType='theme'">Temi</button><button :class="histType==='core' ? 'on' : ''" @click="histType='core'">Core</button><button :class="histType==='failed' ? 'on' : ''" @click="histType='failed'">Falliti</button><button :class="histType==='backup' ? 'on' : ''" @click="histType='backup'" title="Aggiornamenti con la copia della versione precedente: si possono ripristinare">⏪ Ripristinabili</button>
+                </div>
+                <span class="small mut" x-text="historyRows.length + ' di ' + history.length"></span>
+              </div>
+              <div class="hist-days">
+              <template x-for="g in historyByDay" :key="'hd'+g.day">
+                <div class="hist-day">
+                  <div class="hist-day-h"><b x-text="dayLabel(g.day)"></b> <span class="small mut" x-text="g.ok + ' ' + pl(g.ok, 'riuscito', 'riusciti')"></span><span class="small err" x-show="g.failed" x-text="' · ' + g.failed + ' ' + pl(g.failed, 'fallito', 'falliti')"></span></div>
+                  <template x-for="h in g.rows" :key="h.id">
+                    <div class="hist-row" :class="h.ok ? '' : 'failed'">
+                      <span class="hist-time mono small mut" x-text="h.at ? new Date(h.at).toLocaleTimeString(I18n.locale, { hour: '2-digit', minute: '2-digit' }) : ''"></span>
+                      <div class="hist-main"><a :href="'#/site/'+h.site_id" x-text="h.site_name" translate="no"></a> · <b x-text="h.name" translate="no"></b> <span class="badge" x-text="h.type"></span> <span class="mono small" x-text="h.from + ' → ' + h.to"></span>
+                        <div class="err small" x-show="!h.ok" x-text="h.error"></div><div class="small mut" x-show="h.ok && h.error" x-text="h.error"></div></div>
+                      <button class="btn sm hist-rb" x-show="h.ok && h.backup && h.from && (h.type==='plugin'||h.type==='theme')" :disabled="!!(busy['rb'+h.id])" @click="rollbackItem(h)" :title="'Rimette la ' + h.from + ' dalla copia fatta prima dell\'aggiornamento (' + h.backup + ')'" x-text="'⏪ Ripristina la ' + h.from"></button>
+                    </div>
+                  </template>
+                </div>
               </template>
               <div class="empty" x-show="!history.length">Nessun update negli ultimi 7 giorni</div>
+              <div class="empty" x-show="history.length && !historyRows.length">Nessun aggiornamento corrisponde alla ricerca.</div>
+              <div class="small mut" x-show="historyRows.length > 500" style="padding-top:8px">Mostrati i primi 500: restringi la ricerca.</div>
             </div></div>
           </div>
         </template>
 
         <!-- ===== REPORT MENSILE ===== -->
+        <template x-if="route.page==='servers'">
+          <div>
+            <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+              <div style="flex:1;min-width:280px">
+                <h1 class="page-title">Stato server</h1>
+                <div class="page-sub">Il quadro di ogni server, o di ogni cartella cliente: siti, versioni PHP, spazio, carico, log, problemi, peso con l'andamento di 30 giorni e aggiornamenti degli ultimi 6 mesi. Carico e disco vengono dalla diagnostica notturna.</div>
+              </div>
+              <div class="seg"><button :class="srvst.by==='server' ? 'on' : ''" @click="srvSetBy('server')">Per server</button><button :class="srvst.by==='folder' ? 'on' : ''" @click="srvSetBy('folder')">Per cartella cliente</button></div>
+            </div>
+            <div class="empty" x-show="!srvst.data">Caricamento…</div>
+            <div class="issues-box" x-show="srvst.data">
+              <div class="issues-top">
+                <div>
+                  <div class="issues-title"><span x-text="srvProblemSitesAll ? '⚠️' : '✅'"></span> Cosa non va</div>
+                  <div class="small mut" x-text="srvProblemSitesAll ? srvProblemSitesAll + ' ' + pl(srvProblemSitesAll, 'sito con qualcosa da guardare', 'siti con qualcosa da guardare') + ' su ' + srvTotalSites : 'Tutto a posto su ' + srvTotalSites + ' siti'"></div>
+                </div>
+                <div class="issues-filters" x-show="srvProblems.length">
+                  <template x-for="k in srvProblemKinds" :key="'pk'+k.kind"><button class="issues-filter" :class="['sev-' + problemSev(k.kind), srvst.kind===k.kind ? 'on' : '']" @click="srvst.kind = srvst.kind===k.kind ? '' : k.kind"><span x-text="problemIcon(k.kind)"></span> <span x-text="k.label"></span> <b x-text="k.count"></b></button></template>
+                  <button class="issues-filter" x-show="srvst.kind" @click="srvst.kind=''">tutti</button>
+                </div>
+              </div>
+              <div class="issues-rows" x-show="srvProblems.length">
+                <template x-for="s in srvProblemSites" :key="'is'+s.site_id">
+                  <div class="issue-line" :class="'sev-' + siteSev(s)">
+                    <a :href="'#/site/'+s.site_id" x-text="s.site" translate="no"></a>
+                    <div class="issue-card-chips"><template x-for="(p, i) in s.problems" :key="'ip'+s.site_id+i"><span class="issue-tag" :class="'sev-' + problemSev(p.kind)" :title="p.text"><span x-text="problemIcon(p.kind)"></span> <span x-text="['php','domain','logs','failed'].includes(p.kind) ? p.text : problemShort(p.kind) + ': ' + p.text"></span></span></template></div>
+                    <span class="issue-line-srv" x-text="s.group" translate="no"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <template x-if="srvst.data">
+            <div class="srvx-list">
+              <div class="srvx-cols">
+                <span></span><span>Server</span><span>Siti</span><span>PHP</span><span>Carico</span><span>Disco</span><span>Peso · 30 giorni</span><span>Problemi</span>
+              </div>
+              <template x-for="g in srvst.data.groups" :key="srvst.by + g.key">
+                <div class="srvx" :class="[srvst.open[g.key] ? 'open' : '', g.sites_with_problems ? 'bad' : '']">
+                  <!-- riga chiusa: colonne allineate tra tutti i server -->
+                  <div class="srvx-head" @click="srvst.open = { ...srvst.open, [g.key]: !srvst.open[g.key] }">
+                    <span class="srvx-caret" x-text="srvst.open[g.key] ? '▾' : '▸'"></span>
+                    <div class="srvx-name">
+                      <b x-text="g.by==='server' ? (g.label || g.key) : (g.key || 'Senza cartella')" translate="no"></b>
+                      <div class="small mut mono" x-show="g.by==='server' && g.label" x-text="(g.ips || []).map(i => i.ip).join(' · ')" translate="no"></div>
+                      <div class="small mut" x-show="g.by!=='server' || !g.label" x-text="(g.ips || []).map(i => i.host).filter(Boolean).join(' · ')" translate="no"></div>
+                    </div>
+                    <div><b x-text="g.counts.sites"></b> <span class="small mut" x-text="g.counts.joomla ? g.counts.wp + ' WP · ' + g.counts.joomla + ' J' : 'WP'"></span></div>
+                    <div class="chips"><template x-for="p in g.php" :key="g.key+'hp'+p[0]"><span class="chip small" :class="phpState(p[0]).cls === 'err' ? 'err' : ''"><span x-text="p[0]"></span>&nbsp;<b x-text="p[1]"></b></span></template></div>
+                    <div><span class="badge" :class="loadClass(g.load)" x-show="g.load" x-text="g.load ? g.load.max + (g.load.cores ? ' / ' + g.load.cores : '') : ''"></span><span class="mut" x-show="!g.load">—</span></div>
+                    <div><template x-if="g.disk"><div><span class="small" x-text="Math.round(100 - g.disk.free / g.disk.total * 100) + '%'"></span><div class="bar"><div class="bar-fill" :class="g.disk.free / g.disk.total < .1 ? 'err' : (g.disk.free / g.disk.total < .2 ? 'warn' : '')" :style="'width:' + Math.round(100 - g.disk.free / g.disk.total * 100) + '%'"></div></div></div></template><span class="mut" x-show="!g.disk">—</span></div>
+                    <div><b x-text="fmtMB(g.size.total)"></b> <span class="small mut" x-show="g.size.days > 1" x-text="srvDelta(g)"></span></div>
+                    <div class="srvx-probs">
+                      <span class="badge ok" x-show="!g.sites_with_problems">tutto a posto</span>
+                      <template x-for="k in ['offline','space','failed','logs','php','domain']" :key="g.key+'hk'+k"><span class="srvx-pk" x-show="g.problem_counts && g.problem_counts[k]" :class="'k-'+k" :title="problemShort(k)"><span x-text="problemIcon(k)"></span><b x-text="g.problem_counts ? g.problem_counts[k] : 0"></b></span></template>
+                    </div>
+                  </div>
+                  <!-- aperto: statistiche estese -->
+                  <div class="srvx-body" x-show="srvst.open[g.key]">
+                    <div class="srvx-grid">
+                      <div class="srvx-box"><h4>Siti</h4>
+                        <div class="srvx-kv"><span>Online</span><b x-text="g.counts.enabled - g.counts.offline"></b></div>
+                        <div class="srvx-kv"><span>Offline</span><b :class="g.counts.offline ? 'err' : ''" x-text="g.counts.offline"></b></div>
+                        <div class="srvx-kv"><span>Aggiornamento automatico</span><b x-text="g.auto_update + ' su ' + g.counts.enabled"></b></div>
+                        <div class="srvx-kv"><span>Componenti bloccati</span><b x-text="g.locked"></b></div>
+                        <div class="srvx-sub">Versioni</div>
+                        <template x-for="v in (g.cms_versions || [])" :key="g.key+'cv'+v[0]"><div class="srvx-kv"><span class="mono" x-text="v[0]"></span><b x-text="v[1]"></b></div></template>
+                      </div>
+                      <div class="srvx-box"><h4>Risorse del server</h4>
+                        <div class="srvx-kv"><span>Carico 1 · 5 · 15 min</span><b x-text="g.load_now ? g.load_now.load.join(' · ') : '—'"></b></div>
+                        <div class="srvx-kv"><span>Core</span><b x-text="(g.load && g.load.cores) || '—'"></b></div>
+                        <div class="srvx-kv"><span>Picco di carico visto</span><b :class="loadClass(g.load)" x-text="g.load ? g.load.max : '—'"></b></div>
+                        <div class="srvx-kv"><span>Disco</span><b x-text="g.disk ? fmtGB(g.disk.free) + ' liberi su ' + fmtGB(g.disk.total) : '—'"></b></div>
+                        <div class="srvx-sub">Software</div>
+                        <div class="chips"><template x-for="w in (g.software || [])" :key="g.key+'sw'+w[0]"><span class="chip small"><span x-text="w[0]"></span>&nbsp;<b x-text="w[1]"></b></span></template><span class="mut small" x-show="!(g.software || []).length">dalla prossima diagnostica notturna</span></div>
+                        <div class="small mut mono" style="margin-top:6px" x-show="(g.hostnames || []).length" x-text="(g.hostnames || []).join(' · ')" translate="no"></div>
+                        <div class="small mut" style="margin-top:6px" x-show="g.load_now" x-text="g.load_now ? 'misurato ' + ago(g.load_now.at) : ''"></div>
+                      </div>
+                      <div class="srvx-box"><h4>Peso</h4>
+                        <div class="srvx-kv"><span>Totale</span><b x-text="fmtMB(g.size.total)"></b></div>
+                        <div class="srvx-kv"><span>In 30 giorni</span><b x-text="g.size.days > 1 ? srvDelta(g) : '—'"></b></div>
+                        <div class="srvx-kv"><span>Media per sito</span><b x-text="g.avg_size ? fmtMB(g.avg_size) : '—'"></b></div>
+                        <svg viewBox="0 0 220 44" class="spark" style="margin:8px 0" x-show="g.size.series.length > 1"><path :d="sparkPath(g.size.series)" fill="none" stroke="var(--acc)" stroke-width="2"/></svg>
+                        <div class="srvx-sub" x-show="(g.largest || []).length">I più pesanti</div>
+                        <template x-for="l in (g.largest || [])" :key="g.key+'lg'+l.id"><div class="srvx-kv"><a :href="'#/site/'+l.id" x-text="l.name" translate="no"></a><b x-text="fmtMB(l.size)"></b></div></template>
+                      </div>
+                      <div class="srvx-box"><h4>Aggiornamenti</h4>
+                        <div class="srvx-kv"><span>In sospeso</span><b x-text="g.counts.pending"></b></div>
+                        <div class="srvx-kv"><span>Falliti</span><b :class="g.counts.failed ? 'err' : ''" x-text="g.counts.failed"></b></div>
+                        <div class="mbars" style="margin-top:10px">
+                          <template x-for="m in g.months" :key="g.key+'m'+m.period">
+                            <div class="mbar" :title="m.period + ': ' + m.ok + ' riusciti, ' + m.failed + ' falliti'">
+                              <div class="mbar-n" x-text="(m.ok + m.failed) || ''"></div>
+                              <div class="mbar-col"><div class="mbar-ko" :style="'height:' + (m.failed / monthMax(g.months) * 100) + '%'"></div><div class="mbar-ok" :style="'height:' + (m.ok / monthMax(g.months) * 100) + '%'"></div></div>
+                              <div class="mbar-l" x-text="m.period.slice(5) + '/' + m.period.slice(2, 4)"></div>
+                            </div>
+                          </template>
+                        </div>
+                        <div class="small mut" style="margin-top:4px"><span style="color:var(--ok)">■</span> riusciti · <span style="color:var(--err)">■</span> falliti</div>
+                      </div>
+                      <div class="srvx-box"><h4>Domini</h4>
+                        <div class="srvx-kv"><span>Scaduti</span><b :class="(g.domains_expired || []).length ? 'err' : ''" x-text="(g.domains_expired || []).length"></b></div>
+                        <div class="srvx-kv"><span>In scadenza entro 30 giorni</span><b :class="(g.domains_soon || []).length ? 'warn' : ''" x-text="(g.domains_soon || []).length"></b></div>
+                        <template x-for="d in [...(g.domains_expired || []), ...(g.domains_soon || [])].slice(0, 8)" :key="g.key+'d'+d.site_id"><div class="srvx-kv"><a :href="'#/site/'+d.site_id" x-text="d.site" translate="no"></a><span class="small" :class="d.days < 0 ? 'err' : 'warn'" x-text="d.days < 0 ? 'scaduto da ' + (-d.days) + ' giorni' : 'tra ' + d.days + ' giorni'"></span></div></template>
+                      </div>
+                      <div class="srvx-box"><h4>Problemi</h4>
+                        <div class="small ok" x-show="!g.sites_with_problems">nessuno</div>
+                        <template x-for="k in ['offline','space','failed','logs','php','domain']" :key="g.key+'pb'+k">
+                          <div class="srvx-pgroup" x-show="g.problems.some(p => p.kind === k)">
+                            <div class="srvx-sub"><span x-text="problemIcon(k)"></span> <span x-text="problemShort(k)"></span></div>
+                            <template x-for="(p, i) in g.problems.filter(p => p.kind === k)" :key="g.key+k+i"><div class="srvx-kv"><a :href="'#/site/'+p.site_id" x-text="p.site" translate="no"></a><span class="small mut" x-text="p.text"></span></div></template>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                    <button class="srv-more" @click.stop="srvst.sites = { ...(srvst.sites || {}), [g.key]: !(srvst.sites || {})[g.key] }" x-text="((srvst.sites || {})[g.key] ? 'Nascondi i ' : 'Mostra tutti i ') + g.counts.sites + ' siti'"></button>
+                    <div class="tbl" x-show="(srvst.sites || {})[g.key]" style="margin-top:8px">
+                      <table>
+                        <thead><tr><th class="sortable" @click="tSort('srvsites','name')">Sito<span x-text="tMark('srvsites','name')"></span></th><th class="sortable" @click="tSort('srvsites','cms')">CMS<span x-text="tMark('srvsites','cms')"></span></th><th class="sortable" @click="tSort('srvsites','php')">PHP<span x-text="tMark('srvsites','php')"></span></th><th class="sortable" @click="tSort('srvsites','state')">Stato<span x-text="tMark('srvsites','state')"></span></th><th class="sortable" @click="tSort('srvsites','upd')">Aggiornamenti<span x-text="tMark('srvsites','upd')"></span></th><th class="sortable" @click="tSort('srvsites','size')">Peso<span x-text="tMark('srvsites','size')"></span></th><th class="sortable" @click="tSort('srvsites','check')">Check<span x-text="tMark('srvsites','check')"></span></th></tr></thead>
+                        <tbody><template x-for="s in tSorted('srvsites', g.sites)" :key="g.key+'s'+s.id">
+                          <tr><td><a :href="'#/site/'+s.id" class="name" x-text="s.name" translate="no"></a><div class="url mono" x-text="(s.url||'').replace(/^https?:\/\//,'')"></div></td>
+                            <td><span class="cms" :class="s.cms" x-text="s.cms==='wp'?'WP':'J'"></span> <span class="mono" x-text="s.core"></span></td>
+                            <td><span class="mono" :class="s.php_state==='fuori supporto' ? 'err' : ''" x-text="s.php || '—'"></span></td>
+                            <td><span class="badge" :class="!s.enabled ? '' : (s.status==='ok' ? 'ok' : 'err')" x-text="!s.enabled ? 'disattivato' : (s.status==='ok' ? 'online' : 'offline')"></span> <span class="badge warn" x-show="s.space_low">spazio</span><span class="badge warn" x-show="s.big_logs">log</span></td>
+                            <td><span x-text="s.pending"></span><span class="err" x-show="s.failed" x-text="' · ' + s.failed + ' falliti'"></span><span class="mut" x-show="s.locked" x-text="' · ' + s.locked + ' 🔒'"></span></td>
+                            <td x-text="fmtMB(s.size)"></td><td class="small mut" x-text="s.last_checked ? ago(s.last_checked) : '—'"></td></tr>
+                      </template></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+            </template>
+          </div>
+        </template>
+
+        <template x-if="route.page==='plugins'">
+          <div>
+            <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+              <div style="flex:1;min-width:280px">
+                <h1 class="page-title">Plugin abbandonati</h1>
+                <div class="page-sub">Tutti i plugin WordPress del parco, con la data dell'ultimo aggiornamento dell'autore presa da wordpress.org. Un plugin fermo da anni è una rottura annunciata al prossimo PHP o WordPress.</div>
+              </div>
+              <div class="row"><span class="small mut" x-show="plug.data && plug.data.last_scan" x-text="'catalogo aggiornato ' + (plug.data ? ago(plug.data.last_scan) : '')"></span><button class="btn" :disabled="!!(plug.busy)" @click="scanPluginCatalog()">Aggiorna il catalogo</button></div>
+            </div>
+            <div class="plug-kpis" x-show="plug.data">
+              <button class="plug-kpi err" :class="plug.filter==='closed' ? 'on' : ''" @click="plug.filter = plug.filter==='closed' ? 'watch' : 'closed'"><b x-text="plug.data ? plug.data.counts.closed : 0"></b><span>chiusi da wordpress.org</span><small>vanno sostituiti</small></button>
+              <button class="plug-kpi err" :class="plug.filter==='abandoned' ? 'on' : ''" @click="plug.filter = plug.filter==='abandoned' ? 'watch' : 'abandoned'"><b x-text="plug.data ? plug.data.counts.abandoned : 0"></b><span>abbandonati</span><small>fermi da più di 2 anni</small></button>
+              <button class="plug-kpi warn" :class="plug.filter==='stale' ? 'on' : ''" @click="plug.filter = plug.filter==='stale' ? 'watch' : 'stale'"><b x-text="plug.data ? plug.data.counts.stale : 0"></b><span>fermi da un anno</span><small>da tenere d'occhio</small></button>
+              <button class="plug-kpi ok" :class="plug.filter==='ok' ? 'on' : ''" @click="plug.filter = plug.filter==='ok' ? 'watch' : 'ok'"><b x-text="plug.data ? plug.data.counts.ok : 0"></b><span>aggiornati</span><small>nell'ultimo anno</small></button>
+            </div>
+            <div class="card" style="margin-top:12px">
+              <div class="row" style="flex-wrap:wrap;gap:10px">
+                <div class="seg">
+                  <button :class="plug.filter==='watch' ? 'on' : ''" @click="plug.filter='watch'">Da guardare</button>
+                  <button :class="plug.filter==='all' ? 'on' : ''" @click="plug.filter='all'">Tutti <span class="badge" x-show="plug.data" x-text="plug.data ? plug.data.total : 0"></span></button>
+                </div>
+                <div class="row" style="gap:6px"><span class="small mut">Raggruppa per</span>
+                  <div class="seg"><template x-for="g in [['plugin','Plugin'],['folder','Cartella'],['server','Server'],['client','Cliente'],['status','Stato']]" :key="'pg'+g[0]"><button :class="plug.groupBy===g[0] ? 'on' : ''" @click="plug.groupBy=g[0]" x-text="g[1]"></button></template></div></div>
+                <input class="input" style="flex:1;min-width:220px" x-model="plug.q" placeholder="Cerca plugin, sito o cartella">
+                <span class="small mut" x-text="plugRows.length + ' plugin'"></span>
+              </div>
+              <div class="tbl" style="margin-top:12px">
+                <table class="plug-table">
+                  <thead><tr><th class="sortable" @click="tSort('plug','name')">Plugin<span x-text="tMark('plug','name')"></span></th><th class="sortable" @click="tSort('plug','status')">Stato<span x-text="tMark('plug','status')"></span></th><th class="sortable" @click="tSort('plug','last')">Ultimo aggiornamento dell'autore<span x-text="tMark('plug','last')"></span></th><th class="sortable" @click="tSort('plug','tested')">Testato fino a<span x-text="tMark('plug','tested')"></span></th><th class="sortable" @click="tSort('plug','ver')">Versione<span x-text="tMark('plug','ver')"></span></th><th class="sortable" @click="tSort('plug','sites')">Siti<span x-text="tMark('plug','sites')"></span></th></tr></thead>
+                    <template x-for="r in plugTableRows" :key="r.id">
+                      <tbody class="plug-group" :class="r.kind==='plugin' && plug.open[r.id] ? 'open' : ''">
+                      <template x-if="r.kind==='group'"><tr class="plug-ghead"><td colspan="6"><b x-text="r.gk" translate="no"></b> <span class="small mut" x-text="r.plugins + ' ' + pl(r.plugins, 'plugin', 'plugin') + ' · ' + r.sites + ' ' + pl(r.sites, 'sito', 'siti')"></span></td></tr></template>
+                      <template x-if="r.kind==='plugin'"><tr class="plug-row" @click="plug.open = { ...plug.open, [r.id]: !plug.open[r.id] }">
+                        <td><div class="name"><span class="plug-caret" x-text="plug.open[r.id] ? '▾' : '▸'"></span> <span x-text="r.p.name" translate="no"></span></div><div class="url mono" x-text="r.p.slug"></div></td>
+                        <td><span class="badge" :class="plugStatus(r.p).cls" x-text="plugStatus(r.p).text"></span><div class="small mut" x-show="r.p.closed_reason" x-text="r.p.closed_reason"></div></td>
+                        <td><span x-show="r.p.last_updated" x-text="fmtDay(r.p.last_updated)"></span><span x-show="!r.p.last_updated && r.p.closed_date"><span>chiuso il</span> <span x-text="fmtDay(r.p.closed_date)"></span></span><span class="mut" x-show="!r.p.last_updated && !r.p.closed_date">—</span></td>
+                        <td><span class="mono" x-text="r.p.tested ? 'WP ' + r.p.tested : '—'"></span></td>
+                        <td><span class="mono" x-text="r.p.versions.join(', ') || '—'"></span><span class="small mut" x-show="r.p.latest_version && !r.p.versions.includes(r.p.latest_version)" x-text="' → ' + r.p.latest_version"></span></td>
+                        <td><b x-text="r.p.sites_count"></b> <span class="small mut" x-text="r.p.sites.slice(0, 2).map(s => s.name).join(', ') + (r.p.sites_count > 2 ? ' e altri ' + (r.p.sites_count - 2) : '')" translate="no"></span>
+                          <div class="chips" style="margin-top:3px" x-show="plug.groupBy !== 'folder' && plugFolders(r.p).length"><template x-for="f in plugFolders(r.p).slice(0, 3)" :key="r.id+'f'+f"><span class="chip small" x-text="f" translate="no"></span></template><span class="small mut" x-show="plugFolders(r.p).length > 3" x-text="'+' + (plugFolders(r.p).length - 3)"></span></div></td>
+                      </tr></template>
+                      <template x-if="r.kind==='plugin'"><tr class="plug-sites" x-show="plug.open[r.id]"><td colspan="6">
+                        <div class="plug-site-grid">
+                          <div class="plug-site-h">Sito</div><div class="plug-site-h">Versione</div><div class="plug-site-h">Server</div><div class="plug-site-h">Cliente</div><div class="plug-site-h">Cartella</div>
+                          <template x-for="s in r.p.sites" :key="r.id+'-'+s.id">
+                            <div style="display:contents"><a :href="'#/site/'+s.id" x-text="s.name" translate="no" @click.stop></a><span class="mono" x-text="s.version || '—'"></span><span x-text="s.server || '—'" translate="no"></span><span x-text="(s.clients || []).join(', ') || '—'" translate="no"></span><span class="mut" x-text="s.folder || '—'" translate="no"></span></div>
+                          </template>
+                        </div>
+                      </td></tr></template>
+                      </tbody>
+                    </template>
+                </table>
+                <div class="empty" x-show="plug.data && !plugRows.length" x-text="plug.filter==='watch' ? 'Nessun plugin da guardare: nessun plugin chiuso o fermo da più di un anno.' : 'Nessun plugin trovato.'"></div>
+                <div class="empty" x-show="!plug.data">Caricamento…</div>
+              </div>
+            </div>
+          </div>
+        </template>
+
         <template x-if="route.page==='clients'">
           <div>
             <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
@@ -1351,19 +1572,20 @@
           <div>
             <h1 class="page-title">Impostazioni</h1>
             <div class="page-sub">Configurazione operativa di Sentinel TD. Password, token SMTP e segreti restano fuori da questa pagina.</div>
-            <div class="grid two" style="margin-top:16px">
+            <div class="card" style="margin-top:16px" x-show="!prefsLoaded"><span class="spinner"></span> Caricamento delle impostazioni… se il pannello si sta aggiornando ci vuole qualche secondo, riprova da solo.</div>
+            <div class="grid two" style="margin-top:16px" x-show="prefsLoaded">
               <div>
                 <div class="card">
                   <h3>Scadenze e avvisi</h3>
                   <div class="field"><label>Avvisi scadenza domini</label><input class="input" x-model="prefs.domain_alert_text" placeholder="30, 14, 7"><div class="hint">Giorni prima della scadenza, separati da virgola. Esempio: 60, 30, 14, 7.</div></div>
                   <div class="field"><label>Avvisi plugin / temi / licenze</label><input class="input" x-model="prefs.component_alert_text" placeholder="30, 14, 7"><div class="hint">Puoi usare soglie diverse da quelle dei domini.</div></div>
                   <div class="grid two compact-grid">
-                    <div class="field"><label>Riscansiona registri ogni</label><div class="input-suffix"><input class="input" type="number" min="1" max="90" x-model.number="prefs.domain_scan_days"><span>giorni</span></div></div>
-                    <div class="field"><label>Lookup domini simultanei</label><input class="input" type="number" min="1" max="8" x-model.number="prefs.domain_parallel_lookups"></div>
-                    <div class="field"><label>Chiedi la decisione di rinnovo</label><div class="input-suffix"><input class="input" type="number" min="0" max="3650" x-model.number="prefs.domain_decision_days"><span>giorni prima</span></div><div class="hint">Per i domini ancora "da decidere" arriva un avviso in anticipo, così c'è tempo di sentire il cliente. 0 lo disattiva.</div></div>
-                    <div class="field"><label class="check" style="margin-top:26px"><input type="checkbox" :checked="prefs.domain_alert_norenew===1" @change="prefs.domain_alert_norenew=$event.target.checked?1:0"> Avvisa anche per i domini da non rinnovare</label><div class="hint">Utile per ricordare al cliente che quel dominio scadrà e non verrà rinnovato.</div></div>
+                    <div class="field"><label>Riscansiona registri ogni</label><div class="input-suffix"><input class="input" type="number" min="1" max="90" x-model.number="prefs.domain_scan_days"><span>giorni</span></div><div class="hint">I domini scaduti o in scadenza entro 30 giorni si ricontrollano ogni giorno, così un rinnovo compare subito.</div></div>
+                    <div class="field"><label>Lookup domini simultanei</label><div class="input-suffix"><input class="input" type="number" min="1" max="8" x-model.number="prefs.domain_parallel_lookups"><span>alla volta</span></div></div>
+                    <div class="field"><label>Chiedi la decisione di rinnovo</label><div class="input-suffix"><input class="input" type="number" min="0" max="3650" x-model.number="prefs.domain_decision_days"><span>giorni prima</span></div><div class="hint">Per i domini ancora "da decidere" arriva un avviso in anticipo, così c'è tempo di sentire il cliente. 0 lo disattiva.</div><label class="check" style="margin-top:10px"><input type="checkbox" :checked="prefs.domain_alert_norenew===1" @change="prefs.domain_alert_norenew=$event.target.checked?1:0"> Avvisa anche per i domini da non rinnovare</label><div class="hint">Utile per ricordare al cliente che quel dominio scadrà e non verrà rinnovato.</div></div>
                     <div class="field"><label>Conserva la cronologia dettagliata per</label><div class="input-suffix"><input class="input" type="number" min="7" max="3650" x-model.number="prefs.history_retention_days"><span>giorni</span></div><div class="hint">Serve al report dettagliato ("dalla versione X alla Y" per ogni aggiornamento). I totali mensili restano per sempre.</div></div>
                     <div class="field"><label>Email dei report di aggiornamento</label><select class="input" x-model="prefs.email_report_mode"><option value="site" :selected="prefs.email_report_mode==='site'">Un'email per ogni sito</option><option value="cycle" :selected="prefs.email_report_mode==='cycle'">Un riepilogo unico per ciclo</option></select><div class="hint">Con il riepilogo unico arriva una sola email a fine ciclo, con tutti i siti aggiornati, invece di una per sito. Telegram non cambia.</div></div>
+                    <label class="check" style="padding:4px 0 10px;grid-column:1/-1"><input type="checkbox" x-model="prefs.auto_rollback"> Ripristino automatico: se la home si rompe dopo un aggiornamento, rimetti le copie fatte prima e blocca quei componenti</label>
                     <div class="field"><label>Avvisa che un sito non risponde dopo</label><div class="input-suffix"><input class="input" type="number" min="0" max="120" x-model.number="prefs.offline_alert_minutes"><span>minuti</span></div><div class="hint">Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.</div></div>
                     <div class="field"><label>Aggiorna anteprime siti ogni</label><div class="input-suffix"><input class="input" type="number" min="1" max="720" x-model.number="prefs.screenshot_every_hours"><span>ore</span></div>
                       <button class="btn sm" style="margin-top:6px" @click="shootBulk(false)">🖼 Rigenera tutte adesso</button></div>
@@ -1385,19 +1607,37 @@
                   <h3>Connettori</h3>
                   <div class="small mut" style="margin-bottom:10px">I pacchetti installabili sono inclusi in Sentinel TD: scaricali da qui, non serve crearli. Caricane uno solo se vuoi usare una versione diversa da quella inclusa.</div>
                   <template x-for="c in conn.list" :key="c.kind">
-                    <div class="row" style="padding:10px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap">
-                      <span class="cms" :class="c.kind==='wp'?'wp':'joomla'" x-text="c.kind==='wp'?'WP':'JOOMLA'"></span>
-                      <div style="flex:1;min-width:150px">
-                        <div x-text="c.kind==='wp'?'td-panopticon':'plg_system_tdpanopticon'"></div>
+                    <div class="conn-row">
+                      <span class="cms conn-tag" :class="c.kind==='wp'?'wp':'joomla'" x-text="c.kind==='wp'?'WP':'JOOMLA'"></span>
+                      <div class="conn-info">
+                        <div class="conn-name" x-text="c.kind==='wp'?'td-panopticon':'plg_system_tdpanopticon'"></div>
                         <div class="small mut" x-show="c.present && c.builtin"><span x-text="'v'+c.version"></span> · incluso in Sentinel TD</div>
                         <div class="small mut" x-show="c.present && !c.builtin"><span x-show="c.version" x-text="'v'+c.version+' · '"></span><span>caricato il</span> <span x-text="fmtDate(c.mtime*1000)"></span></div>
                         <div class="small mut" x-show="!c.present">non disponibile</div>
                       </div>
-                      <button class="btn sm primary" x-show="c.present" @click="downloadConn(c.kind)">Scarica</button>
-                      <label class="btn sm"><span x-text="c.builtin ? 'Carica una versione tua' : 'Sostituisci'"></span><input type="file" accept=".zip" style="display:none" :disabled="!!(conn.busy)" @change="uploadConn(c.kind,$event)"></label>
-                      <button class="btn sm ghost" x-show="c.present && !c.builtin" @click="resetConn(c.kind)" title="Torna al pacchetto incluso in Sentinel TD">Usa quello incluso</button>
+                      <div class="conn-actions">
+                        <button class="btn sm" x-show="rolloutOf(c.kind) && rolloutOf(c.kind).outdated" :disabled="!!(conn.rolling || inst.job)" @click="rolloutNow(c.kind)" title="Installa questa versione sui siti che ne hanno una più vecchia, in sottofondo">Aggiorna sui siti</button>
+                        <button class="btn sm primary" x-show="c.present" @click="downloadConn(c.kind)">Scarica</button>
+                        <label class="btn sm"><span x-text="c.builtin ? 'Carica una versione tua' : 'Sostituisci'"></span><input type="file" accept=".zip" style="display:none" :disabled="!!(conn.busy)" @change="uploadConn(c.kind,$event)"></label>
+                        <button class="btn sm ghost" x-show="c.present && !c.builtin" @click="resetConn(c.kind)" title="Torna al pacchetto incluso in Sentinel TD">Usa quello incluso</button>
+                      </div>
+                      <div class="conn-progress" x-show="inst.job && inst.progress && conn.rolloutKind === c.kind">
+                        <div class="row" style="gap:8px;flex-wrap:wrap"><span class="spinner"></span>
+                          <b x-text="inst.progress ? (inst.progress.done + ' su ' + inst.progress.total + ' siti') : ''"></b>
+                          <span class="small ok" x-show="inst.progress && inst.progress.ok" x-text="inst.progress ? inst.progress.ok + ' installati' : ''"></span>
+                          <span class="small err" x-show="inst.progress && inst.progress.failed" x-text="inst.progress ? inst.progress.failed + ' falliti' : ''"></span>
+                          <span class="small mut" x-show="inst.progress && (inst.progress.running || inst.progress.waiting)" x-text="inst.progress ? ((inst.progress.running ? inst.progress.running + ' in corso · ' : '') + inst.progress.waiting + ' in coda') : ''"></span>
+                          <button class="srv-more" style="margin:0" @click="conn.rolloutOpen = !conn.rolloutOpen" x-text="conn.rolloutOpen ? 'Nascondi i siti' : 'Mostra i siti'"></button></div>
+                        <div class="bar" style="margin-top:6px"><div class="bar-fill" :style="inst.progress ? 'width:' + Math.round(inst.progress.done / Math.max(1, inst.progress.total) * 100) + '%' : ''"></div></div>
+                        <div class="conn-sites" x-show="conn.rolloutOpen"><template x-for="o in (inst.progress ? inst.progress.results : [])" :key="'ro'+o.site_id"><div class="small"><span class="dot" :class="o.state==='done' ? (o.ok ? 'ok' : 'err') : 'warn'" style="display:inline-block;margin-right:6px"></span><span x-text="o.site_name" translate="no"></span> <span class="mut" x-text="'— ' + instRowText(o)"></span></div></template></div>
+                      </div>
+                      <div class="small conn-rollout" x-show="rolloutOf(c.kind) && !(inst.job && conn.rolloutKind === c.kind)">
+                          <span class="ok" x-show="rolloutOf(c.kind) && !rolloutOf(c.kind).outdated" x-text="'sui siti: tutti alla ' + (rolloutOf(c.kind)||{}).version"></span>
+                          <span class="warn" x-show="rolloutOf(c.kind) && rolloutOf(c.kind).outdated" x-text="(rolloutOf(c.kind)||{}).outdated + ' ' + pl((rolloutOf(c.kind)||{}).outdated, 'sito con una versione più vecchia', 'siti con una versione più vecchia') + ' su ' + (rolloutOf(c.kind)||{}).total"></span>
+                        </div>
                     </div>
                   </template>
+                  <label class="check" style="padding:10px 0 0" x-show="conn.rollout"><input type="checkbox" :checked="conn.rollout && conn.rollout.auto" @change="toggleConnAuto()"> Ogni notte installa da solo il connettore nuovo sui siti che ne hanno uno vecchio (alle 4:30, un sito alla volta sui server col freno)</label>
                   <div class="msg ok" x-show="conn.msg" x-text="conn.msg"></div><div class="msg err" x-show="conn.err" x-text="conn.err"></div>
                   <h3 style="margin-top:20px">Indirizzo pubblico di questo pannello</h3>
                   <div class="small mut" style="margin-bottom:8px">Il pacchetto WordPress scaricato da qui viene generato con questo indirizzo e con la chiave qui sotto: i siti nuovi si collegano da soli, senza incollare niente. Lasciandolo vuoto il pacchetto resta neutro.</div>
@@ -1464,7 +1704,8 @@
                   <div class="srv-save"><button class="btn primary" @click="savePrefs()" :disabled="!!(prefs.busy)">Salva</button><span class="small" :class="prefs.err ? 'err' : 'mut'" x-text="prefs.err || prefs.msg"></span></div>
                 </div>
               </div>
-              <div class="srv-subhead"><b>Server rilevati</b><span class="small mut">Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre.</span></div>
+              <datalist id="srv-labels"><template x-for="l in srvLabelList" :key="'sl'+l"><option :value="l"></option></template></datalist>
+              <div class="srv-subhead"><b>Server rilevati</b><span class="small mut">Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre. Dai lo stesso nome a più server per vederli come un gruppo solo in Stato server e nei report.</span></div>
               <div class="small mut" x-show="serversLoading">Rilevamento dei server…</div>
               <div class="srv-groups">
                 <template x-for="g in serverGroups()" :key="'sg'+g.folder">
@@ -1476,7 +1717,7 @@
                     <template x-for="sv in g.servers" :key="'sv'+sv.server">
                       <div class="srv-row" :class="isLimited(sv.server) ? 'on' : ''">
                         <label class="srv-sw" :title="isLimited(sv.server) ? 'Freno attivo' : 'Senza freno'"><input type="checkbox" :checked="isLimited(sv.server)" @change="toggleLimited(sv.server)"><span></span></label>
-                        <span class="mono srv-ip" x-text="sv.server" translate="no"></span>
+                        <div style="min-width:0"><input class="input srv-name" list="srv-labels" :value="srvLabel(sv.server)" @change="setSrvLabel(sv.server, $event.target.value)" placeholder="Dai un nome" title="Nome del server, mostrato ovunque accanto all'IP (anche nei report). Più server con lo stesso nome diventano un gruppo solo. Poi Salva." x-show="sv.server && sv.server !== '?'"><span class="mono srv-ip" x-text="sv.server" translate="no"></span></div>
                         <div class="srv-mid">
                           <span class="srv-host" x-text="sv.host || '—'" translate="no"></span>
                           <span class="srv-also" x-show="srvOthers(sv, g.folder).length"><span>anche</span> <span translate="no" x-text="srvOthers(sv, g.folder).map(f => (f.name || '—') + ' (' + f.count + ')').join(', ')"></span></span>

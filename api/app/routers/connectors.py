@@ -237,6 +237,90 @@ async def upload_connector(kind: str, package: UploadFile = File(...)):
     return _meta(kind)
 
 
+async def connector_package(kind: str, plain: bool = False) -> tuple[bytes, str]:
+    """Lo zip del connettore pronto per i siti: quello caricato o costruito dai sorgenti, e per
+    WordPress gia' personalizzato (indirizzo del pannello + chiave di registrazione)."""
+    meta = _meta(kind)
+    name = meta.get("filename") or f"{kind}.zip"
+    zpath, _ = _paths(kind)
+    if os.path.isfile(zpath):
+        with open(zpath, "rb") as f:
+            content = f.read()
+    else:
+        content = _build_from_sources(kind)     # nessun caricamento: costruisci dai sorgenti
+    if kind == "wp" and not plain:
+        hub = await _hub_url()
+        if hub:
+            from ..db import SessionLocal
+            from .agent import get_register_key
+            async with SessionLocal() as s:
+                key = await get_register_key(s)
+            content = _personalize_wp(content, hub, key or "")
+    return content, name
+
+
+def shipped_version(kind: str) -> str:
+    """Versione del connettore che il pannello consegna (zip caricato o sorgenti inclusi)."""
+    meta = _meta(kind)
+    zpath, _ = _paths(kind)
+    if os.path.isfile(zpath) and meta.get("version"):
+        return str(meta["version"])
+    return _source_version(kind)
+
+
+async def outdated_sites(kind: str, s) -> list:
+    """Siti abilitati di quel CMS il cui connettore e' piu' vecchio di quello consegnato
+    (o di versione sconosciuta: connettori vecchi che non la dichiarano)."""
+    from sqlalchemy import select as _select
+    from ..models import Site
+    from .packages import version_gt
+    target = shipped_version(kind)
+    cms = "wp" if kind == "wp" else "joomla"
+    rows = (await s.execute(_select(Site).where(Site.cms == cms, Site.enabled == True).order_by(Site.name))).scalars().all()  # noqa: E712
+    return [x for x in rows if not x.connector_version or version_gt(target, x.connector_version)]
+
+
+@router.get("/rollout", dependencies=[Depends(require_auth)])
+async def rollout_status():
+    """Per ogni CMS: versione consegnata, siti aggiornati e siti da aggiornare."""
+    from ..db import SessionLocal
+    from ..settings_store import get_operational_settings
+    prefs = await get_operational_settings()
+    out = {"auto": bool(prefs.get("connector_auto_update", True))}
+    async with SessionLocal() as s:
+        for kind in KINDS:
+            old = await outdated_sites(kind, s)
+            from sqlalchemy import select as _select, func as _func
+            from ..models import Site
+            cms = "wp" if kind == "wp" else "joomla"
+            total = (await s.execute(_select(_func.count(Site.id)).where(Site.cms == cms, Site.enabled == True))).scalar() or 0  # noqa: E712
+            out[kind] = {"version": shipped_version(kind), "total": total, "outdated": len(old),
+                         "sites": [{"id": x.id, "name": x.name, "version": x.connector_version or "?"} for x in old]}
+    return out
+
+
+@router.post("/{kind}/rollout", dependencies=[Depends(require_auth)])
+async def rollout_now(kind: str):
+    """Installa il connettore consegnato su tutti i siti che ne hanno uno piu' vecchio: un lavoro
+    in sottofondo per sito, come l'installazione in blocco."""
+    if kind not in KINDS:
+        raise HTTPException(400, "kind non valido")
+    from ..db import SessionLocal
+    from .install import start_install_job
+    async with SessionLocal() as s:
+        targets = await outdated_sites(kind, s)
+    if not targets:
+        return {"job": None, "total": 0, "version": shipped_version(kind)}
+    try:
+        content, name = await connector_package(kind)
+    except Exception as ex:  # noqa: BLE001
+        raise HTTPException(500, f"Pacchetto del connettore non pronto: {ex}")
+    res = await start_install_job(targets, content, name, "wp" if kind == "wp" else "joomla", "plugin", True,
+                                  label=f"connettore {kind} {shipped_version(kind)}")
+    res["version"] = shipped_version(kind)
+    return res
+
+
 @router.get("/{kind}/download", dependencies=[Depends(require_auth)])
 async def download_connector(kind: str, plain: str = Query("")):
     """Download dello zip del connettore.
@@ -247,30 +331,10 @@ async def download_connector(kind: str, plain: str = Query("")):
     Il frontend lo scarica via fetch + blob."""
     if kind not in KINDS:
         raise HTTPException(400, "kind non valido")
-    meta = _meta(kind)
-    name = meta.get("filename") or f"{kind}.zip"
-    zpath, _ = _paths(kind)
-    if os.path.isfile(zpath):
-        with open(zpath, "rb") as f:
-            content = f.read()
-    else:
-        content = _build_from_sources(kind)     # nessun caricamento: costruisci dai sorgenti
-
-    # WordPress: se l'indirizzo del pannello e' configurato, consegna una copia gia'
-    # personalizzata (indirizzo + chiave di registrazione). Lo zip in archivio resta
-    # quello neutro caricato dall'amministratore.
-    if kind == "wp" and plain != "1":
-        hub = await _hub_url()
-        if hub:
-            from ..db import SessionLocal
-            from .agent import get_register_key
-            async with SessionLocal() as s:
-                key = await get_register_key(s)
-            try:
-                content = _personalize_wp(content, hub, key or "")
-            except Exception as ex:  # noqa: BLE001
-                raise HTTPException(500, f"Personalizzazione non riuscita: {ex}")
-
+    try:
+        content, name = await connector_package(kind, plain == "1")
+    except Exception as ex:  # noqa: BLE001
+        raise HTTPException(500, f"Personalizzazione non riuscita: {ex}")
     return Response(content, media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 

@@ -1,6 +1,7 @@
 """
 Storico update (7 giorni) per Sentinel: timeline per sito e riepilogo dashboard.
 """
+import html
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, Query
@@ -30,10 +31,11 @@ async def list_history(
     rows = (await s.execute(q)).scalars().all()
     return [{
         "id": r.id, "site_id": r.site_id, "site_name": r.site_name, "cms": r.cms,
-        "type": r.ext_type, "name": r.ext_name, "slug": r.slug,
+        "type": r.ext_type, "name": html.unescape(r.ext_name or ""), "slug": r.slug,   # "&#8211;" -> "–"
         # ripulito anche quello salvato prima della 2.9.0 (link interi col token, &#8230;…)
         "from": r.from_version, "to": r.to_version, "ok": r.ok, "error": clean_error(r.error),
         "at": r.created_at.isoformat() if r.created_at else None,
+        "backup": r.backup_file or "",
     } for r in rows]
 
 

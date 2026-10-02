@@ -19,7 +19,7 @@ function sentinel() {
     sites: [], loading: false, busy: {}, toast: '', toastTimer: null,
     detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [], siteSizes: [], diagBusy: {}, coreOpen: false,
     sec: { summary: null, items: [], loading: false, sev: '' },
-    conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false },
+    conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false, rollout: null, rolling: '', rolloutKind: '', rolloutOpen: false },
     pkg: { list: [], msg: '', err: '', busy: false, q: '', cands: [], searching: false, hbusy: '' }, servers: [], serversLoading: false, srvOpen: {},
     brand: { logo_url: '/static/logo.png', favicon_url: '/static/favicon.png', custom_logo: false, custom_favicon: false, busy: false },
     exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, dSort: 'folder' },
@@ -40,6 +40,9 @@ function sentinel() {
     stats: { period: '', scope: '__all__', months: 12, data: null, trend: null, periods: [], scopes: [], mode: 'month', cmpA: '', cmpB: '', cmp: null, busy: false, hover: null, days: 30 },
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
+    plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
+    srvst: { data: null, by: 'server', open: {}, busy: false, kind: '' },
+    tsort: {}, histQ: '', histType: '', problems: [],
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
            open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
@@ -99,6 +102,19 @@ function sentinel() {
         if (d.rev !== prev.all) await this.load(true);           // qualcosa e' cambiato nel parco
         if (sid && sid === prev.sid && d.site !== prev.site) await this.refreshDetail(this.detail.id);
       } catch (e) { /* rete assente: si riprova al giro dopo */ } finally { this._watching = false; }
+    },
+    // ---- ripristino della versione precedente dalla copia (dallo Storico) ----
+    async rollbackItem(h) {
+      if (!confirm(`Rimettere ${h.name} alla versione ${h.from}? La ${h.to} viene sostituita dalla copia fatta prima dell'aggiornamento, e il componente resta bloccato alla ${h.from} finché non lo sblocchi.`)) return;
+      this.busy['rb' + h.id] = true;
+      try {
+        const r = await this.api(`/api/sites/${h.site_id}/rollback`, { method: 'POST', body: JSON.stringify({ type: h.type, slug: h.slug, file: h.backup, name: h.name }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.say(d.detail || 'Ripristino non riuscito', 6000); return; }
+        this.say(`${h.name} ripristinato alla ${d.to || h.from} e bloccato`, 6000);
+        if (this.detail && this.detail.id === h.site_id) await this.refreshDetail(h.site_id);
+        if (this.route.page === 'history') await this.loadHistory();
+      } finally { this.busy['rb' + h.id] = false; }
     },
     // ---- blocco di un singolo plugin o tema alla versione installata ----
     isLocked(e) { return !!(this.detail && (this.detail.locked || []).includes(e.type + ':' + e.slug)); },
@@ -213,7 +229,7 @@ function sentinel() {
       else if (p[0] === 'folder') { r.page = 'sites'; r.folder = decodeURIComponent(p[1] || ''); }
       else if (p[0] === 'site') { r.page = 'site'; r.siteId = parseInt(p[1]); r.tab = ['overview','ext','history'].includes(p[2]) ? p[2] : 'overview'; }
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
-      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats'].includes(p[0])) r.page = p[0];
+      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers'].includes(p[0])) r.page = p[0];
       this.route = r; this.sideOpen = false;
     },
     go(path) { location.hash = '#/' + path; },
@@ -230,6 +246,8 @@ function sentinel() {
       if (this.route.page === 'notifications') { await this.loadNotif(); }
       if (this.route.page === 'reports') { await this.loadReports(); }
       if (this.route.page === 'clients') { await this.loadClients(); }
+      if (this.route.page === 'plugins') { await this.loadPluginCatalog(); }
+      if (this.route.page === 'servers') { await this.loadServerStatus(); }
       if (this.route.page === 'domain-expiries') { await this.loadPrefs(); await this.loadDomainExpiries(); }
       if (this.route.page === 'component-expiries') { await this.loadPrefs(); await this.loadComponentExpiries(); }
       window.scrollTo(0, 0);
@@ -243,6 +261,7 @@ function sentinel() {
         if (r.ok) this.sites = await r.json();
         if (!silent) await this._onRoute();
         else if (this.route.page === 'dashboard') this.loadHistory();
+        if (this.route.page === 'dashboard') this.loadProblems();
       } catch (e) { /* logout gestito in api() */ }
       this.loading = false;
     },
@@ -326,8 +345,33 @@ function sentinel() {
       if (Math.abs(delta) < 1048576) return `stabile negli ultimi ${days} ${this.pl(days, 'giorno', 'giorni')}`;
       return `${delta > 0 ? '+' : '−'}${this.fmtBytes(Math.abs(delta))} negli ultimi ${days} ${this.pl(days, 'giorno', 'giorni')}`;
     },
+    async loadProblems() { try { const r = await this.api('/api/servers/problems'); if (r.ok) this.problems = await r.json(); } catch (e) { } },
+    get historyRows() {
+      const q = (this.histQ || '').trim().toLowerCase(), t = this.histType;
+      return this.history.filter(h => (!t || (t === 'failed' ? !h.ok : (t === 'backup' ? (h.ok && h.backup) : h.type === t)))
+        && (!q || (h.site_name || '').toLowerCase().includes(q) || (h.name || '').toLowerCase().includes(q) || (h.slug || '').toLowerCase().includes(q)));
+    },
+    // storico diviso per giorno, per la pagina Storico
+    get historyByDay() {
+      const out = []; let cur = null;
+      for (const h of this.historyRows.slice(0, 500)) {
+        // giorno LOCALE (non UTC): un aggiornamento alle 00:30 sta nel giorno giusto
+        const t = h.at ? new Date(h.at) : null;
+        const d = t ? `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}` : '';
+        if (!cur || cur.day !== d) { cur = { day: d, rows: [], ok: 0, failed: 0 }; out.push(cur); }
+        cur.rows.push(h); h.ok ? cur.ok++ : cur.failed++;
+      }
+      return out;
+    },
+    dayLabel(d) {
+      if (!d) return '';
+      const x = new Date(d + 'T12:00:00'), t = new Date(); const y = new Date(); y.setDate(t.getDate() - 1);
+      const same = (p, q) => p.toDateString() === q.toDateString();
+      if (same(x, t)) return 'Oggi'; if (same(x, y)) return 'Ieri';
+      return x.toLocaleDateString(I18n.locale, { weekday: 'long', day: 'numeric', month: 'long' });
+    },
     async loadHistory() {
-      const [a, b] = await Promise.all([this.api('/api/history?days=7&limit=200'), this.api('/api/history/summary?days=7')]);
+      const [a, b] = await Promise.all([this.api('/api/history?days=7&limit=' + (this.route.page === 'history' ? 2000 : 200)), this.api('/api/history/summary?days=7')]);
       if (a.ok) this.history = await a.json();
       if (b.ok) this.histSummary = await b.json();
     },
@@ -920,9 +964,16 @@ function sentinel() {
     },
 
     // ---------- impostazioni operative (no segreti) ----------
-    async loadPrefs() {
-      const r = await this.api('/api/preferences');
-      if (!r.ok) return;
+    async loadPrefs(attempt = 0) {
+      // Se la lettura fallisce (es. l'API sta ripartendo durante un deploy) NON si mostrano i
+      // valori di base scritti nella pagina: sembrerebbe un reset, e premendo Salva lo
+      // diventerebbe davvero. Si riprova da soli finche' le impostazioni vere non arrivano.
+      let r = null;
+      try { r = await this.api('/api/preferences'); } catch (e) { r = null; }
+      if (!r || !r.ok) {
+        if (attempt < 40) setTimeout(() => this.loadPrefs(attempt + 1), 3000);
+        return;
+      }
       const d = await r.json();
       this.prefs = { ...this.prefs, ...d, domain_alert_text: (d.domain_alert_days||[30,14,7]).join(', '), component_alert_text: (d.component_alert_days||[30,14,7]).join(', '), msg: '', err: '', busy: false };
       this.prefsLoaded = true;
@@ -951,7 +1002,9 @@ function sentinel() {
     },
     parseAlertDays(v) { return [...new Set(String(v||'').split(/[,;\s]+/).map(x=>parseInt(x,10)).filter(x=>Number.isFinite(x)&&x>0&&x<=3650))].sort((a,b)=>b-a); },
     async savePrefs() {
-      this.prefs.msg = this.prefs.err = ''; this.prefs.busy = true;
+      this.prefs.msg = this.prefs.err = '';
+      if (!this.prefsLoaded) { this.prefs.err = 'Impostazioni non ancora caricate: niente salvato, riprova tra qualche secondo'; return; }
+      this.prefs.busy = true;
       try {
         const da = this.parseAlertDays(this.prefs.domain_alert_text), ca = this.parseAlertDays(this.prefs.component_alert_text);
         if (!da.length || !ca.length) { this.prefs.err = 'Inserisci almeno una soglia valida per domini e plugin/temi'; return; }
@@ -963,7 +1016,8 @@ function sentinel() {
                           'domain_decision_days', 'domain_alert_norenew', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
-                       server_limited: this.prefs.server_limited || [] };
+                       server_limited: this.prefs.server_limited || [], connector_auto_update: this.prefs.connector_auto_update !== false,
+                       auto_rollback: this.prefs.auto_rollback !== false, server_labels: this.prefs.server_labels || {} };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
           if (Number.isFinite(v)) body[k] = v;
@@ -997,9 +1051,36 @@ function sentinel() {
     useCurrentHubUrl() { this.conn.hubUrl = window.location.origin; },
     get hubDirty() { return (this.conn.hubUrl || '') !== (this.conn.hubSaved || ''); },
 
+    // ---- distribuzione del connettore sui siti ----
+    rolloutOf(kind) { return (this.conn.rollout && this.conn.rollout[kind]) || null; },
+    async rolloutNow(kind) {
+      const r0 = this.rolloutOf(kind); if (!r0 || !r0.outdated) return;
+      if (!confirm(`Installare il connettore ${r0.version} su ${r0.outdated} ${this.pl(r0.outdated, 'sito', 'siti')} che ne hanno uno più vecchio? Parte in sottofondo, un sito alla volta sui server col freno.`)) return;
+      this.conn.rolling = kind;
+      try {
+        const r = await this.api(`/api/connectors/${kind}/rollout`, { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.say(d.detail || 'Non riuscito'); return; }
+        if (!d.job) { this.say('Tutti i siti hanno già questa versione'); return; }
+        this.conn.rolloutKind = kind;
+        this.say(`Connettore ${d.version} in installazione su ${d.total} ${this.pl(d.total, 'sito', 'siti')}: l'avanzamento è qui sotto`, 6000);
+        // si segue subito (prima partiva solo ricaricando la pagina); a fine lavoro si rileggono le versioni
+        this.pollInstall(d.job).then(() => this.loadConn());
+      } finally { this.conn.rolling = ''; }
+    },
+    async toggleConnAuto() {
+      const want = !(this.conn.rollout && this.conn.rollout.auto);
+      if (!this.prefs) return;
+      this.prefs.connector_auto_update = want;
+      await this.savePrefs();   // stesso salvataggio delle altre impostazioni: niente valori persi
+      if (this.prefs.err) { this.prefs.connector_auto_update = !want; this.say(this.prefs.err); return; }
+      if (this.conn.rollout) this.conn.rollout.auto = want;
+      this.say(want ? 'Connettore aggiornato da solo ogni notte' : 'Aggiornamento notturno del connettore spento');
+    },
     async loadConn() {
       try {
         const r = await this.api('/api/connectors'); if (r.ok) this.conn.list = await r.json();
+        const ro = await this.api('/api/connectors/rollout'); if (ro.ok) this.conn.rollout = await ro.json();
         const k = await this.api('/api/connectors/regkey'); if (k.ok) this.conn.regKey = (await k.json()).key || '';
         const h = await this.api('/api/connectors/hub-url');
         if (h.ok) { const d = await h.json(); this.conn.hubUrl = this.conn.hubSaved = d.url || ''; }
@@ -1635,6 +1716,157 @@ function sentinel() {
     },
 
     // ---------- report mensile ----------
+    // ---------- ordinamento delle tabelle: clic sul titolo della colonna, ▲▼ ----------
+    tSort(t, k) { const s = this.tsort[t] || {}; this.tsort = { ...this.tsort, [t]: { k, d: s.k === k ? -(s.d || 1) : 1 } }; },
+    tMark(t, k) { const s = this.tsort[t]; return s && s.k === k ? (s.d > 0 ? ' ▲' : ' ▼') : ''; },
+    tSorted(t, rows) {
+      const s = this.tsort[t]; const get = (this.tGetters[t] || {})[s && s.k];
+      if (!s || !get) return rows;
+      const val = x => { const v = get(x); return v === null || v === undefined || v === '' || v === '—' ? null : v; };
+      return [...rows].sort((a, b) => {
+        const x = val(a), y = val(b);
+        if (x === null && y === null) return 0; if (x === null) return 1; if (y === null) return -1;   // vuoti sempre in fondo
+        const r = (typeof x === 'number' && typeof y === 'number') ? x - y : String(x).localeCompare(String(y), 'it', { numeric: true, sensitivity: 'base' });
+        return r * s.d;
+      });
+    },
+    get tGetters() {
+      const ver = v => String(v || '');
+      return {
+        ext: { name: e => e.name, type: e => e.type, cur: e => ver(e.current_version), avail: e => e.update_available ? ver(e.new_version) : null, state: e => this.isLocked(e) ? 2 : (e.update_available ? 0 : 1) },
+        comp: { name: x => x.name, platform: x => x.platform, provider: x => x.provider, date: x => x.expires_at, left: x => x.expires_at },
+        sec: { sev: m => ({ critical: 0, high: 1, medium: 2, low: 3 })[m.severity] ?? 4, site: m => m.site_name, ext: m => m.ext_name || m.ext_slug, cve: m => m.cve_id, cur: m => ver(m.site_version), fix: m => ver(m.version_fixed) },
+        srvsites: { name: s => s.name, cms: s => s.cms, php: s => ver(s.php), state: s => !s.enabled ? 3 : (s.status === 'ok' ? (s.space_low || s.big_logs ? 1 : 2) : 0), upd: s => -(s.pending + s.failed * 10), size: s => s.size, conn: s => ver(s.connector), check: s => s.last_checked },
+        dom: { name: x => x.name, site: x => (x.site_names || [])[0] || '', exp: x => x.days ?? null, renew: x => ({ '': 0, yes: 1, no: 2 })[x.renew || ''] },
+        plug: { name: p => p.name, status: p => ({ closed: 0, abandoned: 1, stale: 2, ok: 3, unchecked: 4 })[p.status], last: p => p.last_updated || p.closed_date, tested: p => ver(p.tested), ver: p => ver(p.versions[0]), sites: p => -p.sites_count },
+      };
+    },
+    // ---------- stato server ----------
+    async loadServerStatus() {
+      this.srvst.busy = true;
+      try {
+        const r = await this.api('/api/servers/overview?by=' + this.srvst.by); if (r.ok) this.srvst.data = await r.json();
+      } finally { this.srvst.busy = false; }
+    },
+    async srvSetBy(by) { this.srvst.by = by; await this.loadServerStatus(); },
+    fmtGB(b) { return b ? (b / 1073741824).toFixed(b < 10737418240 ? 1 : 0).replace('.', ',') + ' GB' : '—'; },
+    fmtMB(b) { if (!b) return '—'; return b >= 1073741824 ? this.fmtGB(b) : Math.round(b / 1048576) + ' MB'; },
+    loadClass(l) { if (!l || !l.max) return ''; const c = l.cores || 1; return l.max > c * 2 ? 'err' : (l.max > c ? 'warn' : 'ok'); },
+    // grafici in SVG: andamento del peso (linea) e aggiornamenti per mese (barre)
+    sparkPath(series, w = 220, h = 44) {
+      const v = (series || []).map(p => p.total); if (v.length < 2) return '';
+      const min = Math.min(...v), max = Math.max(...v), span = (max - min) || 1;
+      return v.map((y, i) => `${i ? 'L' : 'M'}${(i / (v.length - 1) * w).toFixed(1)},${(h - 3 - (y - min) / span * (h - 6)).toFixed(1)}`).join(' ');
+    },
+    // barre dei mesi come SVG pronto (un template Alpine dentro un <svg> non funziona)
+    monthBarsSvg(months, w = 220, h = 54) {
+      const m = months || []; const max = Math.max(1, ...m.map(x => x.ok + x.failed)); const bw = w / Math.max(1, m.length);
+      h = h; const top = 11;   // spazio sopra la barra piu' alta per il numero
+      const esc = s => String(s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+      const parts = m.map((x, i) => {
+        const okh = x.ok / max * (h - 14 - top), koh = x.failed / max * (h - 14 - top), bx = (i * bw + 3).toFixed(1), bwid = (bw - 6).toFixed(1);
+        const okY = (h - 12 - okh).toFixed(1), koY = (h - 12 - okh - koh).toFixed(1), tot = x.ok + x.failed;
+        return `<rect x="${bx}" y="${okY}" width="${bwid}" height="${okh.toFixed(1)}" fill="var(--ok)" rx="2"/>`
+          + (koh > 0 ? `<rect x="${bx}" y="${koY}" width="${bwid}" height="${koh.toFixed(1)}" fill="var(--err)" rx="2"/>` : '')
+          + `<text x="${(i * bw + bw / 2).toFixed(1)}" y="${h - 2}" text-anchor="middle" font-size="9" fill="var(--mut)">${esc(String(x.period).slice(5))}</text>`
+          + (tot ? `<text x="${(i * bw + bw / 2).toFixed(1)}" y="${(h - 14 - okh - koh).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--txt-2)">${tot}</text>` : '');
+      });
+      return `<svg viewBox="0 0 ${w} ${h}" class="spark">${parts.join('')}</svg>`;
+    },
+    // tutti i problemi di tutti i gruppi, per il riquadro "Cosa non va"
+    get srvProblems() {
+      const d = this.srvst.data; if (!d) return [];
+      const out = [];
+      for (const g of d.groups) for (const p of g.problems) out.push({ ...p, group: g.label || g.key || 'Senza cartella', host: g.host });
+      const order = { offline: 0, space: 1, failed: 2, logs: 3, php: 4 };
+      return out.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9) || a.site.localeCompare(b.site, 'it'));
+    },
+    // una riga per sito, con tutti i suoi problemi (prima: una riga per problema, nome ripetuto)
+    get srvProblemSites() {
+      const by = {};
+      for (const p of this.srvProblems) {
+        const s = by[p.site_id] || (by[p.site_id] = { site: p.site, site_id: p.site_id, group: p.group, problems: [] });
+        s.problems.push(p);
+      }
+      const order = { offline: 0, space: 1, failed: 2, logs: 3, php: 4, domain: 5 };
+      return Object.values(by).filter(s => !this.srvst.kind || s.problems.some(p => p.kind === this.srvst.kind))
+        .sort((a, b) => Math.min(...a.problems.map(p => order[p.kind] ?? 9)) - Math.min(...b.problems.map(p => order[p.kind] ?? 9)) || b.problems.length - a.problems.length || a.site.localeCompare(b.site, 'it'));
+    },
+    secSev(s) { return ({ critical: 'err', high: 'err', medium: 'warn', low: 'info' })[s] || 'info'; },
+    problemSev(k) { return ({ offline: 'err', domain: 'err', space: 'warn', failed: 'warn', php: 'info', logs: 'info' })[k] || 'info'; },
+    siteSev(s) { const r = { err: 0, warn: 1, info: 2 }; return s.problems.map(p => this.problemSev(p.kind)).sort((a, b) => r[a] - r[b])[0] || 'info'; },
+    get srvProblemSitesAll() { return new Set(this.srvProblems.map(p => p.site_id)).size; },
+    get srvTotalSites() { return ((this.srvst.data && this.srvst.data.groups) || []).reduce((n, g) => n + g.counts.sites, 0); },
+    problemShort(k) { return { offline: 'offline', space: 'spazio', failed: 'aggiornamenti falliti', logs: 'log grandi', php: 'PHP vecchio', domain: 'dominio scaduto' }[k] || k; },
+    get srvProblemKinds() {
+      const labels = { offline: 'offline', space: 'spazio quasi esaurito', failed: 'aggiornamenti falliti', logs: 'log grandi', php: 'PHP fuori supporto', domain: 'dominio scaduto' };
+      const c = {}; for (const p of this.srvProblems) c[p.kind] = (c[p.kind] || 0) + 1;   // problemi, non righe
+      return Object.keys(labels).filter(k => c[k]).map(k => ({ kind: k, label: labels[k], count: c[k] }));
+    },
+    srvDelta(g) {
+      const d = g.size.delta || 0;
+      return Math.abs(d) < 1048576 ? 'stabile' : (d > 0 ? '+' : '−') + this.fmtMB(Math.abs(d));
+    },
+    monthMax(months) { return Math.max(1, ...(months || []).map(m => m.ok + m.failed)); },
+    problemIcon(k) { return { offline: '🔴', space: '💾', failed: '⚠️', logs: '📄', php: '🐘', domain: '🌐' }[k] || '•'; },
+    get srvLabelList() { return [...new Set(Object.values((this.prefs && this.prefs.server_labels) || {}))].sort((a, b) => a.localeCompare(b, 'it')); },
+    srvLabel(ip) { return ((this.prefs && this.prefs.server_labels) || {})[ip] || ''; },
+    setSrvLabel(ip, v) { const l = { ...((this.prefs && this.prefs.server_labels) || {}) }; v = String(v || '').trim(); if (v) l[ip] = v; else delete l[ip]; this.prefs.server_labels = l; },
+    // ---------- plugin del parco e plugin abbandonati ----------
+    async loadPluginCatalog() {
+      const r = await this.api('/api/plugins/catalog'); if (r.ok) this.plug.data = await r.json();
+    },
+    async scanPluginCatalog() {
+      this.plug.busy = true;
+      try {
+        const r = await this.api('/api/plugins/catalog/scan', { method: 'POST' });
+        this.say(r.ok ? 'Catalogo in aggiornamento da wordpress.org: ci vuole qualche minuto, poi ricarica' : 'Non riuscito', 6000);
+      } finally { this.plug.busy = false; }
+    },
+    get plugRows() {
+      const d = this.plug.data; if (!d) return [];
+      const q = (this.plug.q || '').trim().toLowerCase();
+      const f = this.plug.filter;
+      return d.plugins.filter(p => (f === 'all' || (f === 'watch' ? ['closed', 'abandoned', 'stale'].includes(p.status) : p.status === f))
+        && (!q || p.name.toLowerCase().includes(q) || p.slug.includes(q) || p.sites.some(s => [s.name, s.folder, s.server, ...(s.clients || [])].some(v => String(v || '').toLowerCase().includes(q)))));
+    },
+    get plugSorted() { return this.tSorted('plug', this.plugRows); },
+    plugFolders(p) { return [...new Set(p.sites.map(s => s.folder).filter(Boolean))]; },
+    // righe della tabella: intestazioni dei gruppi + plugin (con i soli siti del gruppo)
+    get plugTableRows() {
+      const by = this.plug.groupBy, list = this.plugSorted;
+      if (by === 'plugin') return list.map(p => ({ kind: 'plugin', id: '|' + p.slug, gk: '', p }));
+      const keysOf = (p, s) => by === 'folder' ? [s.folder || 'Senza cartella'] : by === 'server' ? [s.server || 'Server non rilevato']
+        : by === 'client' ? ((s.clients && s.clients.length) ? s.clients : ['Nessun cliente']) : [this.plugStatus(p).text];
+      const groups = new Map();
+      for (const p of list) for (const s of p.sites) for (const k of keysOf(p, s)) {
+        if (!groups.has(k)) groups.set(k, new Map());
+        const g = groups.get(k);
+        if (!g.has(p.slug)) g.set(p.slug, { ...p, sites: [] });
+        g.get(p.slug).sites.push(s);
+      }
+      const order = by === 'status' ? (k => ['chiuso da wordpress.org'].includes(k) ? 0 : k.startsWith('abbandonato') ? 1 : k.startsWith('fermo') ? 2 : 3) : () => 0;
+      const keys = [...groups.keys()].sort((a, b) => order(a) - order(b) || groups.get(b).size - groups.get(a).size || a.localeCompare(b, 'it'));
+      const rows = [];
+      for (const k of keys) {
+        const plugins = [...groups.get(k).values()].map(p => ({ ...p, sites_count: p.sites.length }));
+        const sites = new Set(plugins.flatMap(p => p.sites.map(s => s.id)));
+        rows.push({ kind: 'group', id: 'g|' + k, gk: k, plugins: plugins.length, sites: sites.size });
+        for (const p of plugins) rows.push({ kind: 'plugin', id: k + '|' + p.slug, gk: k, p });
+      }
+      return rows;
+    },
+    plugStatus(p) {
+      const y = p.days_since_update ? Math.floor(p.days_since_update / 365) : 0, m = p.days_since_update ? Math.floor(p.days_since_update / 30) : 0;
+      switch (p.status) {
+        case 'closed': return { cls: 'err', text: 'chiuso da wordpress.org' };
+        case 'abandoned': return { cls: 'err', text: y >= 2 ? `abbandonato · fermo da ${y} anni` : 'abbandonato' };
+        case 'stale': return { cls: 'warn', text: `fermo da ${m} mesi` };
+        case 'ok': return { cls: 'ok', text: 'aggiornato' };
+        case 'unknown': return { cls: '', text: 'non su wordpress.org' };
+        default: return { cls: '', text: 'non ancora controllato' };
+      }
+    },
     // ---------- report per cliente ----------
     async loadClients() {
       // giorno, ora e interruttore sono quelli dei clienti (Report clienti -> Impostazioni), non del Report mensile
@@ -1675,7 +1907,9 @@ function sentinel() {
       } finally { this.cliSet.busy = false; }
     },
     async saveClientSettings() {
-      this.cliSet.busy = true; this.cliSet.msg = this.cliSet.err = '';
+      this.cliSet.msg = this.cliSet.err = '';
+      if (!this.cliSet.cfg || !Object.keys(this.cliSet.cfg).length) { this.cliSet.err = 'Impostazioni dei report clienti non ancora caricate: niente salvato, ricarica la pagina'; return; }
+      this.cliSet.busy = true;
       try {
         const body = { config: this.cliSet.cfg }; if (this.cliSet.advanced) body.template = this.cliSet.template;
         const r = await this.api('/api/clients/config', { method: 'PUT', body: JSON.stringify(body) });
@@ -1974,7 +2208,9 @@ function sentinel() {
       } finally { this.rep.busy = false; }
     },
     async saveReportCfg() {
-      this.rep.busy = true; this.rep.msg = this.rep.err = '';
+      this.rep.msg = this.rep.err = '';
+      if (!this.rep.cfg || !Object.keys(this.rep.cfg).length) { this.rep.err = 'Impostazioni del report non ancora caricate: niente salvato, ricarica la pagina'; return; }
+      this.rep.busy = true;
       try {
         const body = { config: this.rep.cfg }; if (this.rep.advanced) body.template = this.rep.template;
         const r = await this.api('/api/reports/config', { method: 'PUT', body: JSON.stringify(body) });
@@ -2028,8 +2264,10 @@ function sentinel() {
     // ---------- dashboard ----------
     get attention() {
       const out = [];
-      for (const s of this.sites) if (this.isOff(s)) out.push({ kind: 'err', site: s, text: 'Offline: ' + (s.error || s.status) });
-      for (const h of this.history.filter(x => !x.ok).slice(0, 8)) out.push({ kind: 'warn', site: this.sites.find(s => s.id === h.site_id), text: `Update fallito: ${h.name} (${h.error || 'errore'})`, at: h.at });
+      // stessi problemi di Stato server e report: un aggiornamento fallito conta solo finche' e'
+      // ancora fallito (prima veniva dallo storico e restava li' una settimana anche se risolto)
+      const lab = { offline: 'Offline', space: 'Spazio quasi esaurito', failed: 'Aggiornamenti falliti', logs: 'Log grandi', php: 'PHP fuori supporto', domain: 'Dominio scaduto' };
+      for (const p of this.problems) out.push({ kind: p.kind === 'offline' || p.kind === 'domain' ? 'err' : 'warn', site: this.sites.find(s => s.id === p.site_id), text: `${lab[p.kind] || p.kind}: ${p.text}` });
       if (this.sec.summary && (this.sec.summary.critical || this.sec.summary.exploited)) out.push({ kind: 'err', text: `${this.sec.summary.critical} vulnerabilità critiche, ${this.sec.summary.exploited} sfruttate attivamente`, link: 'security' });
       return out.slice(0, 12);
     },

@@ -1,5 +1,256 @@
 # Changelog
 
+## 2.23.0
+
+### Changed
+- Dashboard: *Keep an eye on* uses the same rows as Server status' *What is wrong* — site, tag,
+  left edge in the colour of the severity
+- History: grouped **by day** (today, yesterday, then the date, in local time) with the day's
+  successes and failures; each row shows the time, failures have a red edge, and **⏪ Restore x.y**
+  is a visible button on the right
+- Domain expiries: **sortable columns** (domain, site, expiry, renewal) inside each group
+- Security: severities in the same colours as Server status (critical and high red, medium
+  yellow, low neutral), with the edge on the row
+
+## 2.22.2
+
+### Changed
+- Server status, *What is wrong*: back to one row per site, with the new style — site, tags and
+  server in aligned columns, the left edge in the colour of the worst problem
+
+## 2.22.1
+
+### Changed
+- Server status, *What is wrong*: a title with the total ("N sites with something to look at out
+  of M", or all fine), kind filters as pills coloured by severity, and the sites as cards in a
+  grid with the server under the name, the problems as tags and a left edge in the colour of the
+  worst problem (red: offline, expired domain; yellow: low space, failed updates; neutral: PHP,
+  logs). Tags no longer repeat the kind before their detail
+
+## 2.22.0
+
+### Changed
+- **Server status redone as one row per server that opens.** Closed, the rows line up in
+  columns to compare servers at a glance: name and IPs, sites (WordPress / Joomla), PHP versions,
+  load on cores, disk use, size with its 30-day change, problems counted by kind; servers with
+  problems get a yellow edge. Open, six boxes: **Sites** (online, offline, automatic update, locked
+  components, WordPress / Joomla versions), **Server resources** (load at 1 · 5 · 15 minutes,
+  cores, highest load seen, disk, web server software, hostname, when it was measured),
+  **Size** (total, 30-day change, average, sparkline, the five largest sites), **Updates**
+  (pending, failed, monthly bars), **Domains** (expired and expiring within 30 days, with the
+  sites), **Problems** (each kind with its sites); then the full sortable site list. The
+  connector versions are gone from this page
+
+## 2.21.4
+
+### Fixed
+- Names with HTML entities (`Booking Calendar &#8211; Event Calendar`, `&amp;`): wordpress.org and
+  some plugins send names already encoded, and the panel showed them as they came. They are
+  decoded on the way in (extension list, plugin catalog) and on the way out for what is already
+  stored (plugin catalog, history, monthly totals in the reports), so they read right at once
+
+## 2.21.3
+
+### Added
+- Abandoned plugins: **Group by** plugin, folder, server (with its name), client or status. In
+  a group, each plugin lists only the sites of that group and still opens to show them. The
+  folders of the affected sites are shown on each plugin row; search also matches folder,
+  server and client
+
+## 2.21.2
+
+### Fixed
+- **Settings that looked reset after a deploy.** While the API restarts, the Settings page read
+  `/api/preferences`, failed silently and showed the defaults written in the page — and saving
+  then wrote those defaults for real. The page now shows a loading message and retries every
+  3 seconds until the real settings arrive, and refuses to save before they did. The monthly
+  report and client report pages refuse to save a configuration they never loaded. The API
+  rejects empty saves too (`PUT /api/preferences` without the thresholds,
+  `PUT /api/reports/config` and `PUT /api/clients/config` with an empty configuration): 422
+  instead of turning them into defaults
+
+## 2.21.1
+
+### Fixed
+- Settings: number fields with a unit ("days before", "minutes"…) no longer show the spin
+  arrows, which covered the unit text; the room kept for the unit is wider. *Also warn for
+  domains not to be renewed* moved under *Ask for the renewal decision*, its own setting; the
+  automatic rollback switch spans the full width
+- No spin arrows on any number field of the panel (they were left on the fields without a
+  unit); *Concurrent domain lookups* shows its unit, "at a time", like the others
+
+## 2.21.0
+
+### Changed
+- Server status, *What is wrong*: **one row per site** with all its problems as chips on the same
+  line and the server on the right, in fixed columns (rows were one per problem, the site name
+  repeated, and columns drifted). Chips no longer repeat themselves ("expired domain · domain
+  expired…")
+- Server status cards: no site names any more. Problems are **counted by kind** (sites out of
+  the total), and the card shows server stats — web server software, connector versions in use,
+  average size per site — next to PHP, load, disk and updates. The badge reads *N sites with
+  problems*, consistent with the box above. The month legend is coloured
+- Abandoned plugins: each plugin is a **row that opens**, with the first sites already named
+  on the row; open, it lists every site with version, **server** (with its name), **client** and
+  **folder**. The table uses the full width
+
+## 2.20.1
+
+### Added
+- **Servers grouped by name**: servers given the same name in Settings → Site servers become
+  one group in Server status (title with the name, its IPs and server names below) and in the
+  reports' *Site status* (*Name (ip1, ip2)*). Servers without a name stay one per IP. The name
+  field suggests the names already used
+
+## 2.20.0
+
+### Changed
+- **One definition of what is wrong with a site**, used by the dashboard, Server status and the
+  reports (`app/problems.py`): offline, low writable space, large logs, updates **still** failed,
+  unsupported PHP, expired domain. The dashboard's *Keep an eye on* used to list failures from
+  the 7-day history, so a failure stayed there for a week after it was solved; it now reads
+  `GET /api/servers/problems`, where a failed update counts only while it is still failed
+- **Server names**: Settings → Site servers has a name field next to each IP
+  (`server_labels`); the name is shown with the IP everywhere — Server status cards and
+  problems, and the reports
+- Server status: a **What is wrong** box on top with every problem of every server, counted by
+  kind and clickable to filter; monthly updates as HTML bars with month/year labels and a
+  legend (the SVG text grew huge on wide screens); a size change under 1 MB reads *stable*
+- Reports (yours and the clients'): *Site status* split **by server** (with its name), a count
+  of the sites with problems, and the problems under each site
+- History: search by site, plugin or theme, filters (plugins, themes, core, failed,
+  restorable), up to 2000 rows loaded on that page (was 200)
+- Abandoned plugins: plugins not on wordpress.org are gone; four clickable boxes (closed,
+  abandoned, idle for a year, up to date) that also filter
+- **Sortable columns** (click the header, ▲▼) on site extensions, plugin and theme expiries,
+  security, Server status sites and abandoned plugins; empty values always last
+
+## 2.19.2
+
+### Fixed
+- *Update on the sites* (Settings → Connectors) said to follow the progress from *Install*, but
+  nothing showed: the job id was stored without starting to follow it (that happened only on a
+  page reload), and the Install drawer lives on the site list anyway. The progress now shows
+  right under the connector — bar, sites done out of total, installed, failed, running and
+  queued, and the site-by-site list on demand — and the connector versions are re-read at the
+  end. The button is disabled while a distribution is running
+
+## 2.19.1
+
+### Fixed
+- Core files check: harmless files (`wp-config-sample.php`, readme and licence files, `error_log`,
+  `*.log`, `.user.ini`, `php.ini`, `.htaccess`…) are now filtered in the panel too, so they
+  disappear at once also from results saved by older connectors; counts and status are
+  recomputed
+- **Automatic rollback** only when the homepage was really seen healthy *before* the update:
+  without that snapshot (screenshot service down) a site already broken before would have been
+  rolled back as if the update had broken it
+- Connector WordPress **2.26.1**: the copy before an update checks the account's real writable
+  space (the write test, cached 15 minutes) instead of the server disk, and leaves the space
+  to the update when there is not room for both — on hostings with a quota the copy could
+  otherwise use up the space the update needs
+
+### Changed
+- Server status: the core files are no longer listed among the problems, and the brake switch
+  and badge are gone from the cards (the brake stays in Settings → Site servers)
+- Settings → Connectors: one aligned block per connector — tag and name, buttons on their own
+  line, status on the sites below
+- Sidebar: *7-day history* and *Statistics* right after *Security*, then *Abandoned plugins*
+
+## 2.19.0
+
+### Added
+- **Copy before the update and restore.** Connector WordPress **2.26.0**: before updating a
+  plugin or a theme, its folder is zipped into `wp-content/uploads/sentinel-backups/`
+  (`{type}-{slug}-{version}-{date}.zip`, folder protected by `.htaccess` and `index.php`); no
+  copy over 300 MB or when space is short, and the update goes ahead anyway with the reason in
+  the reply. Last two copies per item, nothing older than 14 days. New endpoints `GET /backups`
+  and `POST /rollback`, which swaps the current folder with the copy and puts things back as
+  they were if anything fails, then clears the caches on the next request
+- The panel stores the copy name on each history row (`update_history.backup_file`); the site
+  history and the 7-day history show **⏪ Restore x.y** on updates that have one
+  (`POST /api/sites/{id}/rollback`). A restored component is **locked** to the restored version
+  so the next cycle does not update it again, and the site status is re-read
+- **Automatic rollback**: when the homepage check after an update says *ko* (an error or a
+  5xx that was not there before) and the updated items have copies, they are restored from
+  the last to the first, locked, the homepage is checked again, and the new notification
+  *Automatic rollback after an update* (email and Telegram) tells what was restored and whether
+  the homepage came back. Switch in Settings (`auto_rollback`, on by default)
+
+## 2.18.0
+
+### Added
+- **Server status** page (sidebar, under Statistics). One card per server — the IP of the sites'
+  domain, with the server name — or, with one click, per client folder. In each card: number of
+  sites (WordPress / Joomla), the folders on it, PHP versions (unsupported in red), load and
+  cores, server disk, pending and failed updates, the total size of its sites with a 30-day
+  sparkline, updates per month over the last six months (successes and failures), the list of
+  problems with a link to each site (offline, low writable space, large logs, failed updates,
+  core files, unsupported PHP), and the brake switch for that server. The site list of a card
+  opens on demand with CMS, PHP, state, updates, size, connector version and last check.
+  Connectors WordPress **2.25.0** and Joomla **1.34.0** report load average, cores, server disk,
+  software and hostname in the diagnostics. Endpoint `GET /api/servers/overview?by=server|folder`
+
+## 2.17.0
+
+### Added
+- **Abandoned plugins** page (sidebar, under Security). Every WordPress plugin of the fleet with
+  the sites that run it and their versions, and from wordpress.org the author's last update,
+  the *tested up to* version, the current version and closures (the API answers 404 with the
+  closure data in the body for closed plugins). Statuses: closed, abandoned (idle for 2+
+  years), idle for a year, up to date, not on wordpress.org (licensed products), not checked
+  yet. *To look at* shows the first three; *All* everything, with search by plugin or site.
+  Catalog table `plugin_catalog`, refreshed every Sunday at 05:00 and at the first start, or
+  right now with *Refresh the catalog*. Endpoints `GET /api/plugins/catalog`,
+  `POST /api/plugins/catalog/scan`
+
+## 2.16.0
+
+### Added
+- **Space and logs watch.** Connectors WordPress **2.24.0** and Joomla **1.33.0**: while
+  measuring the site size they list the **large logs** (over 10 MB: `error_log`, `debug.log`,
+  `*.log`, `*.error.log`), inside the site and in the account folder next to it (the user's home
+  and `~/logs`, where cPanel writes the PHP error log — invisible from the site and the usual
+  cause of a full quota). The nightly diagnostics now also runs a light **50 MB write test**
+  (the space an average update needs). New notification *Site space and logs* (Telegram on by
+  default): one per site when the writable space is under the test size or a large log
+  appears, again only when something changes (a new log, a log grown by another 50 MB, space
+  gone or back); the memory is kept in Redis. The site page lists the large logs in the
+  Diagnostics box
+
+## 2.15.0
+
+### Added
+- **Connector kept up to date by itself.** Connectors WordPress **2.23.0** and Joomla **1.32.0**
+  declare their version in the status reply (`connector`); the panel stores it per site
+  (`sites.connector_version`, for older WordPress connectors read from the `td-panopticon`
+  plugin in the extension list). *Settings → Connectors* shows, for each CMS, the version the
+  panel ships, how many sites are at it and which are behind, with **Update on the sites**: a
+  background install job (one per site, server brake respected, progress in *Install*). A
+  nightly run at 04:30 does the same by itself; switch *Every night install the new connector
+  by itself…* in the same place (`connector_auto_update`, on by default). New endpoints
+  `GET /api/connectors/rollout`, `POST /api/connectors/{kind}/rollout`
+
+## 2.14.4
+
+### Fixed
+- Component lock vs the Elementor / Elementor Pro pairing. With Elementor Pro locked and
+  Elementor jumping to a new major version, the pairing rule tried the Pro anyway (it saw it
+  "behind" and not in the queue), overriding the lock; with Elementor locked, the Pro could be
+  taken to a new major alone, the combination that breaks sites. Now a locked member of the
+  pair is never attempted, and the other one waits with an explicit reason ("… is locked to
+  x.y, unlock it to update them together"). Minor updates within the same major still go
+  through
+
+## 2.14.3
+
+### Fixed
+- A renewed domain could keep showing as expired for up to a week: the registry was read again
+  only every *domain scan days* (7 by default), whatever the expiry. Domains already expired or
+  expiring within 30 days are now read again **every day** (the daily run at 07:15), the others
+  keep the configured interval. A domain checked less than 20 hours ago is not read again.
+  *Check all now* in Domain expiries still forces an immediate read of every domain
+
 ## 2.14.2
 
 ### Added

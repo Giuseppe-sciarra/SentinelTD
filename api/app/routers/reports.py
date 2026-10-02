@@ -55,6 +55,9 @@ async def get_config():
 
 @router.put("/config", dependencies=[Depends(require_auth)])
 async def save_config(payload: dict = Body(...)):
+    # un salvataggio VUOTO (pagina che non aveva letto le impostazioni) non diventa "valori di base"
+    if not isinstance(payload.get("config"), dict) or not payload.get("config"):
+        raise HTTPException(422, "Configurazione vuota: niente salvato. Ricarica la pagina e riprova")
     cfg = await rep.save_config(payload.get("config") or {})
     if "template" in payload:
         html = (payload.get("template") or "").strip()

@@ -1,5 +1,5 @@
 """Impostazioni operative esposte alla UI: nessun token/password/SMTP."""
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_auth
@@ -16,6 +16,10 @@ async def get_preferences():
 
 @router.put("")
 async def put_preferences(payload: dict = Body(...)):
+    # un salvataggio senza le soglie (pagina che non aveva letto le impostazioni) non diventa
+    # "valori di base": il pannello manda sempre l'elenco completo
+    if not payload or "domain_alert_days" not in payload:
+        raise HTTPException(422, "Impostazioni incomplete: niente salvato. Ricarica la pagina e riprova")
     return await save_operational_settings(payload)
 
 
