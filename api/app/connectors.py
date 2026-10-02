@@ -188,6 +188,7 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             for p in prev
             if p.update_failed_at is not None
         }
+        locked = site.locked_set   # bloccati alla versione installata: non contano come "da aggiornare"
         # stato "da aggiornare" dell'ultimo controllo riuscito, per le categorie non verificate
         last_known = {(p.type, p.slug): (bool(p.update_available), p.new_version or "") for p in prev}
         # preserva lo stato "vendor" (Balbooa) rilevato da vendor_scan: il connettore non lo
@@ -242,7 +243,7 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
                     is_upd, enew = True, prev_new
 
             tot[cat] += 1
-            if is_upd:
+            if is_upd and f"{etype}:{eslug}" not in locked:
                 upd[cat] += 1
 
             # riapplica il cooldown SOLO se la versione target e' ancora la stessa che aveva fallito;

@@ -256,7 +256,7 @@ async def create_site(payload: SiteIn, s: AsyncSession = Depends(get_session)):
     s.add(site)
     await s.commit()
     await s.refresh(site)
-    await _enqueue("poll_site", site.id)
+    await _enqueue("poll_site", site.id, True)   # primo controllo: ricalcolo forzato
     return site
 
 
@@ -265,6 +265,39 @@ async def get_site(site_id: int, s: AsyncSession = Depends(get_session)):
     site = await s.get(Site, site_id)
     if not site:
         raise HTTPException(404)
+    return site
+
+
+@router.post("/{site_id}/lock", response_model=SiteDetailOut)
+async def lock_component(site_id: int, payload: dict, s: AsyncSession = Depends(get_session)):
+    """Blocca (o sblocca) un plugin o tema alla versione installata: il pannello non lo
+    aggiorna, ne' in automatico ne' con Aggiorna, e non lo conta tra gli aggiornamenti."""
+    import json as _json
+    from sqlalchemy import select as _select
+    from ..models import Extension
+    site = await s.get(Site, site_id)
+    if not site:
+        raise HTTPException(404)
+    etype, slug = str(payload.get("type") or ""), str(payload.get("slug") or "").strip()
+    if etype not in ("plugin", "theme") or not slug:
+        raise HTTPException(422, "Serve un plugin o un tema")
+    items = site.locked_set
+    key = f"{etype}:{slug}"
+    if payload.get("locked", True):
+        items.add(key)
+    else:
+        items.discard(key)
+    site.locked_items = _json.dumps(sorted(items))
+    # conteggio "da aggiornare" ricalcolato subito, senza aspettare il prossimo controllo
+    exts = (await s.execute(_select(Extension).where(Extension.site_id == site.id))).scalars().all()
+    upd = {"plugin": 0, "theme": 0, "other": 0}
+    for e in exts:
+        if e.update_available and f"{e.type}:{e.slug}" not in items:
+            upd[e.type if e.type in ("plugin", "theme") else "other"] += 1
+    site.upd_plugins, site.upd_themes, site.upd_other = upd["plugin"], upd["theme"], upd["other"]
+    site.updates_count = sum(upd.values()) + (1 if site.core_update else 0)
+    await s.commit()
+    await s.refresh(site)
     return site
 
 

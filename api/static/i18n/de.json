@@ -1995,5 +1995,15 @@
   "✓ Salvate alle {0}": "✓ Gespeichert um {0}",
   "Orario": "Uhrzeit",
   "Aggiornamenti non verificati:": "Updates nicht geprüft:",
-  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "die Website konnte sie nicht neu berechnen (WordPress-Update-Cache fehlt). Hier gilt die letzte erfolgreiche Prüfung; Jetzt prüfen versucht es erneut."
+  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "die Website konnte sie nicht neu berechnen (WordPress-Update-Cache fehlt). Hier gilt die letzte erfolgreiche Prüfung; Jetzt prüfen versucht es erneut.",
+  "🔒 bloccato": "🔒 gesperrt",
+  "Blocca": "Sperren",
+  "Sblocca": "Entsperren",
+  "Bloccato alla versione installata: Sentinel non lo aggiorna": "Auf die installierte Version gesperrt: Sentinel aktualisiert es nicht",
+  "Sblocca: torna ad aggiornarsi normalmente": "Entsperren: wird wieder normal aktualisiert",
+  "Blocca alla versione installata: Sentinel non lo aggiornerà finché non lo sblocchi": "Auf die installierte Version sperren: Sentinel aktualisiert es nicht, bis Sie es entsperren",
+  "Bloccare {0} alla versione {1}? Sentinel non lo aggiornerà più, né in automatico né con Aggiorna, finché non lo sblocchi.": "{0} auf Version {1} sperren? Sentinel aktualisiert es nicht mehr, weder automatisch noch mit Aktualisieren, bis Sie es entsperren.",
+  "{0} bloccato alla versione {1}": "{0} auf Version {1} gesperrt",
+  "{0} sbloccato: torna ad aggiornarsi": "{0} entsperrt: wird wieder aktualisiert",
+  "Serve un plugin o un tema": "Ein Plugin oder Theme ist erforderlich"
 }

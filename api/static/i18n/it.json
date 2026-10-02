@@ -1995,5 +1995,15 @@
   "✓ Salvate alle {0}": "✓ Salvate alle {0}",
   "Orario": "Orario",
   "Aggiornamenti non verificati:": "Aggiornamenti non verificati:",
-  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova."
+  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.",
+  "🔒 bloccato": "🔒 bloccato",
+  "Blocca": "Blocca",
+  "Sblocca": "Sblocca",
+  "Bloccato alla versione installata: Sentinel non lo aggiorna": "Bloccato alla versione installata: Sentinel non lo aggiorna",
+  "Sblocca: torna ad aggiornarsi normalmente": "Sblocca: torna ad aggiornarsi normalmente",
+  "Blocca alla versione installata: Sentinel non lo aggiornerà finché non lo sblocchi": "Blocca alla versione installata: Sentinel non lo aggiornerà finché non lo sblocchi",
+  "Bloccare {0} alla versione {1}? Sentinel non lo aggiornerà più, né in automatico né con Aggiorna, finché non lo sblocchi.": "Bloccare {0} alla versione {1}? Sentinel non lo aggiornerà più, né in automatico né con Aggiorna, finché non lo sblocchi.",
+  "{0} bloccato alla versione {1}": "{0} bloccato alla versione {1}",
+  "{0} sbloccato: torna ad aggiornarsi": "{0} sbloccato: torna ad aggiornarsi",
+  "Serve un plugin o un tema": "Serve un plugin o un tema"
 }

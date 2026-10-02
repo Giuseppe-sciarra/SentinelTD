@@ -690,10 +690,10 @@
             <template x-if="route.tab==='ext'">
               <div class="tbl-wrap site-tab">
                 <table class="tbl">
-                  <thead><tr><th>Estensione</th><th>Tipo</th><th>Installata</th><th>Disponibile</th><th>Stato</th></tr></thead>
+                  <thead><tr><th>Estensione</th><th>Tipo</th><th>Installata</th><th>Disponibile</th><th>Stato</th><th></th></tr></thead>
                   <tbody>
-                    <template x-for="e in [...detail.extensions].sort((a,b)=>(b.update_available-a.update_available)||a.name.localeCompare(b.name))" :key="e.type+e.slug">
-                      <tr><td><div class="name" x-text="e.name" translate="no"></div><div class="url mono" x-text="e.slug"></div></td><td><span class="badge" x-text="e.type"></span></td><td class="mono" x-text="e.current_version||'—'"></td><td class="mono" x-text="e.update_available?e.new_version:'—'"></td><td><span class="badge" :class="e.update_available?'warn':'ok'" x-text="e.update_available?'update':'ok'"></span></td></tr>
+                    <template x-for="e in [...detail.extensions].sort((a,b)=>((b.update_available&&!isLocked(b))-(a.update_available&&!isLocked(a)))||(isLocked(b)-isLocked(a))||a.name.localeCompare(b.name))" :key="e.type+e.slug">
+                      <tr><td><div class="name" x-text="e.name" translate="no"></div><div class="url mono" x-text="e.slug"></div></td><td><span class="badge" x-text="e.type"></span></td><td class="mono" x-text="e.current_version||'—'"></td><td class="mono" x-text="e.update_available?e.new_version:'—'"></td><td><span class="badge" x-show="isLocked(e)" title="Bloccato alla versione installata: Sentinel non lo aggiorna">🔒 bloccato</span><span class="badge" x-show="!isLocked(e)" :class="e.update_available?'warn':'ok'" x-text="e.update_available?'update':'ok'"></span></td><td class="lock-cell"><button class="btn sm ghost" x-show="e.type==='plugin'||e.type==='theme'" @click="toggleLock(e)" :disabled="!!(busy['lock'+e.type+e.slug])" :title="isLocked(e) ? 'Sblocca: torna ad aggiornarsi normalmente' : 'Blocca alla versione installata: Sentinel non lo aggiornerà finché non lo sblocchi'" x-text="isLocked(e) ? 'Sblocca' : 'Blocca'"></button></td></tr>
                     </template>
                   </tbody>
                 </table>

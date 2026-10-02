@@ -59,6 +59,20 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   siti a cui il produttore non lo consegna
 - Elementor ed Elementor Pro si muovono insieme: Elementor non salta mai a una nuova
   versione principale lasciando indietro il Pro
+- **Blocca un singolo plugin o tema** alla versione installata (pagina del sito → Estensioni →
+  *Blocca*): non viene mai aggiornato, né in automatico né a mano, né contato tra quelli in sospeso,
+  mentre il resto del sito continua ad aggiornarsi
+- Dopo qualunque aggiornamento di plugin, temi o core il connettore WordPress **svuota da solo le
+  cache del sito**, ognuna col suo comando ufficiale e solo se presente: CSS generati dai costruttori
+  di pagine (Elementor, Essential Addons, Beaver Builder, Divi, Avada), cache di pagina (WP Rocket,
+  W3 Total Cache, LiteSpeed, WP Super Cache, WP Fastest Cache, SiteGround, Breeze, Cache Enabler,
+  Hummingbird, Nginx Helper, Autoptimize) e le opzioni nella cache degli oggetti — la causa delle
+  pagine che si bloccano o perdono gli stili dopo un aggiornamento
+- **YOOtheme Pro**, su WordPress e Joomla: dopo qualunque aggiornamento il connettore svuota la
+  cache della configurazione di YOOtheme (builder, elementi, sorgenti dinamiche) — la cartella che
+  svuota il suo pulsante *Svuota cache* — prima che YOOtheme la rilegga. La cache delle immagini
+  resta intatta: rigenerare tutte le immagini ridimensionate dopo un aggiornamento non serve e
+  peserebbe sui server deboli
 - **Errori leggibili**: niente entità HTML, niente link di download coi token, niente righe di
   avanzamento — solo la frase che conta, con un suggerimento quando la causa probabile è lo
   spazio esaurito

@@ -40,6 +40,21 @@ class Site(Base):
     # ultimo controllo in cui il sito NON ha potuto verificare gli aggiornamenti (cache di
     # WordPress mancante): i conteggi sono quelli dell'ultimo controllo riuscito
     updates_unverified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # componenti bloccati alla versione installata ("plugin:slug", "theme:slug"), JSON. Sta nel
+    # sito e non nelle estensioni perche' le righe delle estensioni si ricreano a ogni controllo
+    locked_items: Mapped[str] = mapped_column(Text, default="")
+
+    @property
+    def locked_set(self) -> set[str]:
+        try:
+            return {str(x) for x in (json.loads(self.locked_items) if self.locked_items else [])}
+        except Exception:  # noqa: BLE001
+            return set()
+
+    @property
+    def locked(self) -> list[str]:
+        """Per il pannello: elenco dei componenti bloccati ("plugin:slug", "theme:slug")."""
+        return sorted(self.locked_set)
 
     @property
     def diag(self) -> dict | None:

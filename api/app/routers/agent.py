@@ -168,7 +168,7 @@ async def agent_register(request: Request, payload: dict = Body(...)):
         from arq.connections import RedisSettings
         from ..config import settings as cfg
         pool = await create_pool(RedisSettings.from_dsn(cfg.REDIS_URL))
-        await pool.enqueue_job("poll_site", site.id)
+        await pool.enqueue_job("poll_site", site.id, True)   # primo controllo: ricalcolo forzato
         await pool.close()
     except Exception:  # noqa: BLE001
         pass

@@ -85,6 +85,7 @@ class SiteDetailOut(SiteOut):
     diag: dict | None = None
     diag_at: datetime | None = None
     updates_unverified_at: datetime | None = None
+    locked: list[str] = []   # componenti bloccati alla versione installata
 
 
 class LoginIn(BaseModel):

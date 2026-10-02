@@ -1995,5 +1995,15 @@
   "✓ Salvate alle {0}": "✓ Enregistrées à {0}",
   "Orario": "Heure",
   "Aggiornamenti non verificati:": "Mises à jour non vérifiées :",
-  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "le site n'a pas pu les recalculer (cache de mises à jour WordPress absent). Le dernier contrôle réussi fait foi ici ; Vérifier maintenant réessaie."
+  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "le site n'a pas pu les recalculer (cache de mises à jour WordPress absent). Le dernier contrôle réussi fait foi ici ; Vérifier maintenant réessaie.",
+  "🔒 bloccato": "🔒 bloqué",
+  "Blocca": "Bloquer",
+  "Sblocca": "Débloquer",
+  "Bloccato alla versione installata: Sentinel non lo aggiorna": "Bloqué à la version installée : Sentinel ne le met pas à jour",
+  "Sblocca: torna ad aggiornarsi normalmente": "Débloquer : il se remet à jour normalement",
+  "Blocca alla versione installata: Sentinel non lo aggiornerà finché non lo sblocchi": "Bloquer à la version installée : Sentinel ne le mettra pas à jour tant que vous ne le débloquez pas",
+  "Bloccare {0} alla versione {1}? Sentinel non lo aggiornerà più, né in automatico né con Aggiorna, finché non lo sblocchi.": "Bloquer {0} à la version {1} ? Sentinel ne le mettra plus à jour, ni automatiquement ni avec Mettre à jour, tant que vous ne le débloquez pas.",
+  "{0} bloccato alla versione {1}": "{0} bloqué à la version {1}",
+  "{0} sbloccato: torna ad aggiornarsi": "{0} débloqué : il se remet à jour",
+  "Serve un plugin o un tema": "Un plugin ou un thème est requis"
 }

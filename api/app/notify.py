@@ -81,8 +81,9 @@ EVENTS: dict[str, dict[str, Any]] = {
     },
     "core_integrity": {
         "label": "File del core da controllare",
-        "desc": "La verifica notturna dei file di WordPress ha trovato file modificati, mancanti o in più (solo quando cambia qualcosa).",
-        "channels": {"email": False, "telegram": True},
+        "desc": "La verifica notturna dei file di WordPress ha trovato file modificati, mancanti o in più (solo quando cambia qualcosa). Spento di base: il risultato resta nella pagina del sito e nei report.",
+        "enabled": False,
+        "channels": {"email": False, "telegram": False},
         "vars": {"site_name": "Nome del sito", "site_url": "URL", "folder": "Cartella del sito",
                  "core_summary": "Sintesi (es. 2 modificati · 1 mancante · 3 in più)",
                  "core_lines": "Elenco dei file per Telegram", "core_html": "Elenco dei file per email (HTML)",
@@ -296,7 +297,7 @@ def default_config(event: str, language: str | None = None) -> dict:
     lang = normalize_language(language, DEFAULT_LANGUAGE)
     e = EVENTS[event]
     return {
-        "enabled": True,
+        "enabled": bool(e.get("enabled", True)),
         "email": e["channels"]["email"],
         "telegram": e["channels"]["telegram"],
         "subject": localize_template(e["subject"], lang),

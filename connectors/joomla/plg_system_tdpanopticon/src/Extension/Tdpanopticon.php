@@ -34,6 +34,8 @@ final class Tdpanopticon extends CMSPlugin
     public function onAfterInitialise(): void
     {
         $app = Factory::getApplication();
+        // dopo un aggiornamento: cache della configurazione di YOOtheme da svuotare (vedi sotto)
+        $this->flushYoothemeIfMarked();
         if (!$app->isClient('site')) {
             return;
         }
@@ -52,6 +54,80 @@ final class Tdpanopticon extends CMSPlugin
             echo json_encode(['success' => false, 'data' => null, 'message' => $e->getMessage()]);
         }
         $app->close();
+    }
+
+    /* -----------------------------------------------------------------------
+     * YOOtheme Pro: cache della CONFIGURAZIONE da svuotare dopo gli aggiornamenti.
+     * templates/yootheme/cache e' la stessa cartella che svuota il pulsante "Svuota cache"
+     * di YOOtheme: builder, elementi e sorgenti dinamiche compilati, che dopo un
+     * aggiornamento possono restare vecchi e si ricostruiscono da soli. Non si tocca la cache
+     * delle immagini (media/yootheme/cache): dopo un aggiornamento non serve, e rigenerare
+     * tutte le immagini ridimensionate peserebbe sui server deboli.
+     * Vale per QUALUNQUE installazione o aggiornamento (connettore o amministrazione di
+     * Joomla): gli eventi segnano, la richiesta successiva svuota, prima che YOOtheme
+     * rilegga la sua configurazione. La richiesta successiva arriva subito: dopo ogni
+     * aggiornamento il pannello rilegge lo stato del sito.
+     * --------------------------------------------------------------------- */
+    public function onExtensionAfterInstall(...$args): void
+    {
+        $this->markYoothemeFlush();
+    }
+
+    public function onExtensionAfterUpdate(...$args): void
+    {
+        $this->markYoothemeFlush();
+    }
+
+    public function onJoomlaAfterUpdate(...$args): void
+    {
+        $this->markYoothemeFlush();
+    }
+
+    private function yoothemeFlushFlag(): string
+    {
+        return rtrim((string) Factory::getApplication()->get('tmp_path', JPATH_ROOT . '/tmp'), '/\\') . '/tdpanop_flush_yootheme.flag';
+    }
+
+    private function markYoothemeFlush(): void
+    {
+        try {
+            @file_put_contents($this->yoothemeFlushFlag(), (string) time());
+        } catch (\Throwable $e) {
+            // mai bloccare un aggiornamento per una pulizia di cache
+        }
+    }
+
+    private function flushYoothemeIfMarked(): void
+    {
+        try {
+            $flag = $this->yoothemeFlushFlag();
+            if (!is_file($flag)) {
+                return;
+            }
+            @unlink($flag);
+            $dir = JPATH_ROOT . '/templates/yootheme';
+            // la cartella e' davvero quella di YOOtheme
+            if (!is_dir($dir . '/cache') || !is_file($dir . '/packages/theme-settings/src/CacheController.php')) {
+                return;
+            }
+            $cache = realpath($dir . '/cache');
+            if ($cache === false) {
+                return;
+            }
+            $it = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($cache, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST
+            );
+            foreach ($it as $f) {
+                $path = $f->getPathname();
+                if (strpos($path, $cache . DIRECTORY_SEPARATOR) !== 0) {
+                    continue;   // mai fuori dalla cartella della cache
+                }
+                $f->isDir() && !$f->isLink() ? @rmdir($path) : @unlink($path);
+            }
+        } catch (\Throwable $e) {
+            // mai bloccare il sito per una pulizia di cache
+        }
     }
 
     public function onAjaxTdpanopticon($event = null)

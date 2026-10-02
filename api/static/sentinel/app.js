@@ -100,6 +100,21 @@ function sentinel() {
         if (sid && sid === prev.sid && d.site !== prev.site) await this.refreshDetail(this.detail.id);
       } catch (e) { /* rete assente: si riprova al giro dopo */ } finally { this._watching = false; }
     },
+    // ---- blocco di un singolo plugin o tema alla versione installata ----
+    isLocked(e) { return !!(this.detail && (this.detail.locked || []).includes(e.type + ':' + e.slug)); },
+    async toggleLock(e) {
+      const key = 'lock' + e.type + e.slug, want = !this.isLocked(e);
+      if (want && !confirm(`Bloccare ${e.name} alla versione ${e.current_version || 'installata'}? Sentinel non lo aggiornerà più, né in automatico né con Aggiorna, finché non lo sblocchi.`)) return;
+      this.busy[key] = true;
+      try {
+        const r = await this.api(`/api/sites/${this.detail.id}/lock`, { method: 'POST', body: JSON.stringify({ type: e.type, slug: e.slug, locked: want }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.say(d.detail || 'Non riuscito'); return; }
+        this.detail = d;
+        this.say(want ? `${e.name} bloccato alla versione ${e.current_version}` : `${e.name} sbloccato: torna ad aggiornarsi`);
+        this.load(true);
+      } finally { this.busy[key] = false; }
+    },
     // aggiorna la pagina del sito senza toccare quello che stai guardando (riquadri aperti, grafico)
     async refreshDetail(id) {
       if (!this.detail || this.detail.id !== id) return;

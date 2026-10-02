@@ -605,7 +605,11 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings.REDIS_URL)
 
 
-async def poll_site(ctx, site_id: int):
+async def poll_site(ctx, site_id: int, force: bool = False):
+    """Controllo di un sito. force=True: ricalcolo forzato degli aggiornamenti sul sito, usato
+    per il PRIMO controllo di un sito appena aggiunto (non c'e' ancora nessuna conoscenza
+    precedente, e la cache di WordPress puo' essere vecchia o mancare: in modalita' passiva
+    il sito dichiarerebbe meno aggiornamenti di quanti ne ha, o "tutto ok")."""
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
         if not site or not site.enabled:
@@ -613,7 +617,7 @@ async def poll_site(ctx, site_id: int):
         # stato PRIMA del check, per rilevare la transizione (no spam: notifico solo
         # quando lo stato cambia, non a ogni check mentre resta offline)
         prev_status = site.status
-        await apply_status(s, site)
+        await apply_status(s, site, force=force)
 
         # --- conferma "non raggiungibile" (senza bloccare il worker) ---
         # Siti su server lenti hanno buchi di qualche minuto: l'avviso parte solo dopo
@@ -1242,7 +1246,11 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
 
         skipped = []   # estensioni saltate per cooldown (per log)
         skipped_dlkey = []   # saltate per download key mancante
+        locked = site.locked_set
         for e in exts:
+            # bloccato alla versione installata (pagina del sito): mai aggiornato, nemmeno a mano
+            if f"{e.type}:{e.slug}" in locked:
+                continue
             # download key mancante: l'update non e' scaricabile, inutile tentare (fallirebbe).
             if getattr(e, "dlkey_missing", False):
                 skipped_dlkey.append(e.name)

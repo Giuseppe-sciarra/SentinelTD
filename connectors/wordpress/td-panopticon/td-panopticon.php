@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.19.2
+ * Version: 2.22.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -1774,12 +1774,25 @@ function tdpanop_core_integrity(): array
         return ['status' => 'unavailable', 'version' => $version,
                 'error' => 'impronte ufficiali non disponibili per questa versione'];
     }
+    // File che hosting, traduzioni e strumenti toccano di continuo e che WordPress non esegue
+    // mai: segnalarli e' solo rumore (es. wp-config-sample.php, readme, licenze).
+    $harmless = ['wp-config-sample.php', 'readme.html', 'license.txt', 'licenza.html', 'liesmich.html', 'licence.txt'];
+    // File in piu' che sono log o configurazioni del server, non file estranei.
+    $noise = static function (string $rel): bool {
+        return (bool) preg_match('#(^|/)(error_log|php_errorlog|php_error_log|\.user\.ini|php\.ini|\.htaccess|web\.config|\.DS_Store|Thumbs\.db|desktop\.ini)$#i', $rel)
+            || (bool) preg_match('#\.log$#i', $rel);
+    };
+    $ignored  = 0;
     $modified = [];
     $missing  = [];
     $checked  = 0;
     foreach ($sums as $file => $md5) {
         if (strpos($file, 'wp-content/') === 0) {
             continue;   // temi e plugin predefiniti: non sono core
+        }
+        if (in_array($file, $harmless, true)) {
+            $ignored++;
+            continue;
         }
         $path = ABSPATH . $file;
         if (!is_file($path)) {
@@ -1809,6 +1822,10 @@ function tdpanop_core_integrity(): array
                 }
                 $rel = ltrim(str_replace('\\', '/', substr($f->getPathname(), strlen(ABSPATH))), '/');
                 if (!isset($sums[$rel])) {
+                    if ($noise($rel)) {
+                        $ignored++;
+                        continue;
+                    }
                     $extra[] = $rel;
                 }
             }
@@ -1827,6 +1844,7 @@ function tdpanop_core_integrity(): array
         'modified_count' => count($modified),
         'missing_count'  => count($missing),
         'extra_count'    => count($extra),
+        'ignored_count'  => $ignored,   // file innocui non segnalati (esempi, readme, log, ini)
         'modified'       => array_slice($modified, 0, 100),
         'missing'        => array_slice($missing, 0, 100),
         'extra'          => array_slice($extra, 0, 100),
@@ -2003,5 +2021,197 @@ add_action('init', function () {
     wp_safe_redirect(admin_url());
     exit;
 });
+
+/* ---------------------------------------------------------------------------
+ * Cache da svuotare dopo gli aggiornamenti.
+ * Dopo un aggiornamento di plugin, temi o core le cache del sito possono restare incoerenti
+ * con il codice nuovo: CSS generati dai costruttori di pagine (Elementor, Essential Addons,
+ * Beaver Builder, Divi, Avada), pagine in cache che puntano ancora a CSS e JS vecchi, dati
+ * del plugin vecchio nella cache degli oggetti (Redis). Risultato tipico: pagine senza
+ * stili, layout rotti o pagine che vanno in timeout finche' qualcuno svuota a mano.
+ * Qui lo si fa da soli, per QUALUNQUE aggiornamento o installazione (connettore,
+ * installazione in blocco, wp-admin, aggiornamenti automatici di WordPress).
+ * Ogni pulizia parte solo se quel plugin o tema c'e', usando il suo comando ufficiale; un
+ * errore in una non ferma le altre e non blocca mai il sito.
+ * La pulizia avviene alla richiesta SUCCESSIVA, non in quella dell'aggiornamento, dove in
+ * memoria c'e' ancora il codice vecchio: e la richiesta successiva arriva subito, perche'
+ * dopo ogni aggiornamento il pannello rilegge lo stato del sito.
+ * ------------------------------------------------------------------------- */
+add_action('upgrader_process_complete', function ($upgrader, $extra) {
+    $type = is_array($extra) ? (string) ($extra['type'] ?? '') : '';
+    if (in_array($type, ['plugin', 'theme', 'core'], true)) {
+        update_option('tdpanop_flush_caches', time(), true);
+    }
+}, 10, 2);
+
+/**
+ * Svuota le cache del sito. Ritorna l'elenco di quelle svuotate (per il log del connettore).
+ */
+function tdpanop_flush_caches(): array
+{
+    $done = [];
+    $try = static function (string $name, callable $fn) use (&$done) {
+        try {
+            if ($fn() !== false) {
+                $done[] = $name;
+            }
+        } catch (\Throwable $e) {
+            // una cache che non si svuota non deve fermare le altre ne' il sito
+        }
+    };
+
+    // --- costruttori di pagine: CSS generati
+    if (class_exists('\Elementor\Plugin') && !empty(\Elementor\Plugin::$instance)) {
+        $try('Elementor', static function () {
+            $fm = \Elementor\Plugin::$instance->files_manager ?? null;
+            if (!$fm || !method_exists($fm, 'clear_cache')) {
+                return false;
+            }
+            $fm->clear_cache();   // come "wp elementor flush-css"
+            return true;
+        });
+    }
+    $up = wp_upload_dir(null, false);
+    $eaDir = !empty($up['basedir']) ? $up['basedir'] . '/essential-addons-elementor' : '';
+    if ($eaDir !== '' && is_dir($eaDir) && (defined('EAEL_PLUGIN_VERSION') || class_exists('\Essential_Addons_Elementor\Classes\Bootstrap'))) {
+        $try('Essential Addons', static function () use ($eaDir) {
+            foreach ((array) glob($eaDir . '/*.{css,js}', GLOB_BRACE) as $f) {
+                if (is_file($f)) {
+                    @unlink($f);   // file uniti di Essential Addons: si rigenerano alla prima visita
+                }
+            }
+            return true;
+        });
+    }
+    if (class_exists('FLBuilderModel') && method_exists('FLBuilderModel', 'delete_asset_cache_for_all_posts')) {
+        $try('Beaver Builder', static function () { \FLBuilderModel::delete_asset_cache_for_all_posts(); return true; });
+    }
+    if (class_exists('ET_Core_PageResource') && method_exists('ET_Core_PageResource', 'remove_static_resources')) {
+        $try('Divi', static function () { \ET_Core_PageResource::remove_static_resources('all', 'all'); return true; });
+    }
+    if (function_exists('fusion_reset_all_caches')) {
+        $try('Avada', static function () { fusion_reset_all_caches(); return true; });
+    }
+
+    // --- cache di pagina e di file uniti
+    if (function_exists('rocket_clean_domain')) {
+        $try('WP Rocket', static function () {
+            rocket_clean_domain();
+            if (function_exists('rocket_clean_minify')) {
+                rocket_clean_minify();
+            }
+            return true;
+        });
+    }
+    if (function_exists('w3tc_flush_all')) {
+        $try('W3 Total Cache', static function () { w3tc_flush_all(); return true; });
+    }
+    if (defined('LSCWP_V') || class_exists('\LiteSpeed\Purge')) {
+        $try('LiteSpeed Cache', static function () { do_action('litespeed_purge_all'); return true; });
+    }
+    if (function_exists('wp_cache_clear_cache')) {
+        $try('WP Super Cache', static function () { wp_cache_clear_cache(); return true; });
+    }
+    if (isset($GLOBALS['wp_fastest_cache']) && is_object($GLOBALS['wp_fastest_cache']) && method_exists($GLOBALS['wp_fastest_cache'], 'deleteCache')) {
+        $try('WP Fastest Cache', static function () { $GLOBALS['wp_fastest_cache']->deleteCache(true); return true; });
+    }
+    if (function_exists('sg_cachepress_purge_cache')) {
+        $try('SiteGround Optimizer', static function () { sg_cachepress_purge_cache(); return true; });
+    }
+    if (defined('BREEZE_VERSION')) {
+        $try('Breeze', static function () { do_action('breeze_clear_all_cache'); return true; });
+    }
+    if (class_exists('Cache_Enabler')) {
+        $try('Cache Enabler', static function () { do_action('cache_enabler_clear_complete_cache'); return true; });
+    }
+    if (defined('WPHB_VERSION')) {
+        $try('Hummingbird', static function () { do_action('wphb_clear_page_cache'); return true; });
+    }
+    if (defined('NGINX_HELPER_BASENAME') || class_exists('Nginx_Helper')) {
+        $try('Nginx Helper', static function () { do_action('rt_nginx_helper_purge_all'); return true; });
+    }
+    if (class_exists('autoptimizeCache') && method_exists('autoptimizeCache', 'clearall')) {
+        $try('Autoptimize', static function () { \autoptimizeCache::clearall(); return true; });
+    }
+
+    // --- cache degli oggetti (Redis, Memcached): niente dati del codice vecchio in memoria.
+    // Lo svuotamento completo solo se cancella le chiavi di QUESTO sito e basta
+    // (WP_REDIS_SELECTIVE_FLUSH del plugin Redis Object Cache): con un Redis condiviso tra
+    // piu' siti o applicazioni, wp_cache_flush() li svuoterebbe tutti. Altrimenti si tolgono
+    // solo le opzioni in cache, la causa tipica dei dati vecchi dopo un aggiornamento.
+    if (function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache()) {
+        if (defined('WP_REDIS_SELECTIVE_FLUSH') && WP_REDIS_SELECTIVE_FLUSH && function_exists('wp_cache_flush')) {
+            $try('cache degli oggetti', static function () { return wp_cache_flush(); });
+        } else {
+            $try('opzioni in cache', static function () {
+                wp_cache_delete('alloptions', 'options');
+                wp_cache_delete('notoptions', 'options');
+                return true;
+            });
+        }
+    }
+    return $done;
+}
+
+/**
+ * YOOtheme Pro: svuota la cache della CONFIGURAZIONE (wp-content/themes/yootheme/cache),
+ * la stessa cartella che svuota il suo pulsante "Svuota cache": builder, elementi e sorgenti
+ * dinamiche compilati. E' quella che resta vecchia dopo gli aggiornamenti (es. un plugin che
+ * aggiunge elementi al builder) e si ricostruisce da sola. NON si tocca la cache delle
+ * immagini (uploads/yootheme/cache), che il pulsante svuota ma dopo un aggiornamento non
+ * serve: rigenerare tutte le immagini ridimensionate peserebbe sui server deboli. Il CSS del
+ * tema non e' in nessuna delle due: lo compila il personalizzatore nel browser.
+ */
+function tdpanop_flush_yootheme(): bool
+{
+    $dir = function_exists('get_template_directory') ? get_template_directory() : '';
+    // YOOtheme e' il tema (o il padre del tema figlio) attivo e la cartella e' davvero la sua
+    if ($dir === '' || !is_dir($dir . '/cache') || !is_file($dir . '/packages/theme-settings/src/CacheController.php')) {
+        return false;
+    }
+    $cache = realpath($dir . '/cache');
+    if ($cache === false) {
+        return false;
+    }
+    $it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($cache, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($it as $f) {
+        $path = $f->getPathname();
+        if (strpos($path, $cache . DIRECTORY_SEPARATOR) !== 0) {
+            continue;   // mai fuori dalla cartella della cache
+        }
+        $f->isDir() && !$f->isLink() ? @rmdir($path) : @unlink($path);
+    }
+    return true;
+}
+
+// Prima che YOOtheme rilegga la sua configurazione (che avviene col tema): cosi' gia' questa
+// richiesta parte pulita. Il segno resta per le altre pulizie, sotto.
+add_action('plugins_loaded', function () {
+    if (get_option('tdpanop_flush_caches') && !get_option('tdpanop_flush_yoo_done')) {
+        try {
+            if (tdpanop_flush_yootheme()) {
+                update_option('tdpanop_flush_yoo_done', 1, false);
+            }
+        } catch (\Throwable $e) {
+            // mai bloccare il sito per una pulizia di cache
+        }
+    }
+}, 1);
+
+add_action('wp_loaded', function () {
+    if (!get_option('tdpanop_flush_caches')) {
+        return;
+    }
+    delete_option('tdpanop_flush_caches');
+    $done = tdpanop_flush_caches();
+    if (get_option('tdpanop_flush_yoo_done')) {
+        array_unshift($done, 'YOOtheme');
+        delete_option('tdpanop_flush_yoo_done');
+    }
+    update_option('tdpanop_last_flush', ['at' => time(), 'caches' => $done], false);
+}, 99);
 
 } // fine blocco condizionale (vedi sopra)

@@ -1995,5 +1995,15 @@
   "✓ Salvate alle {0}": "✓ Saved at {0}",
   "Orario": "Time",
   "Aggiornamenti non verificati:": "Updates not verified:",
-  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "the site could not recompute them (WordPress update cache missing). The last successful check applies here; Check now tries again."
+  "il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.": "the site could not recompute them (WordPress update cache missing). The last successful check applies here; Check now tries again.",
+  "🔒 bloccato": "🔒 locked",
+  "Blocca": "Lock",
+  "Sblocca": "Unlock",
+  "Bloccato alla versione installata: Sentinel non lo aggiorna": "Locked to the installed version: Sentinel does not update it",
+  "Sblocca: torna ad aggiornarsi normalmente": "Unlock: it goes back to updating normally",
+  "Blocca alla versione installata: Sentinel non lo aggiornerà finché non lo sblocchi": "Lock to the installed version: Sentinel will not update it until you unlock it",
+  "Bloccare {0} alla versione {1}? Sentinel non lo aggiornerà più, né in automatico né con Aggiorna, finché non lo sblocchi.": "Lock {0} to version {1}? Sentinel will no longer update it, neither automatically nor with Update, until you unlock it.",
+  "{0} bloccato alla versione {1}": "{0} locked to version {1}",
+  "{0} sbloccato: torna ad aggiornarsi": "{0} unlocked: it updates again",
+  "Serve un plugin o un tema": "A plugin or a theme is required"
 }
