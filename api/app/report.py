@@ -582,22 +582,31 @@ async def _site_stats(s, sites: list) -> list[dict]:
     try:
         from redis.asyncio import from_url
         from .config import settings as _settings
-        from .servers import server_of
+        from .servers import key_host, key_ip, machine_key, server_of, site_hostname
         from .settings_store import get_operational_settings
-        labels = (await get_operational_settings()).get("server_labels") or {}
+        _prefs = await get_operational_settings()
+        labels = _prefs.get("server_labels") or {}
+        split = set(_prefs.get("server_split") or [])
         r = from_url(_settings.REDIS_URL)
         try:
             ip_of = {x.id: (await server_of(r, x.url) or "?") for x in sites}
         finally:
             await r.aclose()
+        # IP diviso per macchina ("IP|nome"): ogni macchina e' un server a parte
+        mk = {x.id: machine_key(ip_of[x.id], site_hostname(x), split) for x in sites}
         # server con lo STESSO nome = un gruppo solo, con i suoi IP tra parentesi
         ips_by_label: dict[str, set] = {}
-        for ip in ip_of.values():
-            if labels.get(ip):
-                ips_by_label.setdefault(labels[ip], set()).add(ip)
-        for sid, ip in ip_of.items():
-            lab = labels.get(ip)
-            servers[sid] = f"{lab} ({', '.join(sorted(ips_by_label[lab]))})" if lab else ip
+        for key in mk.values():
+            if labels.get(key):
+                ips_by_label.setdefault(labels[key], set()).add(key_ip(key))
+        for sid, key in mk.items():
+            lab = labels.get(key)
+            if lab:
+                servers[sid] = f"{lab} ({', '.join(sorted(ips_by_label[lab]))})"
+            elif key_host(key):
+                servers[sid] = f"{key_host(key)} ({key_ip(key)})"   # macchina divisa e senza nome: il suo nome tecnico
+            else:
+                servers[sid] = key
     except Exception:  # noqa: BLE001
         pass
     hist: dict[int, list] = {}

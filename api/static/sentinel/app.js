@@ -42,7 +42,8 @@ function sentinel() {
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
     srvst: { data: null, by: 'server', open: {}, busy: false, kind: '' },
-    tsort: {}, histQ: '', histType: '', problems: [],
+    // Stato server: di base per nome server, dalla A alla Z
+    tsort: { srv: { k: 'name', d: 1 } }, histQ: '', histType: '', problems: [],
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
            open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
@@ -63,13 +64,21 @@ function sentinel() {
         if (!el) return;
         const text = el.getAttribute('title'); if (!text) return;
         cur = el; el.dataset.tip = text; el.removeAttribute('title');
-        tip.textContent = text; tip.classList.add('on');
-        const r = el.getBoundingClientRect(), w = Math.min(340, window.innerWidth - 24);
+        tip.textContent = '';
+        if (text.includes('•')) {   // elenco: ogni "•" e' una riga a parte
+          const lead = !text.trim().startsWith('•');
+          text.split('•').map(x => x.trim()).filter(Boolean).forEach((p, i) => {
+            const li = document.createElement('div'); li.className = 'td-tip-li'; li.textContent = (lead && i === 0 ? '' : '• ') + p; tip.appendChild(li);
+          });
+        } else tip.textContent = text;
+        tip.classList.add('on');
+        const r = el.getBoundingClientRect(), w = Math.min(el.classList.contains('hint-wide') ? 470 : 340, window.innerWidth - 24);
         tip.style.maxWidth = w + 'px';
         const left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
         const th = tip.offsetHeight;
-        const top = r.top - th - 8 > 8 ? r.top - th - 8 : r.bottom + 8;   // sopra la voce, se c'e' spazio
-        tip.style.left = left + 'px'; tip.style.top = (top + window.scrollY) + 'px';
+        let top = r.top - th - 8 > 8 ? r.top - th - 8 : r.bottom + 8;   // sopra la voce, se c'e' spazio
+        top = Math.max(8, Math.min(top, window.innerHeight - th - 8));   // sempre dentro lo schermo
+        tip.style.left = left + 'px'; tip.style.top = top + 'px';   // fisso alla finestra: non allunga mai la pagina
       });
       window.addEventListener('scroll', hide, { passive: true });
     },
@@ -1019,6 +1028,13 @@ function sentinel() {
       return Object.values(groups).sort((a, b) => (a.folder === '') - (b.folder === '') || a.folder.localeCompare(b.folder, 'it', { numeric: true }));
     },
     srvOthers(sv, folder) { return (sv.folders || []).filter(f => f.name !== folder); },
+    // IP con piu' macchine: "Dividi per macchina" le tratta come server a parte
+    isSplit(ip) { return (this.prefs.server_split || []).includes(ip); },
+    toggleSplit(ip) {
+      const cur = this.prefs.server_split || [];
+      this.prefs.server_split = cur.includes(ip) ? cur.filter(x => x !== ip) : [...cur, ip];
+    },
+    machineName(ip, hostname) { return this.srvLabel(ip + '|' + hostname); },
     isLimited(ip) { return (this.prefs.server_limited || []).includes(ip); },
     toggleLimited(ip) {
       const cur = this.prefs.server_limited || [];
@@ -1040,7 +1056,7 @@ function sentinel() {
                           'domain_decision_days', 'domain_alert_norenew', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
-                       server_limited: this.prefs.server_limited || [], connector_auto_update: this.prefs.connector_auto_update !== false,
+                       server_limited: this.prefs.server_limited || [], server_split: this.prefs.server_split || [], connector_auto_update: this.prefs.connector_auto_update !== false,
                        auto_rollback: this.prefs.auto_rollback !== false, server_labels: this.prefs.server_labels || {} };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
@@ -1741,7 +1757,7 @@ function sentinel() {
 
     // ---------- report mensile ----------
     // ---------- ordinamento delle tabelle: clic sul titolo della colonna, ▲▼ ----------
-    tSort(t, k) { const s = this.tsort[t] || {}; this.tsort = { ...this.tsort, [t]: { k, d: s.k === k ? -(s.d || 1) : 1 } }; },
+    tSort(t, k, firstDesc = false) { const s = this.tsort[t] || {}; this.tsort = { ...this.tsort, [t]: { k, d: s.k === k ? -(s.d || 1) : (firstDesc ? -1 : 1) } }; },
     tMark(t, k) { const s = this.tsort[t]; return s && s.k === k ? (s.d > 0 ? ' ▲' : ' ▼') : ''; },
     tSorted(t, rows) {
       const s = this.tsort[t]; const get = (this.tGetters[t] || {})[s && s.k];
@@ -1761,6 +1777,16 @@ function sentinel() {
         comp: { name: x => x.name, platform: x => x.platform, provider: x => x.provider, date: x => x.expires_at, left: x => x.expires_at },
         sec: { sev: m => ({ critical: 0, high: 1, medium: 2, low: 3 })[m.severity] ?? 4, site: m => m.site_name, ext: m => m.ext_name || m.ext_slug, cve: m => m.cve_id, cur: m => ver(m.site_version), fix: m => ver(m.version_fixed) },
         srvsites: { name: s => s.name, cms: s => s.cms, php: s => ver(s.php), state: s => !s.enabled ? 3 : (s.status === 'ok' ? (s.space_low || s.big_logs ? 1 : 2) : 0), upd: s => -(s.pending + s.failed * 10), size: s => s.size, conn: s => ver(s.connector), check: s => s.last_checked },
+        srv: {
+          name: g => String(g.title || g.key || '').toLowerCase(),
+          sites: g => g.counts.sites,
+          php: g => { const v = (g.php || []).map(p => { const m = String(p[0]).match(/(\d+)\.(\d+)/); return m ? +m[1] * 100 + +m[2] : null; }).filter(x => x !== null); return v.length ? Math.min(...v) : null; },   // la versione piu' vecchia in uso
+          load: g => { const l = this.srvLoad(g); return l && l.cores ? l.v / l.cores * 100 : null; },
+          ram: g => (g.load24 && g.load24.mem) ? g.load24.mem.usual : null,
+          disk: g => (g.disk && g.disk.total) ? 100 - g.disk.free / g.disk.total * 100 : null,
+          size: g => g.size ? g.size.total : null,
+          problems: g => g.sites_with_problems || 0,
+        },
         dom: { name: x => x.name, site: x => (x.site_names || [])[0] || '', exp: x => x.days ?? null, renew: x => ({ '': 0, yes: 1, no: 2 })[x.renew || ''] },
         plug: { name: p => p.name, status: p => ({ closed: 0, abandoned: 1, stale: 2, ok: 3, unchecked: 4 })[p.status], last: p => p.last_updated || p.closed_date, tested: p => ver(p.tested), ver: p => ver(p.versions[0]), sites: p => -p.sites_count },
       };
@@ -1846,7 +1872,7 @@ function sentinel() {
     get srvProblems() {
       const d = this.srvst.data; if (!d) return [];
       const out = [];
-      for (const g of d.groups) for (const p of g.problems) out.push({ ...p, group: g.label || g.key || 'Senza cartella', host: g.host });
+      for (const g of d.groups) for (const p of g.problems) out.push({ ...p, group: g.title || g.key || 'Senza cartella', host: g.host });
       const order = { offline: 0, space: 1, failed: 2, logs: 3, php: 4 };
       return out.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9) || a.site.localeCompare(b.site, 'it'));
     },

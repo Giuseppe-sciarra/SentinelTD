@@ -94,3 +94,30 @@ async def release(redis, server: str, slot: str | None, worked: bool) -> None:
                 await redis.set(f"srv:cool:{server}", "1", ex=pause)
     except Exception:  # noqa: BLE001
         pass
+
+
+# ---- macchine dietro lo stesso IP -----------------------------------------------------------
+# Due container (es. uno WordPress e uno Joomla) dietro lo stesso IP pubblico sono per il pannello
+# un server solo: carico, RAM e core si mescolano. Il connettore comunica il nome della macchina
+# (gethostname); se l'IP e' nell'elenco "diviso" (Impostazioni -> Server dei siti) ogni macchina
+# diventa un server a parte, con chiave "IP|nome macchina".
+
+def site_hostname(site) -> str:
+    """Nome della macchina su cui gira il sito, dalla diagnostica (vuoto se non ancora noto)."""
+    try:
+        return str((((site.diag or {}).get("server") or {}).get("hostname")) or "").strip()[:80]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def machine_key(ip: str, hostname: str, split: set) -> str:
+    """"IP|nome" se l'IP e' diviso e il nome si conosce, altrimenti l'IP."""
+    return f"{ip}|{hostname}" if ip in split and hostname else ip
+
+
+def key_ip(key: str) -> str:
+    return key.partition("|")[0]
+
+
+def key_host(key: str) -> str:
+    return key.partition("|")[2]

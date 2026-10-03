@@ -134,6 +134,9 @@ class Site(Base):
     # screenshot
     shot_path: Mapped[str] = mapped_column(String(255), default="")     # path relativo dentro /data/screenshots
     shot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shot_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ultima volta che lo shooter e' stato respinto dal sito (antibot, 403): vuoto se l'anteprima riesce
+    shot_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

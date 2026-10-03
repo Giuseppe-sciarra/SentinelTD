@@ -143,15 +143,18 @@ async def overview() -> dict:
     try:
         from redis.asyncio import from_url
         from .config import settings as _settings
-        from .servers import server_of
+        from .servers import key_host, machine_key, server_of, site_hostname
         from .settings_store import get_operational_settings
-        labels = (await get_operational_settings()).get("server_labels") or {}
+        _prefs = await get_operational_settings()
+        labels = _prefs.get("server_labels") or {}
+        split = set(_prefs.get("server_split") or [])
         r = from_url(_settings.REDIS_URL)
         try:
             for sid in {sid for _e, _n, sid in exts}:
                 x = site_rows.get(sid)
                 ip = (await server_of(r, x.url)) if x else ""
-                servers[sid] = labels.get(ip) or ip or ""
+                key = machine_key(ip, site_hostname(x), split) if x else ip
+                servers[sid] = labels.get(key) or key_host(key) or ip or ""
         finally:
             await r.aclose()
     except Exception:  # noqa: BLE001

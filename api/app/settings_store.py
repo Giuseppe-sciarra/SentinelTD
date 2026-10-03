@@ -26,6 +26,7 @@ DEFAULTS = {
     "auto_rollback": True,          # se la home si rompe dopo un aggiornamento, rimette le copie e blocca
     "server_labels": {},            # nome dato a ogni server (IP -> nome), mostrato ovunque accanto all'IP
     "server_limited": [],           # server (IP) con il freno; di base nessuno, si lavora come sempre
+    "server_split": [],             # IP da dividere per macchina (nome della macchina del connettore)
 }
 
 
@@ -63,12 +64,14 @@ def normalize(data: dict | None) -> dict:
     # (2.9.4 aveva l'elenco opposto, "server_unlimited": non si converte, il default e' cambiato)
     raw = src.get("server_limited", out["server_limited"])
     out["server_limited"] = sorted({str(x).strip() for x in (raw if isinstance(raw, list) else []) if str(x).strip()})[:200]
+    rawsplit = src.get("server_split", out["server_split"])
+    out["server_split"] = sorted({str(x).strip() for x in (rawsplit if isinstance(rawsplit, list) else []) if str(x).strip()})[:200]
     mode = str(src.get("email_report_mode", out["email_report_mode"]) or "").strip().lower()
     out["email_report_mode"] = mode if mode in ("site", "cycle") else "site"
     out["connector_auto_update"] = bool(src.get("connector_auto_update", out["connector_auto_update"]))
     out["auto_rollback"] = bool(src.get("auto_rollback", out["auto_rollback"]))
     labels = src.get("server_labels", out["server_labels"])
-    out["server_labels"] = {str(k)[:64]: str(v).strip()[:60] for k, v in (labels.items() if isinstance(labels, dict) else []) if str(v).strip()}
+    out["server_labels"] = {str(k)[:160]: str(v).strip()[:60] for k, v in (labels.items() if isinstance(labels, dict) else []) if str(v).strip()}
     if out["expiry_critical_days"] > out["expiry_warning_days"]:
         out["expiry_critical_days"] = out["expiry_warning_days"]
     return out

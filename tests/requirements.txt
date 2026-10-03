@@ -1,0 +1,11 @@
+arq==0.26.1
+redis==5.2.1
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+httpx==0.28.1
+pydantic==2.10.4
+pydantic-settings==2.7.0
+aiosmtplib==5.1.2
+jinja2==3.1.6
+aiosqlite==0.22.1
+fakeredis[lua]==2.39.0

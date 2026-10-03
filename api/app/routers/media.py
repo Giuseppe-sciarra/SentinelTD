@@ -1,5 +1,4 @@
 import os
-from datetime import timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..models import Site
 from ..auth import verify_token, require_auth
+from ..screenshot_schedule import enqueue_screenshot
 
 # Nessuna dependency globale: l'immagine si autentica col token in query string,
 # perche' <img>/background-image non possono inviare l'header Authorization.
@@ -55,8 +55,10 @@ async def shoot_now(site_id: int, s: AsyncSession = Depends(get_session)):
         from arq.connections import RedisSettings
         from ..config import settings
         pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await pool.enqueue_job("shoot_site", site.id)
-        await pool.close()
+        try:
+            await enqueue_screenshot(pool, site.id)
+        finally:
+            await pool.close()
     except Exception as ex:  # noqa: BLE001
         raise HTTPException(503, f"Coda non raggiungibile: {ex}")
     return {"ok": True, "queued": True}
@@ -83,10 +85,14 @@ async def shoot_bulk(payload: dict = Body(default={}), s: AsyncSession = Depends
         from arq.connections import RedisSettings
         from ..config import settings
         pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        for i, site in enumerate(rows):
-            await pool.enqueue_job("shoot_site", site.id, _defer_by=timedelta(seconds=i * 12))
-        await pool.close()
+        queued = 0
+        try:
+            for site in rows:
+                if await enqueue_screenshot(pool, site.id, delay_seconds=queued * 12) is not None:
+                    queued += 1
+        finally:
+            await pool.close()
     except Exception as ex:  # noqa: BLE001
         raise HTTPException(503, f"Coda non raggiungibile: {ex}")
 
-    return {"queued": len(rows), "eta_min": max(1, round(len(rows) * 12 / 60))}
+    return {"queued": queued, "eta_min": max(1, round(queued * 12 / 60)) if queued else 0}

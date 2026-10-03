@@ -16,6 +16,10 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   lento non ti sveglia di notte
 - Versioni di core, plugin, temi e traduzioni per ogni sito, tramite i connettori inclusi
 - **Anteprima visiva di ogni sito**, rigenerata a intervalli, con le miniature nell'elenco
+  (timer autonomo verificato ogni minuto; frequenza da Impostazioni, anche se la pagina non cambia).
+  I siti abilitati senza anteprima o con anteprima scaduta vengono accodati anche all'avvio.
+  Dopo un errore o un blocco antibot si ritenta all'intervallo impostato; l'ultima immagine
+  riuscita conserva la propria data. L'esecuzione può slittare per l'attesa in coda
 - Cartelle (clienti), tag, filtri rapidi, ricerca ed esportazione CSV
 - **Diagnostica dei siti**: spazio scrivibile misurato scrivendo davvero sul sito — non lo spazio
   libero del disco, che descrive il disco del server e ignora la quota dell'hosting — più cartella
@@ -128,7 +132,8 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   dei componenti più aggiornati
 - **Stato server**: una riga per server (o per cartella cliente) che si apre: siti, versioni PHP,
   **carico e RAM nelle ultime 24 ore** (valore di solito, picco con l'ora, grafico) e disco, peso con
-  l'andamento di 30 giorni, aggiornamenti, domini e problemi di ogni sito, con le spiegazioni ⓘ
+  l'andamento di 30 giorni, aggiornamenti, domini e problemi di ogni sito, con le spiegazioni ⓘ; i server dietro lo stesso IP (per esempio un container WordPress e uno Joomla)
+  si possono **dividere per macchina** dalle Impostazioni, ognuno con il suo carico, la sua RAM e il suo disco
 - **Il pannello si aggiorna da solo**: pallini, etichette e la pagina del sito aperto seguono lo
   stato reale entro pochi secondi, senza ricaricare. Ogni 6 secondi il browser chiede un'impronta
   del parco di una riga (un `304` vuoto se nulla è cambiato) e scarica la lista solo quando serve

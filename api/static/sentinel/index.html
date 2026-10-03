@@ -515,9 +515,9 @@
                       <td x-show="selMode" @click.stop><input type="checkbox" :checked="selIds.includes(s.id)" @change="toggleSel(s.id)"></td>
                       <td><span class="dot" :class="isOff(s)?'err':(hasUpd(s)?'warn':'ok')" :title="isOff(s)?(s.error||'offline'):(hasUpd(s)?'update disponibili':'ok')"></span></td>
                       <td><div class="site-cell">
-                        <span class="site-thumb" :title="s.shot_at ? 'Anteprima di '+ago(s.shot_at) : 'Anteprima non ancora disponibile'">
+                        <span class="site-thumb" :title="s.shot_blocked_at ? 'Il sito respinge l\'accesso automatico (antibot): anteprima non aggiornata' : (s.shot_at ? 'Anteprima di '+ago(s.shot_at) : 'Anteprima non ancora disponibile')">
                           <img x-show="s.shot_path" :src="thumbUrl(s)" loading="lazy" alt="" @error="$event.target.style.visibility='hidden'">
-                          <span class="ini" x-show="!s.shot_path" x-text="initials(s.name)"></span>
+                          <span class="ini" x-show="!s.shot_path" x-text="initials(s.name)"></span><i class="thumb-flag" x-show="s.shot_blocked_at" title="Anteprima bloccata dall'antibot del sito">🛡</i>
                         </span>
                         <span style="min-width:0">
                           <span class="name" x-text="s.name" translate="no"></span>
@@ -604,6 +604,7 @@
                       <span class="spinner" x-show="busy['shot'+detail.id]"></span> ⟳ Aggiorna
                     </button>
                   </div>
+                  <div class="shot-blocked" x-show="detail.shot_blocked_at">🛡 <b>Il sito respinge l'accesso automatico</b> (di solito un antibot, come quello di SiteGround o Cloudflare). <span x-show="detail.shot_path">Questa è l'ultima anteprima riuscita.</span> Per vederla aggiornata fai consentire l'IP del pannello nel firewall del sito.</div>
                   <a :href="detail.url" target="_blank" x-show="detail.shot_path" class="shot-wrap">
                     <img :src="shotUrl(detail)" :alt="'Anteprima '+detail.name" loading="lazy" @error="onShotError(detail, $event.target)">
                   </a>
@@ -915,7 +916,7 @@
             <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
               <div style="flex:1;min-width:280px">
                 <h1 class="page-title">Stato server</h1>
-                <div class="page-sub">Ogni server, o ogni cartella cliente, su una riga: clicca per aprirla e vedere tutti i dettagli. Carico, RAM e disco vengono dai controlli dei siti, il peso dalla diagnostica notturna; passa sopra alle ⓘ per sapere cosa significa ogni valore.</div>
+                <div class="page-sub">Ogni server, o ogni cartella cliente, su una riga: clicca per aprirla e vedere tutti i dettagli. Carico, RAM e disco vengono dai controlli dei siti, il peso dalla diagnostica notturna; passa sopra alle ⓘ per sapere cosa significa ogni valore. Clicca sul titolo di una colonna per ordinare.</div>
               </div>
               <div class="seg"><button :class="srvst.by==='server' ? 'on' : ''" @click="srvSetBy('server')">Per server</button><button :class="srvst.by==='folder' ? 'on' : ''" @click="srvSetBy('folder')">Per cartella cliente</button></div>
             </div>
@@ -944,17 +945,17 @@
             <template x-if="srvst.data">
             <div class="srvx-list">
               <div class="srvx-cols">
-                <span></span><span class="hint-h" title="Il server dove stanno i siti, riconosciuto dall'IP del dominio. Server con lo stesso nome (Impostazioni → Server dei siti) sono un gruppo solo.">Server <i>ⓘ</i></span><span class="hint-h" title="Siti monitorati su questo server, divisi tra WordPress e Joomla.">Siti <i>ⓘ</i></span><span class="hint-h" title="Versioni di PHP usate dai siti, con quanti siti per versione. In rosso quelle non più supportate.">PHP <i>ⓘ</i></span><span class="hint-h" title="Quanto lavora di solito il server nelle ultime 24 ore, rispetto a quello che può fare. Sotto il 70% è tranquillo, dal 70 al 150% è impegnato, oltre il 150% è sovraccarico e i siti rallentano. Aperto il server vedi adesso, picco e grafico.">Carico <i>ⓘ</i></span><span class="hint-h" title="Quanta memoria (RAM) del server è occupata dai programmi, di solito, nelle ultime 24 ore. Non conta la memoria che il sistema usa come cache e libera subito. Sotto il 75% è a posto, 75–90% è alta, oltre il 90% è piena e il server rallenta.">RAM <i>ⓘ</i></span><span class="hint-h" title="Spazio usato sul disco del server. Su un hosting condiviso è il disco di tutti, non la quota del singolo account.">Disco <i>ⓘ</i></span><span class="hint-h" title="Peso totale dei siti (file e database) e quanto è cambiato negli ultimi 30 giorni.">Peso · 30 giorni <i>ⓘ</i></span><span class="hint-h" title="Siti con qualcosa da guardare, per tipo: offline, spazio quasi esaurito, aggiornamenti falliti, PHP fuori supporto, dominio scaduto. Apri il server per sapere quali.">Problemi <i>ⓘ</i></span>
+                <span></span><span class="hint-h srvx-sort" @click="tSort('srv','name')" title="Il server dove stanno i siti, riconosciuto dall'IP del dominio. Server con lo stesso nome (Impostazioni → Server dei siti) sono un gruppo solo.">Server<span x-text="tMark('srv','name')"></span> <i>ⓘ</i></span><span class="hint-h srvx-sort" @click="tSort('srv','sites',true)" title="Siti monitorati su questo server, divisi tra WordPress e Joomla.">Siti<span x-text="tMark('srv','sites')"></span> <i>ⓘ</i></span><span class="hint-h srvx-sort" @click="tSort('srv','php')" title="Versioni di PHP usate dai siti, con quanti siti per versione. In rosso quelle non più supportate.">PHP<span x-text="tMark('srv','php')"></span> <i>ⓘ</i></span><span class="hint-h srvx-sort" @click="tSort('srv','load',true)" title="Quanto lavora di solito il server nelle ultime 24 ore, rispetto a quello che può fare. Sotto il 70% è tranquillo, dal 70 al 150% è impegnato, oltre il 150% è sovraccarico e i siti rallentano. Aperto il server vedi adesso, picco e grafico.">Carico<span x-text="tMark('srv','load')"></span> <i>ⓘ</i></span><span class="hint-h srvx-sort" @click="tSort('srv','ram',true)" title="Quanta memoria (RAM) del server è occupata dai programmi, di solito, nelle ultime 24 ore. Non conta la memoria che il sistema usa come cache e libera subito. Sotto il 75% è a posto, 75–90% è alta, oltre il 90% è piena e il server rallenta.">RAM<span x-text="tMark('srv','ram')"></span> <i>ⓘ</i></span><span class="hint-h srvx-sort" @click="tSort('srv','disk',true)" title="Spazio usato sul disco del server. Su un hosting condiviso è il disco di tutti, non la quota del singolo account.">Disco<span x-text="tMark('srv','disk')"></span> <i>ⓘ</i></span><span class="hint-h srvx-sort" @click="tSort('srv','size',true)" title="Peso totale dei siti (file e database) e quanto è cambiato negli ultimi 30 giorni.">Peso · 30 giorni<span x-text="tMark('srv','size')"></span> <i>ⓘ</i></span><span class="hint-h srvx-sort" @click="tSort('srv','problems',true)" title="Siti con qualcosa da guardare, per tipo: offline, spazio quasi esaurito, aggiornamenti falliti, PHP fuori supporto, dominio scaduto. Apri il server per sapere quali.">Problemi<span x-text="tMark('srv','problems')"></span> <i>ⓘ</i></span>
               </div>
-              <template x-for="g in srvst.data.groups" :key="srvst.by + g.key">
+              <template x-for="g in tSorted('srv', srvst.data.groups)" :key="srvst.by + g.key">
                 <div class="srvx" :class="[srvst.open[g.key] ? 'open' : '', g.sites_with_problems ? 'bad' : '']">
                   <!-- riga chiusa: colonne allineate tra tutti i server -->
                   <div class="srvx-head" @click="srvst.open = { ...srvst.open, [g.key]: !srvst.open[g.key] }">
                     <span class="srvx-caret" x-text="srvst.open[g.key] ? '▾' : '▸'"></span>
                     <div class="srvx-name">
-                      <b x-text="g.by==='server' ? (g.label || g.key) : (g.key || 'Senza cartella')" translate="no"></b>
-                      <div class="small mut mono" x-show="g.by==='server' && g.label" x-text="(g.ips || []).map(i => i.ip).join(' · ')" translate="no"></div>
-                      <div class="small mut" x-show="g.by!=='server' || !g.label" x-text="(g.ips || []).map(i => i.host).filter(Boolean).join(' · ')" translate="no"></div>
+                      <b x-text="g.by==='server' ? (g.title || g.key) : (g.key || 'Senza cartella')" translate="no"></b>
+                      <div class="small mut mono" x-show="g.by==='server' && g.named" x-text="(g.ips || []).map(i => i.ip).join(' · ')" translate="no"></div>
+                      <div class="small mut" x-show="g.by!=='server' || !g.named" x-text="(g.ips || []).map(i => i.host).filter(Boolean).join(' · ')" translate="no"></div>
                     </div>
                     <div><b x-text="g.counts.sites"></b> <span class="small mut" x-text="g.counts.joomla && g.counts.wp ? g.counts.wp + ' WordPress · ' + g.counts.joomla + ' Joomla' : (g.counts.joomla ? 'Joomla' : 'WordPress')"></span></div>
                     <div class="chips"><template x-for="p in g.php" :key="g.key+'hp'+p[0]"><span class="chip small" :class="phpState(p[0]).cls === 'err' ? 'err' : ''" :title="'PHP ' + p[0] + ': ' + p[1] + ' ' + pl(p[1], 'sito', 'siti') + (phpState(p[0]).label ? ' · ' + phpState(p[0]).label : '')"><span x-text="p[0]"></span>&nbsp;<span class="mut" x-text="'×' + p[1]"></span></span></template></div>
@@ -1616,7 +1617,7 @@
                     <div class="field"><label>Soglia gialla</label><div class="input-suffix"><input class="input" type="number" min="1" x-model.number="prefs.expiry_warning_days"><span>giorni</span></div></div>
                     <div class="field"><label>Soglia rossa</label><div class="input-suffix"><input class="input" type="number" min="1" x-model.number="prefs.expiry_critical_days"><span>giorni</span></div></div>
                   </div>
-                  <div class="row" style="margin-top:8px"><button class="btn primary" :disabled="!!(prefs.busy)" @click="savePrefs()">Salva impostazioni scadenze</button><span class="msg ok" style="margin:0" x-show="prefs.msg" x-text="prefs.msg"></span><span class="msg err" style="margin:0" x-show="prefs.err" x-text="prefs.err"></span></div>
+                  <div class="row" style="margin-top:8px"><button class="btn primary" :disabled="!!(prefs.busy)" @click="savePrefs()">Salva impostazioni</button><span class="msg ok" style="margin:0" x-show="prefs.msg" x-text="prefs.msg"></span><span class="msg err" style="margin:0" x-show="prefs.err" x-text="prefs.err"></span></div>
                 </div>
                 <div class="card" style="margin-top:16px">
                   <h3>Branding</h3>
@@ -1750,6 +1751,21 @@
                         <span class="srv-num"><b x-text="sv.sites"></b> <span x-text="pl(sv.sites, 'sito', 'siti')"></span></span>
                         <button class="srv-more" @click="srvOpen[sv.server] = !srvOpen[sv.server]" x-text="srvOpen[sv.server] ? 'Nascondi i siti' : 'Mostra i siti'"></button>
                         <div class="srv-names" x-show="srvOpen[sv.server]" x-text="sv.names.join(' · ')" translate="no"></div>
+                        <div class="srv-split" x-show="(sv.machines || []).length > 1">
+                          <div class="row" style="gap:12px;align-items:center"><label class="check"><input type="checkbox" :checked="isSplit(sv.server)" @change="toggleSplit(sv.server)"> <b>Dividi per macchina</b></label><span class="hint-h hint-wide small" title="• È tutto o niente per IP. La spunta divide tutte le macchine di quell'IP, non puoi staccarne una sola. Se ne vuoi tenere insieme due su tre, dai a quelle due lo stesso nome: diventano un gruppo solo (per esempio “Interni” ne unisce due e la terza resta a parte). Però le loro misure si mescolano di nuovo, che era il problema di partenza, quindi ha senso solo se sono davvero la stessa cosa. • Le macchine si riconoscono dal nome macchina (hostname). Se hai clonato dei container e hanno tutti lo stesso nome, il pannello non può distinguerli e li vede come una macchina sola. In quel caso basta dare nomi diversi alle macchine dal sistema. • Il nome si legge dalla diagnostica notturna: un sito mai diagnosticato resta da solo sull'IP finché non arriva.">Come funziona <i>ⓘ</i></span></div>
+                          <div class="small mut"><span>Dietro questo IP ci sono</span> <b x-text="sv.machines.length"></b> <span>macchine diverse, riconosciute dal loro nome:</span> <span translate="no" x-text="sv.machines.map(m => m.hostname + ' (' + m.sites + ')').join(' · ')"></span></div>
+                          <div class="small mut" x-show="!isSplit(sv.server)">Finché sono insieme le loro statistiche (CPU, RAM, disco) si mescolano e risultano sbagliate. Divise, ognuna ha le sue e il suo nome.</div>
+                          <div class="srv-machines" x-show="isSplit(sv.server)">
+                            <template x-for="m in sv.machines" :key="sv.server + '|' + m.hostname">
+                              <div class="srv-machine">
+                                <input class="input srv-name" list="srv-labels" :value="machineName(sv.server, m.hostname)" @change="setSrvLabel(sv.server + '|' + m.hostname, $event.target.value)" placeholder="Dai un nome">
+                                <span class="mono small" x-text="m.hostname" translate="no"></span>
+                                <span class="small mut"><b x-text="m.sites"></b> <span x-text="pl(m.sites, 'sito', 'siti')"></span></span>
+                              </div>
+                            </template>
+                            <div class="small mut" x-show="sv.unknown"><b x-text="sv.unknown"></b> <span x-text="pl(sv.unknown, 'sito', 'siti')"></span> <span>senza il nome della macchina, che si legge dalla diagnostica notturna: restano sull'IP finché non arriva.</span></div>
+                          </div>
+                        </div>
                       </div>
                     </template>
                   </div>
@@ -2010,7 +2026,7 @@
                   <input type="checkbox" :checked="drep.ids.includes(s.id)" @change="drepToggleSite(s.id)">
                   <span class="site-thumb bk-thumb">
                     <img x-show="s.shot_path" :src="thumbUrl(s)" loading="lazy" alt="" @error="$event.target.style.visibility='hidden'">
-                    <span class="ini" x-show="!s.shot_path" x-text="initials(s.name)"></span>
+                    <span class="ini" x-show="!s.shot_path" x-text="initials(s.name)"></span><i class="thumb-flag" x-show="s.shot_blocked_at" title="Anteprima bloccata dall'antibot del sito">🛡</i>
                   </span>
                   <span class="bk-site-txt"><span class="name" x-text="s.name" translate="no"></span><span class="url" x-text="s.url.replace(/^https?:\/\//,'')" translate="no"></span></span>
                   <span class="cms" :class="s.cms" x-text="s.cms==='wp'?'WP':'J'"></span>
@@ -2170,7 +2186,7 @@
                   <input type="checkbox" :checked="inst.sel.includes(s.id)" @change="instToggleSite(s.id)">
                   <span class="site-thumb bk-thumb">
                     <img x-show="s.shot_path" :src="thumbUrl(s)" loading="lazy" alt="" @error="$event.target.style.visibility='hidden'">
-                    <span class="ini" x-show="!s.shot_path" x-text="initials(s.name)"></span>
+                    <span class="ini" x-show="!s.shot_path" x-text="initials(s.name)"></span><i class="thumb-flag" x-show="s.shot_blocked_at" title="Anteprima bloccata dall'antibot del sito">🛡</i>
                   </span>
                   <span class="bk-site-txt"><span class="name" x-text="s.name" translate="no"></span><span class="url" x-text="s.url.replace(/^https?:\/\//,'')" translate="no"></span></span>
                   <span class="mono small mut" x-show="inst.mode==='remove'" x-text="instSiteVersion(s)"></span>

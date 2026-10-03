@@ -73,6 +73,8 @@ class SiteOut(BaseModel):
     domain_check_error: str
     shot_path: str
     shot_at: datetime | None
+    shot_attempted_at: datetime | None = None
+    shot_blocked_at: datetime | None = None
 
 
 class SiteDetailOut(SiteOut):

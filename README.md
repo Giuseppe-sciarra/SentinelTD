@@ -16,6 +16,10 @@ Your server, your data, your branding.
   server does not wake you up
 - Core, plugin, theme and translation versions for every site, through the included connectors
 - Visual **preview of each site**, refreshed on a schedule, with thumbnails in the list
+  (independent timer checked every minute; frequency from Settings, even for unchanged pages).
+  Enabled sites with missing or overdue previews are queued at startup too. Failed or blocked
+  attempts retry after the configured interval; the last good image retains its real date.
+  Actual execution may be delayed by the queue
 - Folders (clients), tags, quick filters, search and CSV export
 - **Site diagnostics**: writable space measured by really writing to the site — not the free
   disk figure, which describes the host's disk and ignores the account quota — plus temporary
@@ -120,7 +124,8 @@ Your server, your data, your branding.
   sites and components
 - **Server status**: one row per server (or per client folder) that opens: sites, PHP versions,
   **load and RAM over the last 24 hours** (usual value, peak with its time, chart) and disk, size with
-  its 30-day trend, updates, domains and the problems of each site, with ⓘ explanations
+  its 30-day trend, updates, domains and the problems of each site, with ⓘ explanations; servers behind the same IP (say a WordPress and a Joomla container) can be
+  **split by machine** in Settings, each with its own load, RAM and disk
 - **The panel updates itself**: dots, badges and the open site page follow the real state within
   a few seconds, without reloading. Every 6 seconds the browser asks for a one-line fingerprint
   of the fleet (an empty `304` when nothing changed) and downloads the list only when it did

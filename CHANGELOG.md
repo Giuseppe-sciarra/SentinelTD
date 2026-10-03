@@ -1,5 +1,85 @@
 # Changelog
 
+## 2.28.1
+
+### Fixed
+- The existing **preview refresh interval** in Settings now drives a dedicated scheduler,
+  checked every minute and at worker startup. It no longer depends on site polling or a
+  working connector. Changed settings apply without restarting; unchanged pages are captured too.
+- Preview jobs share a stable per-site queue id across the scheduler and manual queue commands.
+  Already queued/running jobs are not duplicated; completed screenshot jobs have no result
+  retention cooldown, so an immediate manual refresh remains possible.
+- `sites.shot_attempted_at` records each attempt before contacting the shooter. Failed or
+  blocked captures retry after the configured interval, preserving the previous good image
+  and its real timestamp. New jobs are staggered by 12 seconds to limit shooter contention.
+- Screenshot success, scheduling, failures and anti-bot refusals are recorded in worker logs.
+  The new nullable database column is migrated automatically and exposed by the site API.
+
+## 2.28.0
+
+### Fixed
+- **Previews and homepage checks of sites behind an anti-bot** (seen on a SiteGround site: `403
+  Forbidden` / the *Robot Challenge Screen*). Not a user-agent block alone: SiteGround answers
+  `202` with a verification page (`sg-captcha: challenge`) that a real browser passes after a few
+  seconds, while the shooter photographed it at once, and its browser signature was an
+  incomplete `Chrome/131.0 … SentinelTD/1.0` that no real Chrome sends. Shooter now:
+  - presents itself as a real Chrome — the browser's real full version, no `SentinelTD` or
+    `HeadlessChrome`, Italian language and time zone, `navigator.webdriver` not declared,
+    `--disable-blink-features=AutomationControlled` (`SHOT_USER_AGENT` to force another one)
+  - waits for a verification screen (SiteGround, Cloudflare and similar) to pass, up to
+    `SHOT_CHALLENGE_WAIT_MS` (15 s) per attempt, then takes the shot; the final status is the page's
+    own, not the initial 202
+  - tries a second time from scratch if it is still refused
+  - keeps the **pass** (the cookie the site hands out) in `SHOTS_DIR/.state/`, only for sites
+    that actually showed a verification, so the next previews and before/after shots do not
+    repeat it
+  - no longer launches Chrome with site isolation disabled (not what a real Chrome does); iframes
+    of other sites still render
+- If the site refuses anyway: the **previous good preview is kept** instead of being replaced
+  by an error page, the site is marked (`sites.shot_blocked_at`: a shield on the thumbnail and a
+  note on the site page: have the panel's IP allowed in the site's firewall), and the manual
+  preview says so. The homepage check treats a refusal as **"not verifiable", never as a break**:
+  it can no longer trigger the automatic rollback. A real 5xx still does
+- Timeouts of the preview calls raised (35 s and 60 s → 120 s), which the verification wait needs
+
+## 2.27.2
+
+### Added
+- *Split by machine* has a **How it works** explanation (ⓘ) with the three things to know: it is
+  all or nothing per IP (give the same name to machines you want to keep together, whose
+  measurements then mix again), machines are told apart by their hostname (cloned containers
+  with the same name look like one), and the name is read by the nightly diagnostics. The ⓘ
+  boxes show a list when the text has `•` separators, and long ones (`hint-wide`) are wider
+
+### Fixed
+- The ⓘ explanation box could make the page jump when it opened, and close at once: it was
+  positioned inside the page, so filling it stretched the document for an instant and, with the
+  page scrolled to the bottom, the browser moved it by a few pixels, taking the label from
+  under the mouse. It is now fixed to the window (never changes the page length) and always
+  kept inside the screen
+
+## 2.27.1
+
+### Added
+- Server status: **sortable columns** (click the title, ▲▼) — server name, sites, PHP (the oldest
+  version in use first), load, RAM, disk use, size, problems — and **by server name, A to Z, by
+  default**. Number columns put the highest values first on the first click
+
+## 2.27.0
+
+### Added
+- **Split a server by machine.** Servers are recognised by the IP of the site's domain, so two
+  machines behind the same public IP (a WordPress container and a Joomla container, say) were
+  one server: their load samples, cores and RAM mixed, and the page showed half of the real
+  figures (the highest core count and the RAM of whichever sample came last). In *Settings →
+  Site servers*, an IP whose sites report more than one machine name (the hostname the connector
+  sends) now shows **Split by machine**; split, each machine is a server of its own everywhere —
+  Server status (title = the name you give it, or the machine name), the reports' *Site status*
+  (*name (IP)*) and the abandoned plugins — with its own load, RAM, disk, cores and name.
+  Sites whose machine name is not known yet (read by the nightly diagnostics) stay on the IP
+  meanwhile. The brake stays per IP, as the updates are limited by what answers on that address.
+  New setting `server_split`; label keys can now be `IP|machine` (up to 160 characters)
+
 ## 2.26.0
 
 ### Added

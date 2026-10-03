@@ -411,19 +411,30 @@ async def screenshot_now(site_id: int, s: AsyncSession = Depends(get_session)):
     site = await s.get(Site, site_id)
     if not site:
         raise HTTPException(404)
+    blocked = False
+    from datetime import datetime, timezone
+    site.shot_attempted_at = datetime.now(timezone.utc)
+    await s.commit()
     try:
-        async with httpx.AsyncClient(timeout=35.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:   # video e verifiche antibot: serve margine
             r = await client.post(f"{settings.SHOOTER_URL}/shot", json={"url": site.url, "site_id": site.id})
             r.raise_for_status()
-            from datetime import datetime, timezone
-            site.shot_path = r.json()["path"]
-            site.shot_at = datetime.now(timezone.utc)
+            res = r.json()
+            now = datetime.now(timezone.utc)
+            blocked = bool(res.get("blocked"))
+            site.shot_blocked_at = now if blocked else None
+            if not blocked and not res.get("kept_previous"):
+                site.shot_path = res["path"]
+                site.shot_at = now
             await s.commit()
             await s.refresh(site)
     except httpx.TimeoutException:
         raise HTTPException(504, "Shooter timeout: il sito ci mette troppo a rispondere")
     except Exception as ex:  # noqa: BLE001
         raise HTTPException(502, f"Shooter error: {ex}")
+    if blocked:
+        raise HTTPException(409, "Il sito respinge l'accesso automatico (di solito un antibot): l'anteprima non è stata aggiornata. "
+                                 "Consenti l'IP del pannello nel firewall del sito.")
     return site
 
 

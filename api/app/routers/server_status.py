@@ -16,6 +16,7 @@ from ..models import Extension, Site, SiteSize, UpdateMonthly
 from ..servers import server_of
 from ..settings_store import get_operational_settings
 from ..problems import failed_by_site, server_label, site_problems
+from ..servers import key_host, key_ip, machine_key, site_hostname
 
 router = APIRouter(prefix="/api/servers", tags=["servers"], dependencies=[Depends(require_auth)])
 
@@ -68,6 +69,7 @@ async def overview(by: str = Query("server"), s: AsyncSession = Depends(get_sess
     prefs = await get_operational_settings()
     limited = set(prefs.get("server_limited") or [])
     labels = prefs.get("server_labels") or {}
+    split = set(prefs.get("server_split") or [])
     fails = await failed_by_site(s)
 
     # --- per sito: aggiornamenti, fallimenti, blocchi
@@ -96,13 +98,16 @@ async def overview(by: str = Query("server"), s: AsyncSession = Depends(get_sess
     r = from_url(settings.REDIS_URL)
     try:
         site_ip: dict[int, str] = {}
+        site_mkey: dict[int, str] = {}
         if by == "server":
             ips = await asyncio.gather(*(server_of(r, x.url) for x in sites))
             ips = [k or "?" for k in ips]
             site_ip = {x.id: ip for x, ip in zip(sites, ips)}
             names = dict(zip(set(ips), await asyncio.gather(*(_ptr(r, k) for k in set(ips)))))
             # server con lo STESSO nome (Impostazioni) = un gruppo solo; senza nome, uno per IP
-            keys = [labels.get(ip) or ip for ip in ips]
+            # IP diviso per macchina: "IP|nome macchina"; il nome dato in Impostazioni vale per la macchina
+            site_mkey = {x.id: machine_key(ip, site_hostname(x), split) for x, ip in zip(sites, ips)}
+            keys = [labels.get(site_mkey[x.id]) or site_mkey[x.id] for x in sites]
         else:
             keys = []
             for x in sites:
@@ -190,6 +195,10 @@ async def overview(by: str = Query("server"), s: AsyncSession = Depends(get_sess
         out.append({
             "key": key, "braked": g["braked"], "by": by,
             "label": key if by == "server" and key in set(labels.values()) else "",
+            # titolo: il nome dato, altrimenti il nome della macchina (se diviso), altrimenti l'IP
+            "title": key if (by == "server" and key in set(labels.values())) else (key_host(key) or key),
+            "machine": key_host(key) if (by == "server" and key not in set(labels.values())) else "",
+            "named": by == "server" and (key in set(labels.values()) or "|" in key),
             "ips": [{"ip": i, "host": h} for i, h in sorted(g["ips"].items())],
             "host": " · ".join(h for h in g["ips"].values() if h) if len(g["ips"]) == 1 else "",
             "folders": sorted(g["folders"].items(), key=lambda t: (-t[1], t[0].lower())),

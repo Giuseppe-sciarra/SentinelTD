@@ -1,10 +1,11 @@
 """
 Worker arq. Due responsabilità:
- - poll_site(site_id): interroga il connettore e salva stato + accoda screenshot se serve
+ - poll_site(site_id): interroga il connettore e salva stato
  - tick(): ogni SCHEDULER_TICK_MINUTES guarda quali siti vanno pollati e accoda i job
+ - screenshot_tick(): ogni minuto accoda le anteprime scadute, indipendentemente dai poll
  - shoot_site(site_id): chiede al shooter uno screenshot e salva path/timestamp
 
-Niente loop busy: il "cron" è un solo cron job (tick) che fa da dispatcher.
+Niente loop busy: i cron fanno da dispatcher.
 """
 from datetime import datetime, timezone, timedelta
 import asyncio
@@ -17,6 +18,7 @@ import time
 from urllib.parse import urlparse
 import httpx
 from arq import cron
+from arq.worker import func as arq_func
 from arq.connections import RedisSettings
 from sqlalchemy import select, delete, func
 
@@ -29,6 +31,7 @@ from .servers import server_of, acquire as srv_acquire, release as srv_release
 from .diagnostics import store_diagnostics, store_diag_error, prune_sizes
 from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
+from .screenshot_schedule import screenshot_due, enqueue_screenshot
 from .telegram import send_telegram
 from .i18n import DEFAULT_LANGUAGE, t
 from . import security
@@ -687,18 +690,31 @@ async def poll_site(ctx, site_id: int, force: bool = False):
             site.offline_notified = False
             await s.commit()
 
-        # screenshot scaduto? accoda (frequenza dalle impostazioni, fallback .env)
+
+async def screenshot_tick(ctx):
+    """Timer autonomo: rilegge ogni minuto l'intervallo salvato nel pannello."""
+    prefs = await get_operational_settings()
+    hours = max(1, min(720, int(prefs["screenshot_every_hours"])))
+    now = datetime.now(timezone.utc)
+    async with SessionLocal() as s:
+        # Solo le colonne utili: niente caricamento delle estensioni dei siti.
+        rows = (await s.execute(
+            select(Site.id, Site.shot_at, Site.shot_attempted_at)
+            .where(Site.enabled == True)  # noqa: E712
+            .order_by(func.coalesce(Site.shot_attempted_at, Site.shot_at).asc().nullsfirst(), Site.id)
+        )).all()
+    queued = 0
+    for site_id, shot_at, attempted_at in rows:
+        if not screenshot_due(shot_at, attempted_at, now, hours):
+            continue
         try:
-            from .settings_store import get_operational_settings
-            _shot_hours = int((await get_operational_settings()).get("screenshot_every_hours") or settings.SCREENSHOT_EVERY_HOURS)
+            job = await enqueue_screenshot(ctx["redis"], site_id, delay_seconds=queued * 12)
+            if job is not None:
+                queued += 1
         except Exception:  # noqa: BLE001
-            _shot_hours = settings.SCREENSHOT_EVERY_HOURS
-        need_shot = (
-            not site.shot_at
-            or site.shot_at < datetime.now(timezone.utc) - timedelta(hours=_shot_hours)
-        )
-        if need_shot:
-            await ctx["redis"].enqueue_job("shoot_site", site_id)
+            log.exception("Accodamento screenshot fallito (id=%s)", site_id)
+    if queued:
+        log.info("ANTEPRIME: accodati %d screenshot (intervallo %d ore)", queued, hours)
 
 
 async def shoot_site(ctx, site_id: int):
@@ -706,12 +722,27 @@ async def shoot_site(ctx, site_id: int):
         site = await s.get(Site, site_id)
         if not site or not site.enabled:
             return
+        # Persistito prima della chiamata HTTP, anche se fallisce o il worker
+        # riparte. Non modifica la data dell'ultima immagine riuscita.
+        site.shot_attempted_at = datetime.now(timezone.utc)
+        await s.commit()
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:   # lo shooter attende i video: serve margine
+            async with httpx.AsyncClient(timeout=120.0) as client:   # video e verifiche antibot: serve margine
                 r = await client.post(f"{settings.SHOOTER_URL}/shot", json={"url": site.url, "site_id": site.id})
                 r.raise_for_status()
-                site.shot_path = r.json()["path"]
-                site.shot_at = datetime.now(timezone.utc)
+                res = r.json()
+                now = datetime.now(timezone.utc)
+                if res.get("blocked"):
+                    # il sito respinge l'accesso automatico (antibot, 403): lo segno, cosi' si vede
+                    site.shot_blocked_at = now
+                    log.warning("ANTEPRIMA RESPINTA DAL SITO '%s' (id=%s): probabile antibot, consenti l'IP del pannello",
+                                site.name, site.id)
+                else:
+                    site.shot_blocked_at = None
+                if not res.get("blocked") and not res.get("kept_previous"):
+                    site.shot_path = res["path"]
+                    site.shot_at = now
+                    log.info("SCREENSHOT OK '%s' (id=%s)", site.name, site.id)
                 await s.commit()
         except Exception as ex:  # noqa: BLE001
             # WARNING e non info: a livello info il messaggio veniva filtrato dai log del
@@ -793,7 +824,13 @@ def _visual_verdict(before: dict | None, after: dict | None, cmp: dict | None) -
     Gli errori contano solo se NON c'erano gia' prima dell'aggiornamento."""
     if not after:
         return {"status": "na", "message": "controllo visivo non disponibile"}
+    if after.get("blocked"):
+        # il sito ha respinto l'accesso automatico (antibot, 403): non si puo' giudicare. MAI "ko":
+        # un "ko" fa partire il ripristino automatico, e qui non e' il sito che si e' rotto
+        return {"status": "na", "message": "controllo della home non possibile: il sito respinge l'accesso automatico (antibot)"}
     b = before or {}
+    if b.get("blocked"):
+        before = None   # il "prima" era una pagina di verifica o di blocco: non si confronta con quella
     if after.get("error_text") and not b.get("error_text"):
         return {"status": "ko", "message": "errore in home dopo l'aggiornamento: «%s»" % after["error_text"][:120]}
     sa, sb = int(after.get("http_status") or 0), int(b.get("http_status") or 0)
@@ -2230,11 +2267,12 @@ async def diag_all(ctx):
 
 
 class WorkerSettings:
-    functions = [poll_site, shoot_site, update_site, cycle_summary, mass_update_now,
+    functions = [poll_site, arq_func(shoot_site, keep_result=0), update_site, cycle_summary, mass_update_now,
                  mass_update_selected, security_scan, vendor_scan, domain_expiry_scan, monthly_report,
                  diag_site, diag_all, connector_rollout, plugin_catalog_scan, install_site]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
+        cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
         cron(auto_update_cycle, minute={0}),   # ogni ora, al minuto 0 (installa i pending)
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30
