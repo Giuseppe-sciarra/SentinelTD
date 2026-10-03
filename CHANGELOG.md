@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.24.1
+
+### Fixed
+- **Homepage check: false "changed" on sites with a video header or a slider.** The shooter
+  started background videos to get a frame and shot a moment later — a different frame before
+  and after the update — and sliders changed slide by themselves, so the pixel comparison saw a
+  change that was not there. Now (shooter):
+  - videos are paused and moved to the **same second** (`SHOT_VIDEO_FRAME_AT`, 0.5 s) before
+    the shot, waiting for the frame to be drawn, so before and after show the same frame
+  - the areas that change by themselves — `video`, `iframe` (YouTube, maps), `canvas` and the
+    common sliders (YOOtheme slideshow/slider, Elementor slides and background video/slideshow,
+    Swiper, Slick, Owl, Flexslider, Revolution, Smart Slider, MetaSlider, Splide) — are saved
+    with each snapshot (`site_{id}_{before|after}.json`) and **left out of the comparison**; the
+    percentage is computed on the rest of the homepage. Errors, blank page and 5xx are checked
+    as before. The report says when video and sliders were excluded, with how much of the
+    homepage when it is most of it
+
 ## 2.24.0
 
 ### Fixed

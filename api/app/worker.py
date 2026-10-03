@@ -804,9 +804,12 @@ def _visual_verdict(before: dict | None, after: dict | None, cmp: dict | None) -
     if not cmp or not before:
         return {"status": "ok", "message": "home raggiungibile (confronto con il prima non disponibile)"}
     diff = float(cmp.get("diff") or 0)
+    masked = float(cmp.get("masked") or 0)
+    # video e slider sono esclusi dal confronto (cambiano da soli): si dice quando coprono quasi tutto
+    note = f" (video e slider esclusi: {masked:g}% della home)" if masked >= 80 else (" (video e slider esclusi)" if masked > 0 else "")
     if diff >= VISUAL_DIFF_WARN:
-        return {"status": "warn", "diff": diff, "message": f"la home è cambiata del {diff:g}%: controlla che sia tutto a posto"}
-    return {"status": "ok", "diff": diff, "message": f"home invariata (differenza {diff:g}%)"}
+        return {"status": "warn", "diff": diff, "message": f"la home è cambiata del {diff:g}%{note}: controlla che sia tutto a posto"}
+    return {"status": "ok", "diff": diff, "message": f"home invariata (differenza {diff:g}%){note}"}
 
 
 def _visual_attachments(site: Site) -> list:

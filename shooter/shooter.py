@@ -28,6 +28,17 @@ THUMB_W = int(os.getenv("SHOT_THUMB_WIDTH", "360"))      # miniatura per la list
 NAV_TIMEOUT = int(os.getenv("SHOT_TIMEOUT_MS", "25000"))
 SETTLE_MS = int(os.getenv("SHOT_SETTLE_MS", "1800"))     # respiro prima dello scatto
 VIDEO_WAIT_MS = int(os.getenv("SHOT_VIDEO_WAIT_MS", "6000"))
+VIDEO_FRAME_AT = float(os.getenv("SHOT_VIDEO_FRAME_AT", "0.5"))   # secondo del video fotografato, uguale prima e dopo
+
+# Zone che cambiano da sole: escluse dal confronto prima/dopo, altrimenti un video o uno
+# slider risultano "cambiamento" a ogni aggiornamento
+DYNAMIC_SELECTORS = ", ".join([
+    "video", "iframe", "embed", "object", "canvas",
+    "[uk-slideshow]", "[data-uk-slideshow]", ".uk-slideshow", "[uk-slider]", "[data-uk-slider]", ".uk-slider",
+    ".swiper", ".swiper-container", ".slick-slider", ".owl-carousel", ".flexslider", ".carousel",
+    ".elementor-slides", ".elementor-widget-slides", ".elementor-background-video-container", ".elementor-background-slideshow",
+    ".rev_slider_wrapper", "rs-module-wrap", "sr7-module", ".n2-section-smartslider", ".metaslider", ".splide",
+])
 
 app = FastAPI(title="Sentinel shooter")
 
@@ -81,6 +92,7 @@ async def shot(payload: dict = Body(...)):
     tmp = dest + ".tmp"
     thumb = os.path.join(SHOTS_DIR, f"site_{site_id}_thumb.jpg")
     http_status, error_text = 0, ""
+    masks = []
 
     async with _lock:
         ctx = await _browser.new_context(
@@ -164,6 +176,44 @@ async def shot(payload: dict = Body(...)):
             # 3) respiro finale per font, animazioni d'ingresso e frame video
             await page.wait_for_timeout(SETTLE_MS)
 
+            # 4) VIDEO FERMI SULLO STESSO FOTOGRAMMA: prima e dopo l'aggiornamento il video
+            # veniva fotografato in un istante diverso e risultava "cambiamento". Pausa e
+            # sempre lo stesso secondo (VIDEO_FRAME_AT), aspettando che il frame sia disegnato.
+            try:
+                await page.evaluate("""async (at) => {
+                    const vids = Array.from(document.querySelectorAll('video')).filter(v => v.readyState >= 1);
+                    await Promise.all(vids.map(v => new Promise(res => {
+                        try {
+                            v.pause();
+                            const t = Math.min(at, Math.max(0, (v.duration || at) - 0.05));
+                            const done = () => { v.removeEventListener('seeked', done); res(); };
+                            v.addEventListener('seeked', done);
+                            v.currentTime = t;
+                            setTimeout(done, 2500);
+                        } catch (e) { res(); }
+                    })));
+                }""", VIDEO_FRAME_AT)
+                await page.wait_for_timeout(250)
+            except Exception:  # noqa: BLE001
+                pass
+
+            # 5) zone che cambiano da sole (video, iframe, slider): annotate per il confronto
+            masks = []
+            if variant:
+                try:
+                    masks = await page.evaluate("""(sel) => {
+                        const W = window.innerWidth, H = window.innerHeight, out = [];
+                        document.querySelectorAll(sel).forEach(el => {
+                            const r = el.getBoundingClientRect();
+                            const x = Math.max(0, r.left), y = Math.max(0, r.top);
+                            const w = Math.min(W, r.right) - x, h = Math.min(H, r.bottom) - y;
+                            if (w >= 40 && h >= 40) out.push([Math.round(x), Math.round(y), Math.round(w), Math.round(h)]);
+                        });
+                        return { w: W, h: H, masks: out.slice(0, 60) };
+                    }""", DYNAMIC_SELECTORS)
+                except Exception:  # noqa: BLE001
+                    masks = []
+
             # segni inequivocabili di sito rotto nel testo della pagina
             if variant:
                 try:
@@ -180,6 +230,12 @@ async def shot(payload: dict = Body(...)):
     os.replace(tmp, dest)                        # scrittura atomica: mai un file mezzo scritto
 
     if variant:
+        try:
+            import json as _json
+            with open(dest[:-4] + ".json", "w", encoding="utf-8") as fh:
+                _json.dump(masks or {"w": WIDTH, "h": HEIGHT, "masks": []}, fh)
+        except Exception:  # noqa: BLE001
+            pass
         log.info("istantanea %s: %s (%s) http=%s", variant, name, url, http_status)
         return {"path": name, "http_status": http_status, "error_text": error_text}
 
@@ -240,8 +296,42 @@ async def compare(payload: dict = Body(...)):
         ga = ia.convert("L").resize(size, Image.BILINEAR)
         gb = ib.convert("L").resize(size, Image.BILINEAR)
     diff = ImageChops.difference(ga, gb)
-    changed = sum(1 for v in diff.getdata() if v > 40)
-    pct = round(changed * 100 / (size[0] * size[1]), 1)
+    # zone che cambiano da sole (video, iframe, slider) di ENTRAMBE le foto: fuori dal conto
+    ignore = _mask_grid(site_id, size)
+    total = changed = 0
+    for i, v in enumerate(diff.getdata()):
+        if ignore[i]:
+            continue
+        total += 1
+        if v > 40:
+            changed += 1
+    pct = round(changed * 100 / total, 1) if total else 0.0
     blank_after = ImageStat.Stat(gb).stddev[0] < 6
     blank_before = ImageStat.Stat(ga).stddev[0] < 6
-    return {"diff": pct, "blank_after": blank_after, "blank_before": blank_before}
+    masked = round(100 - total * 100 / (size[0] * size[1]), 1)
+    return {"diff": pct, "blank_after": blank_after, "blank_before": blank_before, "masked": masked}
+
+
+def _mask_grid(site_id: int, size: tuple) -> list:
+    """Griglia (alla risoluzione del confronto) dei pixel da ignorare: unione delle zone mobili
+    annotate nella foto prima e in quella dopo."""
+    import json as _json
+    W, H = size
+    grid = [False] * (W * H)
+    for variant in ("before", "after"):
+        path = os.path.join(SHOTS_DIR, f"site_{site_id}_{variant}.json")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                d = _json.load(fh)
+        except Exception:  # noqa: BLE001
+            continue
+        sw, sh = float(d.get("w") or WIDTH), float(d.get("h") or HEIGHT)
+        for m in d.get("masks") or []:
+            x, y, w, h = m
+            x0, y0 = int(x / sw * W), int(y / sh * H)
+            x1, y1 = min(W, int((x + w) / sw * W) + 1), min(H, int((y + h) / sh * H) + 1)
+            for yy in range(max(0, y0), y1):
+                row = yy * W
+                for xx in range(max(0, x0), x1):
+                    grid[row + xx] = True
+    return grid
