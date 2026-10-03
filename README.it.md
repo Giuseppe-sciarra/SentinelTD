@@ -126,12 +126,9 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   intervallo di mesi a scelta, con la cronologia di ogni singolo aggiornamento
 - Statistiche con viste giornaliera, mensile e confronto fra due mesi, classifiche dei siti e
   dei componenti più aggiornati
-- **Stato server**: una scheda per server (o per cartella cliente) con i suoi siti, le versioni PHP,
-  carico e disco dalla diagnostica notturna, aggiornamenti in sospeso e falliti, peso totale con
-  l'andamento di 30 giorni, aggiornamenti per mese, l'elenco dei problemi (offline, spazio, log,
-  fallimenti, file del core, PHP fuori supporto) e l'interruttore del freno
-
-**Amministrazione**
+- **Stato server**: una riga per server (o per cartella cliente) che si apre: siti, versioni PHP,
+  **carico e RAM nelle ultime 24 ore** (valore di solito, picco con l'ora, grafico) e disco, peso con
+  l'andamento di 30 giorni, aggiornamenti, domini e problemi di ogni sito, con le spiegazioni ⓘ
 - **Il pannello si aggiorna da solo**: pallini, etichette e la pagina del sito aperto seguono lo
   stato reale entro pochi secondi, senza ricaricare. Ogni 6 secondi il browser chiede un'impronta
   del parco di una riga (un `304` vuoto se nulla è cambiato) e scarica la lista solo quando serve

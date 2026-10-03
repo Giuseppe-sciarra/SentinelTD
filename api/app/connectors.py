@@ -171,6 +171,10 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             core_known = True
         unverified = not (core_known and all(known_cat.values()))
 
+        # carico e disco del server a ogni controllo (WP 2.28+/Joomla 1.36+): 24 ore in Redis
+        if isinstance(data.get("server"), dict):
+            from .load_history import record as _record_load
+            await _record_load(site.id, data["server"])
         # versione del connettore sul sito: dichiarata (WP 2.23+/Joomla 1.32+) o ricavata dal plugin
         declared = str(data.get("connector") or "").strip()
         if declared:

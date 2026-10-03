@@ -91,6 +91,56 @@ final class Tdpanopticon extends CMSPlugin
         return preg_match('/<version>\s*([^<\s]+)\s*<\/version>/', $raw, $m) ? $m[1] : '0';
     }
 
+    /** Testo di /proc/meminfo -> byte (MemAvailable, o MemFree + Buffers + Cached sui kernel vecchi). */
+    public static function parseMeminfo(string $raw): array
+    {
+        $out = ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
+        $kb = static function (string $key) use ($raw): ?int {
+            return preg_match('/^' . $key . ':\s+(\d+)\s*kB/mi', $raw, $m) ? (int) $m[1] * 1024 : null;
+        };
+        $out['total'] = $kb('MemTotal');
+        $out['available'] = $kb('MemAvailable');
+        if ($out['available'] === null && $out['total'] !== null) {
+            $free = $kb('MemFree');
+            if ($free !== null) {
+                $out['available'] = $free + (int) $kb('Buffers') + (int) $kb('Cached');
+            }
+        }
+        $out['swap_total'] = $kb('SwapTotal');
+        $out['swap_free'] = $kb('SwapFree');
+        return $out;
+    }
+
+    /** Uscita di "free -b" -> byte: ripiego per gli hosting che chiudono /proc/meminfo. */
+    public static function parseFree(string $raw): array
+    {
+        $out = ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
+        if (preg_match('/^Mem:\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?(?:\s+(\d+))?(?:\s+(\d+))?/mi', $raw, $m)) {
+            $out['total'] = (int) $m[1];
+            $free = (int) $m[3];
+            $out['available'] = stripos($raw, 'available') !== false
+                ? (isset($m[6]) && $m[6] !== '' ? (int) $m[6] : $free)
+                : $free + (int) ($m[5] ?? 0) + (int) ($m[6] ?? 0);
+        }
+        if (preg_match('/^Swap:\s+(\d+)\s+(\d+)\s+(\d+)/mi', $raw, $w)) {
+            $out['swap_total'] = (int) $w[1];
+            $out['swap_free'] = (int) $w[3];
+        }
+        return $out;
+    }
+
+    /** Memoria del server: /proc/meminfo, o "free -b" se shell_exec e' permesso. */
+    private function memInfo(): array
+    {
+        $raw = is_readable('/proc/meminfo') ? (string) @file_get_contents('/proc/meminfo') : '';
+        $m = $raw !== '' ? self::parseMeminfo($raw) : ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
+        if (!$m['total'] && function_exists('shell_exec')
+            && !in_array('shell_exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
+            $m = self::parseFree((string) @shell_exec('free -b 2>/dev/null'));
+        }
+        return $m;
+    }
+
     /** Numeri del server per la pagina "Stato server": carico medio, disco del server, software. */
     private function serverInfo(): array
     {
@@ -110,6 +160,7 @@ final class Tdpanopticon extends CMSPlugin
         if (!$cores && function_exists('shell_exec') && !in_array('shell_exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
             $cores = (int) trim((string) @shell_exec('nproc 2>/dev/null'));
         }
+        $mem = $this->memInfo();
         $total = @disk_total_space(JPATH_ROOT);
         $free  = @disk_free_space(JPATH_ROOT);
         return [
@@ -121,6 +172,11 @@ final class Tdpanopticon extends CMSPlugin
             'sapi'       => PHP_SAPI,
             'os'         => PHP_OS_FAMILY,
             'hostname'   => (string) @gethostname(),
+            // memoria (RAM) e swap, in byte: MemAvailable conta anche la cache che il sistema libera subito
+            'mem_total'      => $mem['total'],
+            'mem_available'  => $mem['available'],
+            'swap_total'     => $mem['swap_total'],
+            'swap_free'      => $mem['swap_free'],
         ];
     }
 
@@ -417,6 +473,8 @@ final class Tdpanopticon extends CMSPlugin
         return [
             'cms'  => 'joomla',
             'connector' => $this->connectorVersion(),   // il pannello sa quale versione gira su ogni sito
+            // carico e disco a ogni controllo (letture istantanee): il pannello ne tiene 24 ore
+            'server' => $this->serverInfo(),
             'core' => ['current' => $core_current, 'latest' => $core_latest, 'update' => $core_update],
             'php'  => PHP_VERSION,
             'extensions' => $extensions,

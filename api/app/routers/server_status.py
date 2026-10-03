@@ -170,6 +170,10 @@ async def overview(by: str = Query("server"), s: AsyncSession = Depends(get_sess
         for p in site_problems(x, fails.get(x.id), now):
             g["problems"].append({**p, "site": x.name, "site_id": x.id})
 
+    # carico e disco delle ultime 24 ore, dai controlli normali
+    from ..load_history import samples_for, summarize
+    load_samples = await samples_for([x.id for x in sites])
+
     out = []
     for key, g in groups.items():
         rows = g["sites"]
@@ -214,6 +218,7 @@ async def overview(by: str = Query("server"), s: AsyncSession = Depends(get_sess
             "domains_soon": sorted(g.get("domains_soon") or [], key=lambda d: d["days"]),
             # carico: il campione piu' recente (1, 5, 15 minuti) e il picco visto tra i siti
             "load_now": (max(g["loads"], key=lambda l: l.get("at") or "") if g["loads"] else None),
+            "load24": summarize([smp for r in rows for smp in load_samples.get(r["id"], [])]),
             "hostnames": sorted({str(((x2.diag or {}).get("server") or {}).get("hostname") or "") for x2 in sites if x2.id in {r["id"] for r in rows}} - {""}),
             "sites": sorted(rows, key=lambda r: (r["status"] == "ok", -(r["pending"] + r["failed"]), r["name"].lower())),
         })

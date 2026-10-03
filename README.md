@@ -118,12 +118,9 @@ Your server, your data, your branding.
   any range of months, with the full history of every update
 - Statistics with daily, monthly and month-against-month views, rankings of the most updated
   sites and components
-- **Server status**: one card per server (or per client folder) with its sites, PHP versions, load
-  and disk from the nightly diagnostics, pending and failed updates, total size with a 30-day
-  trend, updates per month, the list of problems (offline, low space, large logs, failures, core
-  files, unsupported PHP) and the brake switch
-
-**Administration**
+- **Server status**: one row per server (or per client folder) that opens: sites, PHP versions,
+  **load and RAM over the last 24 hours** (usual value, peak with its time, chart) and disk, size with
+  its 30-day trend, updates, domains and the problems of each site, with ⓘ explanations
 - **The panel updates itself**: dots, badges and the open site page follow the real state within
   a few seconds, without reloading. Every 6 seconds the browser asks for a one-line fingerprint
   of the fleet (an empty `304` when nothing changed) and downloads the list only when it did

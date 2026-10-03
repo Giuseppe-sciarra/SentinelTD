@@ -1147,7 +1147,7 @@ th.sortable:hover { color: var(--txt); }
 .chip.small { font-size: 11px; padding: 1px 7px; }
 /* Stato server: un server per riga, si apre a tendina */
 .srvx-list { margin-top: 16px; border: 1px solid var(--bd); border-radius: 14px; overflow: hidden; background: var(--panel); }
-.srvx-cols, .srvx-head { display: grid; grid-template-columns: 22px minmax(180px, 1.4fr) 185px 140px 170px 115px 185px minmax(170px, 1.1fr); gap: 14px; align-items: center; padding: 10px 16px; }
+.srvx-cols, .srvx-head { display: grid; grid-template-columns: 22px minmax(150px, 1.3fr) 170px 120px 165px 120px 105px 170px minmax(150px, 1fr); gap: 12px; align-items: center; padding: 10px 16px; }
 .srvx-cols { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); border-bottom: 1px solid var(--bd); }
 .srvx { border-bottom: 1px solid var(--bd); } .srvx:last-child { border-bottom: 0; }
 .srvx-head { cursor: pointer; } .srvx-head:hover, .srvx.open .srvx-head { background: var(--panel-2); }
@@ -1215,3 +1215,5 @@ th.sortable:hover { color: var(--txt); }
 .load-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; margin-top: 8px; color: var(--mut); }
 .load-legend .ok { color: var(--ok); } .load-legend .warn { color: var(--warn); } .load-legend .err { color: var(--err); }
 .srvx-kv b.ok { color: var(--ok); }
+.load-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--mut); margin-top: 2px; }
+.ram-block { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--bd); }

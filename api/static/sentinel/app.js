@@ -1779,6 +1779,45 @@ function sentinel() {
     loadPct(v, cores) { if (v === null || v === undefined) return '—'; return cores ? Math.round(v / cores * 100) + '%' : 'core non rilevati'; },
     loadTitle(v, cores) { return v === null || v === undefined ? '' : `load average ${v}${cores ? ' su ' + cores + ' core' : ''}`; },
     // stato del carico a parole, con soglie fisse (percentuale = quanto lavora rispetto a quanto puo')
+    // carico della riga chiusa: "di solito" nelle 24 ore se ci sono le misure, altrimenti la foto notturna
+    srvLoad(g) {
+      const l = g.load24;
+      if (l && l.usual !== null && l.usual !== undefined) return { v: l.usual, cores: l.cores || (g.load && g.load.cores), live: true };
+      if (g.load) return { v: g.load.max, cores: g.load.cores, live: false };
+      return null;
+    },
+    hhmm(t) { return t ? new Date(t * 1000).toLocaleTimeString(I18n.locale, { hour: '2-digit', minute: '2-digit' }) : ''; },
+    // grafico delle 24 ore: una barra ogni mezz'ora, linea al 100%, colore per livello
+    loadChartSvg(l) {
+      if (!l || !l.series) return '';
+      const W = 300, H = 64, n = l.series.length, bw = W / n, cores = l.cores || 1, cap = 2;   // scala fino al 200%
+      const col = v => ({ ok: 'var(--ok)', warn: 'var(--warn)', err: 'var(--err)' })[this.loadLevel(v, cores)] || 'var(--mut)';
+      let bars = '';
+      l.series.forEach((v, i) => {
+        if (v === null || v === undefined) return;
+        const p = Math.min(v / cores, cap) / cap, bh = Math.max(1.5, p * (H - 2));
+        bars += `<rect x="${(i * bw + 0.6).toFixed(1)}" y="${(H - bh).toFixed(1)}" width="${(bw - 1.2).toFixed(1)}" height="${bh.toFixed(1)}" rx="1" fill="${col(v)}"><title>${this.hhmm(l.series_start + i * l.bucket_seconds)} · ${Math.round(v / cores * 100)}%</title></rect>`;
+      });
+      const y100 = H - (1 / cap) * (H - 2);
+      return `<svg viewBox="0 0 ${W} ${H}" class="spark" preserveAspectRatio="none" style="height:64px">${bars}<line x1="0" x2="${W}" y1="${y100.toFixed(1)}" y2="${y100.toFixed(1)}" stroke="var(--txt-2)" stroke-dasharray="3 3" stroke-width="0.8"/></svg>`;
+    },
+    // RAM usata (%): sotto 75% a posto, 75-90% alta, oltre 90% piena
+    ramLevel(p) { return p === null || p === undefined ? null : (p < 75 ? 'ok' : (p <= 90 ? 'warn' : 'err')); },
+    ramWord(p) { return ({ ok: 'a posto', warn: 'alta', err: 'piena' })[this.ramLevel(p)] || ''; },
+    // grafico della RAM nelle 24 ore: una barra ogni mezz'ora, altezza = % usata, riga tratteggiata al 90%
+    ramChartSvg(m) {
+      if (!m || !m.series) return '';
+      const W = 300, H = 64, n = m.series.length, bw = W / n;
+      const col = v => ({ ok: 'var(--ok)', warn: 'var(--warn)', err: 'var(--err)' })[this.ramLevel(v)] || 'var(--mut)';
+      let bars = '';
+      m.series.forEach((v, i) => {
+        if (v === null || v === undefined) return;
+        const bh = Math.max(1.5, v / 100 * (H - 2));
+        bars += `<rect x="${(i * bw + 0.6).toFixed(1)}" y="${(H - bh).toFixed(1)}" width="${(bw - 1.2).toFixed(1)}" height="${bh.toFixed(1)}" rx="1" fill="${col(v)}"><title>${this.hhmm((m.series_start || 0) + i * (m.bucket_seconds || 1800))} · ${Math.round(v)}%</title></rect>`;
+      });
+      const y90 = H - 0.9 * (H - 2);
+      return `<svg viewBox="0 0 ${W} ${H}" class="spark" preserveAspectRatio="none" style="height:64px">${bars}<line x1="0" x2="${W}" y1="${y90.toFixed(1)}" y2="${y90.toFixed(1)}" stroke="var(--txt-2)" stroke-dasharray="3 3" stroke-width="0.8"/></svg>`;
+    },
     loadLevel(v, cores) { if (v === null || v === undefined || !cores) return null; const p = v / cores * 100; return p < 70 ? 'ok' : (p <= 150 ? 'warn' : 'err'); },
     loadWord(v, cores) { return ({ ok: 'tranquillo', warn: 'impegnato', err: 'sovraccarico' })[this.loadLevel(v, cores)] || ''; },
     loadClass(l) { return l && l.max !== undefined ? (this.loadLevel(l.max, l.cores) || '') : ''; },

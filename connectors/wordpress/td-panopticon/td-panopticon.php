@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.27.0
+ * Version: 2.29.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -992,6 +992,8 @@ function tdpanop_status($req = null)
     return new WP_REST_Response([
         'cms'  => 'wp',
         'connector' => TDPANOP_VERSION,   // il pannello sa quale versione gira su ogni sito
+        // carico e disco a ogni controllo (letture istantanee): il pannello ne tiene 24 ore
+        'server' => tdpanop_server_info(),
         'core' => ['current' => $core_cur, 'latest' => $core_latest, 'update' => $core_update, 'known' => $core_known],
         'php'  => PHP_VERSION,
         'extensions' => $extensions,
@@ -2032,6 +2034,62 @@ function tdpanop_outside_logs(string $abs): array
 }
 
 /**
+ * Testo di /proc/meminfo -> byte. Funzione pura (si prova con dei testi di esempio).
+ * "Disponibile" = MemAvailable; sui kernel vecchi (< 3.14) MemFree + Buffers + Cached.
+ */
+function tdpanop_parse_meminfo(string $raw): array
+{
+    $out = ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
+    $kb = static function (string $key) use ($raw): ?int {
+        return preg_match('/^' . $key . ':\s+(\d+)\s*kB/mi', $raw, $m) ? (int) $m[1] * 1024 : null;
+    };
+    $out['total'] = $kb('MemTotal');
+    $out['available'] = $kb('MemAvailable');
+    if ($out['available'] === null && $out['total'] !== null) {
+        $free = $kb('MemFree');
+        if ($free !== null) {
+            $out['available'] = $free + (int) $kb('Buffers') + (int) $kb('Cached');
+        }
+    }
+    $out['swap_total'] = $kb('SwapTotal');
+    $out['swap_free'] = $kb('SwapFree');
+    return $out;
+}
+
+/**
+ * Uscita di "free -b" -> byte. Ripiego per gli hosting che chiudono /proc/meminfo ma lasciano
+ * shell_exec. Le versioni nuove hanno la colonna "available"; le vecchie hanno buffers e cached.
+ */
+function tdpanop_parse_free(string $raw): array
+{
+    $out = ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
+    if (preg_match('/^Mem:\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?(?:\s+(\d+))?(?:\s+(\d+))?/mi', $raw, $m)) {
+        $out['total'] = (int) $m[1];
+        $free = (int) $m[3];
+        $out['available'] = stripos($raw, 'available') !== false
+            ? (isset($m[6]) && $m[6] !== '' ? (int) $m[6] : $free)
+            : $free + (int) ($m[5] ?? 0) + (int) ($m[6] ?? 0);
+    }
+    if (preg_match('/^Swap:\s+(\d+)\s+(\d+)\s+(\d+)/mi', $raw, $w)) {
+        $out['swap_total'] = (int) $w[1];
+        $out['swap_free'] = (int) $w[3];
+    }
+    return $out;
+}
+
+/** Memoria del server: /proc/meminfo, o "free -b" se shell_exec e' permesso. */
+function tdpanop_mem_info(): array
+{
+    $raw = is_readable('/proc/meminfo') ? (string) @file_get_contents('/proc/meminfo') : '';
+    $m = $raw !== '' ? tdpanop_parse_meminfo($raw) : ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
+    if (!$m['total'] && function_exists('shell_exec')
+        && !in_array('shell_exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
+        $m = tdpanop_parse_free((string) @shell_exec('free -b 2>/dev/null'));
+    }
+    return $m;
+}
+
+/**
  * Numeri del server per la pagina "Stato server" del pannello: carico medio (1, 5, 15 minuti),
  * disco del server (totale e libero: su un hosting condiviso e' il disco di tutti, non la
  * quota dell'account, che si misura con la prova di scrittura), software e PHP.
@@ -2039,8 +2097,10 @@ function tdpanop_outside_logs(string $abs): array
 function tdpanop_server_info(): array
 {
     $load = function_exists('sys_getloadavg') ? @sys_getloadavg() : false;
-    $cores = 0;
-    if (is_readable('/proc/cpuinfo')) {
+    // i core non cambiano: si contano una volta al giorno (evita nproc a ogni controllo)
+    $cores = function_exists('get_transient') ? (int) get_transient('tdpanop_cores') : 0;
+    $cached = $cores > 0;
+    if (!$cores && is_readable('/proc/cpuinfo')) {
         $cores = (int) preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo'));
     }
     // hosting che chiudono /proc/cpuinfo: si prova con l'elenco delle CPU attive ("0-15") e
@@ -2054,6 +2114,10 @@ function tdpanop_server_info(): array
     if (!$cores && function_exists('shell_exec') && !in_array('shell_exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
         $cores = (int) trim((string) @shell_exec('nproc 2>/dev/null'));
     }
+    if ($cores > 0 && !$cached && function_exists('set_transient')) {
+        set_transient('tdpanop_cores', $cores, DAY_IN_SECONDS);
+    }
+    $mem = tdpanop_mem_info();
     $total = @disk_total_space(ABSPATH);
     $free  = @disk_free_space(ABSPATH);
     return [
@@ -2065,6 +2129,11 @@ function tdpanop_server_info(): array
         'sapi'       => PHP_SAPI,
         'os'         => PHP_OS_FAMILY,
         'hostname'   => (string) @gethostname(),
+        // memoria (RAM) e swap, in byte: MemAvailable conta anche la cache che il sistema libera subito
+        'mem_total'      => $mem['total'],
+        'mem_available'  => $mem['available'],
+        'swap_total'     => $mem['swap_total'],
+        'swap_free'      => $mem['swap_free'],
     ];
 }
 

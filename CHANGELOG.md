@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.26.0
+
+### Added
+- **Server RAM.** Connectors WordPress **2.29.0** and Joomla **1.37.0** send the memory of the
+  server (total, available, swap) with every regular status check, read from `/proc/meminfo`
+  (`MemAvailable`, or MemFree + Buffers + Cached on old kernels) or, when that is closed and
+  `shell_exec` is allowed, from `free -b`. Available memory includes the cache the system frees
+  at once, so "used" is what programs really hold. The panel keeps 24 hours of samples like
+  the load. Server status: a **RAM** column in the closed row (the usual value of the last 24 hours
+  — the median — with a word: *fine* under 75%, *high* 75–90%, *full* over 90%), and a *Memory
+  (RAM)* block in the open server with used now, in use out of the total, usual, peak with its time,
+  swap in use, and a 24-hour chart (dashed line at 90%)
+
+### Fixed
+- The Server status subtitle still said load came from the nightly diagnostics; it now says
+  load, RAM and disk come from the site checks and only the size from the nightly diagnostics
+- The "· calm / busy / overloaded" words next to the load were not translated
+
+## 2.25.0
+
+### Changed
+- **Server load over the last 24 hours instead of one night-time snapshot.** Load and disk came
+  only from the nightly diagnostics at 03:40, when nobody visits the sites: one sample a day, at
+  the least meaningful moment. Connectors WordPress **2.28.0** and Joomla **1.36.0** add load
+  (1, 5, 15 min), cores and disk to every regular status check (instant readings; WordPress
+  counts the cores once a day). The panel keeps 24 hours of samples per site in Redis
+  (`load:site:{id}`, self-trimming, `app/load_history.py`) and sums them up per server. Server
+  status: the closed row shows the **usual** load of the last 24 hours — the median, which an
+  isolated peak such as a nightly backup does not move; open, *Now* (1 · 5 · 15 min), *Usually*,
+  *Peak* with its time, cores, a 24-hour chart (one bar per half hour, coloured by level, dashed
+  100% line), the number of samples and the latest disk reading
+
 ## 2.24.1
 
 ### Fixed
