@@ -50,7 +50,31 @@ function sentinel() {
     sec2fa: { totp: false, passkeys: [], setup: null, code: '', msg: '', err: '' },
 
     // ---------- init ----------
+    // spiegazioni (ⓘ): riquadro curato invece del suggerimento del browser
+    initTips() {
+      if (window.__tdTips) return; window.__tdTips = true;
+      const tip = document.createElement('div'); tip.className = 'td-tip'; document.body.appendChild(tip);
+      let cur = null;
+      const hide = () => { tip.classList.remove('on'); if (cur && cur.dataset.tip !== undefined) { cur.setAttribute('title', cur.dataset.tip); delete cur.dataset.tip; } cur = null; };
+      document.addEventListener('mouseover', e => {
+        const el = e.target.closest && e.target.closest('.hint-h');
+        if (el === cur) return;
+        hide();
+        if (!el) return;
+        const text = el.getAttribute('title'); if (!text) return;
+        cur = el; el.dataset.tip = text; el.removeAttribute('title');
+        tip.textContent = text; tip.classList.add('on');
+        const r = el.getBoundingClientRect(), w = Math.min(340, window.innerWidth - 24);
+        tip.style.maxWidth = w + 'px';
+        const left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
+        const th = tip.offsetHeight;
+        const top = r.top - th - 8 > 8 ? r.top - th - 8 : r.bottom + 8;   // sopra la voce, se c'e' spazio
+        tip.style.left = left + 'px'; tip.style.top = (top + window.scrollY) + 'px';
+      });
+      window.addEventListener('scroll', hide, { passive: true });
+    },
     async init() {
+      this.initTips();
       this.initSidebarResize();
       await this.loadBrand();
       this._readHash();
@@ -1751,7 +1775,13 @@ function sentinel() {
     async srvSetBy(by) { this.srvst.by = by; await this.loadServerStatus(); },
     fmtGB(b) { return b ? (b / 1073741824).toFixed(b < 10737418240 ? 1 : 0).replace('.', ',') + ' GB' : '—'; },
     fmtMB(b) { if (!b) return '—'; return b >= 1073741824 ? this.fmtGB(b) : Math.round(b / 1048576) + ' MB'; },
-    loadClass(l) { if (!l || !l.max) return ''; const c = l.cores || 1; return l.max > c * 2 ? 'err' : (l.max > c ? 'warn' : 'ok'); },
+    // carico medio in % dei core: 100% = tutti i core occupati, oltre = processi in coda
+    loadPct(v, cores) { if (v === null || v === undefined) return '—'; return cores ? Math.round(v / cores * 100) + '%' : 'core non rilevati'; },
+    loadTitle(v, cores) { return v === null || v === undefined ? '' : `load average ${v}${cores ? ' su ' + cores + ' core' : ''}`; },
+    // stato del carico a parole, con soglie fisse (percentuale = quanto lavora rispetto a quanto puo')
+    loadLevel(v, cores) { if (v === null || v === undefined || !cores) return null; const p = v / cores * 100; return p < 70 ? 'ok' : (p <= 150 ? 'warn' : 'err'); },
+    loadWord(v, cores) { return ({ ok: 'tranquillo', warn: 'impegnato', err: 'sovraccarico' })[this.loadLevel(v, cores)] || ''; },
+    loadClass(l) { return l && l.max !== undefined ? (this.loadLevel(l.max, l.cores) || '') : ''; },
     // grafici in SVG: andamento del peso (linea) e aggiornamenti per mese (barre)
     sparkPath(series, w = 220, h = 44) {
       const v = (series || []).map(p => p.total); if (v.length < 2) return '';
@@ -1793,6 +1823,20 @@ function sentinel() {
         .sort((a, b) => Math.min(...a.problems.map(p => order[p.kind] ?? 9)) - Math.min(...b.problems.map(p => order[p.kind] ?? 9)) || b.problems.length - a.problems.length || a.site.localeCompare(b.site, 'it'));
     },
     secSev(s) { return ({ critical: 'err', high: 'err', medium: 'warn', low: 'info' })[s] || 'info'; },
+    // dettaglio del problema senza ripetere il tipo (sotto l'intestazione del tipo)
+    problemDetail(p) {
+      const t = String(p.text || '');
+      if (p.kind === 'php') return t.replace(/^PHP\s*/, '').replace(/\s*fuori supporto$/, '');
+      if (p.kind === 'domain') return t.replace(/^dominio scaduto\s*/, '');
+      if (p.kind === 'failed') return t.replace(/^non aggiornati:\s*/, '');
+      return t;
+    },
+    // problemi della riga chiusa, a parole: "1 spazio · 1 PHP · 2 domini"
+    problemWords(g) {
+      const w = { offline: ['offline', 'offline'], space: ['spazio', 'spazio'], failed: ['aggiornamento fallito', 'aggiornamenti falliti'], php: ['PHP', 'PHP'], domain: ['dominio', 'domini'] };
+      return Object.keys(w).filter(k => g.problem_counts && g.problem_counts[k]).map(k => ({ kind: k, n: g.problem_counts[k], label: g.problem_counts[k] === 1 ? w[k][0] : w[k][1] }));
+    },
+    problemLong(k) { return { offline: 'offline', space: 'spazio quasi esaurito', failed: 'aggiornamenti falliti', php: 'PHP fuori supporto', domain: 'dominio scaduto' }[k] || k; },
     problemSev(k) { return ({ offline: 'err', domain: 'err', space: 'warn', failed: 'warn', php: 'info', logs: 'info' })[k] || 'info'; },
     siteSev(s) { const r = { err: 0, warn: 1, info: 2 }; return s.problems.map(p => this.problemSev(p.kind)).sort((a, b) => r[a] - r[b])[0] || 'info'; },
     get srvProblemSitesAll() { return new Set(this.srvProblems.map(p => p.site_id)).size; },

@@ -19,11 +19,9 @@ def site_problems(site, failed_names: list[str] | None = None, now: datetime | N
     diag = site.diag or {}
     sp = diag.get("space") or {}
     if sp and not sp.get("ok"):
-        out.append({"kind": "space", "text": f"solo {sp.get('written_mb')} MB scrivibili".replace(".", ",")})
-    logs = (diag.get("sizes") or {}).get("big_logs") or []
-    if logs:
-        mb = round(sum(int(l.get("bytes", 0)) for l in logs) / 1048576)
-        out.append({"kind": "logs", "text": f"{len(logs)} log grandi, {mb} MB"})
+        out.append({"kind": "space", "text": f"solo {sp.get('written_mb')} MB liberi".replace(".", ",")})
+    # i log grandi NON sono un problema da elencare (troppo rumore): restano la notifica
+    # "Spazio e log del sito" e la diagnostica del sito
     names = failed_names or []
     if names:
         shown = ", ".join(names[:3]) + (f" e altri {len(names) - 3}" if len(names) > 3 else "")

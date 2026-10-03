@@ -99,6 +99,17 @@ final class Tdpanopticon extends CMSPlugin
         if (is_readable('/proc/cpuinfo')) {
             $cores = (int) preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo'));
         }
+        // hosting che chiudono /proc/cpuinfo: si prova con l'elenco delle CPU attive ("0-15") e
+        // con nproc, se shell_exec e' permesso. Senza core la percentuale del carico non si calcola.
+        if (!$cores && is_readable('/sys/devices/system/cpu/online')) {
+            foreach (explode(',', trim((string) @file_get_contents('/sys/devices/system/cpu/online'))) as $part) {
+                $ab = array_map('intval', explode('-', $part));
+                $cores += count($ab) === 2 ? $ab[1] - $ab[0] + 1 : 1;
+            }
+        }
+        if (!$cores && function_exists('shell_exec') && !in_array('shell_exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
+            $cores = (int) trim((string) @shell_exec('nproc 2>/dev/null'));
+        }
         $total = @disk_total_space(JPATH_ROOT);
         $free  = @disk_free_space(JPATH_ROOT);
         return [

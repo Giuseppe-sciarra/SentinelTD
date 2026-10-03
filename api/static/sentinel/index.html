@@ -915,7 +915,7 @@
             <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
               <div style="flex:1;min-width:280px">
                 <h1 class="page-title">Stato server</h1>
-                <div class="page-sub">Il quadro di ogni server, o di ogni cartella cliente: siti, versioni PHP, spazio, carico, log, problemi, peso con l'andamento di 30 giorni e aggiornamenti degli ultimi 6 mesi. Carico e disco vengono dalla diagnostica notturna.</div>
+                <div class="page-sub">Ogni server, o ogni cartella cliente, su una riga: clicca per aprirla e vedere tutti i dettagli. Carico, disco e peso vengono dalla diagnostica notturna; passa sopra alle ⓘ per sapere cosa significa ogni valore.</div>
               </div>
               <div class="seg"><button :class="srvst.by==='server' ? 'on' : ''" @click="srvSetBy('server')">Per server</button><button :class="srvst.by==='folder' ? 'on' : ''" @click="srvSetBy('folder')">Per cartella cliente</button></div>
             </div>
@@ -944,7 +944,7 @@
             <template x-if="srvst.data">
             <div class="srvx-list">
               <div class="srvx-cols">
-                <span></span><span>Server</span><span>Siti</span><span>PHP</span><span>Carico</span><span>Disco</span><span>Peso · 30 giorni</span><span>Problemi</span>
+                <span></span><span class="hint-h" title="Il server dove stanno i siti, riconosciuto dall'IP del dominio. Server con lo stesso nome (Impostazioni → Server dei siti) sono un gruppo solo.">Server <i>ⓘ</i></span><span class="hint-h" title="Siti monitorati su questo server, divisi tra WordPress e Joomla.">Siti <i>ⓘ</i></span><span class="hint-h" title="Versioni di PHP usate dai siti, con quanti siti per versione. In rosso quelle non più supportate.">PHP <i>ⓘ</i></span><span class="hint-h" title="Quanto sta lavorando il server rispetto a quello che può fare. Sotto il 70% è tranquillo, dal 70 al 150% è impegnato, oltre il 150% è sovraccarico e i siti rallentano.">Carico <i>ⓘ</i></span><span class="hint-h" title="Spazio usato sul disco del server. Su un hosting condiviso è il disco di tutti, non la quota del singolo account.">Disco <i>ⓘ</i></span><span class="hint-h" title="Peso totale dei siti (file e database) e quanto è cambiato negli ultimi 30 giorni.">Peso · 30 giorni <i>ⓘ</i></span><span class="hint-h" title="Siti con qualcosa da guardare, per tipo: offline, spazio quasi esaurito, aggiornamenti falliti, PHP fuori supporto, dominio scaduto. Apri il server per sapere quali.">Problemi <i>ⓘ</i></span>
               </div>
               <template x-for="g in srvst.data.groups" :key="srvst.by + g.key">
                 <div class="srvx" :class="[srvst.open[g.key] ? 'open' : '', g.sites_with_problems ? 'bad' : '']">
@@ -956,20 +956,20 @@
                       <div class="small mut mono" x-show="g.by==='server' && g.label" x-text="(g.ips || []).map(i => i.ip).join(' · ')" translate="no"></div>
                       <div class="small mut" x-show="g.by!=='server' || !g.label" x-text="(g.ips || []).map(i => i.host).filter(Boolean).join(' · ')" translate="no"></div>
                     </div>
-                    <div><b x-text="g.counts.sites"></b> <span class="small mut" x-text="g.counts.joomla ? g.counts.wp + ' WP · ' + g.counts.joomla + ' J' : 'WP'"></span></div>
-                    <div class="chips"><template x-for="p in g.php" :key="g.key+'hp'+p[0]"><span class="chip small" :class="phpState(p[0]).cls === 'err' ? 'err' : ''"><span x-text="p[0]"></span>&nbsp;<b x-text="p[1]"></b></span></template></div>
-                    <div><span class="badge" :class="loadClass(g.load)" x-show="g.load" x-text="g.load ? g.load.max + (g.load.cores ? ' / ' + g.load.cores : '') : ''"></span><span class="mut" x-show="!g.load">—</span></div>
-                    <div><template x-if="g.disk"><div><span class="small" x-text="Math.round(100 - g.disk.free / g.disk.total * 100) + '%'"></span><div class="bar"><div class="bar-fill" :class="g.disk.free / g.disk.total < .1 ? 'err' : (g.disk.free / g.disk.total < .2 ? 'warn' : '')" :style="'width:' + Math.round(100 - g.disk.free / g.disk.total * 100) + '%'"></div></div></div></template><span class="mut" x-show="!g.disk">—</span></div>
-                    <div><b x-text="fmtMB(g.size.total)"></b> <span class="small mut" x-show="g.size.days > 1" x-text="srvDelta(g)"></span></div>
+                    <div><b x-text="g.counts.sites"></b> <span class="small mut" x-text="g.counts.joomla && g.counts.wp ? g.counts.wp + ' WordPress · ' + g.counts.joomla + ' Joomla' : (g.counts.joomla ? 'Joomla' : 'WordPress')"></span></div>
+                    <div class="chips"><template x-for="p in g.php" :key="g.key+'hp'+p[0]"><span class="chip small" :class="phpState(p[0]).cls === 'err' ? 'err' : ''" :title="'PHP ' + p[0] + ': ' + p[1] + ' ' + pl(p[1], 'sito', 'siti') + (phpState(p[0]).label ? ' · ' + phpState(p[0]).label : '')"><span x-text="p[0]"></span>&nbsp;<span class="mut" x-text="'×' + p[1]"></span></span></template></div>
+                    <div><span class="badge" :class="loadClass(g.load)" x-show="g.load" x-text="g.load ? loadPct(g.load.max, g.load.cores) + (loadWord(g.load.max, g.load.cores) ? ' · ' + loadWord(g.load.max, g.load.cores) : '') : ''"></span><span class="mut" x-show="!g.load">—</span></div>
+                    <div><template x-if="g.disk"><div><span class="small" x-text="Math.round(100 - g.disk.free / g.disk.total * 100) + '% usato'"></span><div class="bar"><div class="bar-fill" :class="g.disk.free / g.disk.total < .1 ? 'err' : (g.disk.free / g.disk.total < .2 ? 'warn' : '')" :style="'width:' + Math.round(100 - g.disk.free / g.disk.total * 100) + '%'"></div></div></div></template><span class="mut" x-show="!g.disk">—</span></div>
+                    <div><b x-text="fmtMB(g.size.total)"></b> <span class="small mut" x-show="g.size.days > 1" x-text="srvDelta(g) + ' in ' + g.size.days + ' gg'"></span></div>
                     <div class="srvx-probs">
                       <span class="badge ok" x-show="!g.sites_with_problems">tutto a posto</span>
-                      <template x-for="k in ['offline','space','failed','logs','php','domain']" :key="g.key+'hk'+k"><span class="srvx-pk" x-show="g.problem_counts && g.problem_counts[k]" :class="'k-'+k" :title="problemShort(k)"><span x-text="problemIcon(k)"></span><b x-text="g.problem_counts ? g.problem_counts[k] : 0"></b></span></template>
+                      <template x-for="w in problemWords(g)" :key="g.key+'hk'+w.kind"><span class="srvx-pk" :class="'k-'+w.kind"><b x-text="w.n"></b> <span x-text="w.label"></span></span></template>
                     </div>
                   </div>
                   <!-- aperto: statistiche estese -->
                   <div class="srvx-body" x-show="srvst.open[g.key]">
                     <div class="srvx-grid">
-                      <div class="srvx-box"><h4>Siti</h4>
+                      <div class="srvx-box"><h4 class="hint-h" title="Stato dei siti di questo server: raggiungibili, con l'aggiornamento automatico attivo, componenti bloccati alla versione installata e versioni del CMS.">Siti <i>ⓘ</i></h4>
                         <div class="srvx-kv"><span>Online</span><b x-text="g.counts.enabled - g.counts.offline"></b></div>
                         <div class="srvx-kv"><span>Offline</span><b :class="g.counts.offline ? 'err' : ''" x-text="g.counts.offline"></b></div>
                         <div class="srvx-kv"><span>Aggiornamento automatico</span><b x-text="g.auto_update + ' su ' + g.counts.enabled"></b></div>
@@ -977,17 +977,18 @@
                         <div class="srvx-sub">Versioni</div>
                         <template x-for="v in (g.cms_versions || [])" :key="g.key+'cv'+v[0]"><div class="srvx-kv"><span class="mono" x-text="v[0]"></span><b x-text="v[1]"></b></div></template>
                       </div>
-                      <div class="srvx-box"><h4>Risorse del server</h4>
-                        <div class="srvx-kv"><span>Carico 1 · 5 · 15 min</span><b x-text="g.load_now ? g.load_now.load.join(' · ') : '—'"></b></div>
-                        <div class="srvx-kv"><span>Core</span><b x-text="(g.load && g.load.cores) || '—'"></b></div>
-                        <div class="srvx-kv"><span>Picco di carico visto</span><b :class="loadClass(g.load)" x-text="g.load ? g.load.max : '—'"></b></div>
-                        <div class="srvx-kv"><span>Disco</span><b x-text="g.disk ? fmtGB(g.disk.free) + ' liberi su ' + fmtGB(g.disk.total) : '—'"></b></div>
+                      <div class="srvx-box"><h4 class="hint-h" title="Carico, processori e disco del server, software web e nome della macchina, dall'ultima diagnostica notturna.">Risorse del server <i>ⓘ</i></h4>
+                        <div class="srvx-kv"><span class="hint-h" title="Quanto lavorava il server nell'ultimo minuto, negli ultimi 5 e negli ultimi 15 minuti, sempre in percentuale di quello che può fare. Se i tre numeri scendono, il server si sta calmando.">Carico medio (1 · 5 · 15 min) <i>ⓘ</i></span><b :class="g.load_now ? loadLevel(g.load_now.load[0], g.load && g.load.cores) : ''" x-text="g.load_now ? g.load_now.load.map(v => loadPct(v, g.load && g.load.cores)).join(' · ') : '—'"></b></div>
+                        <div class="srvx-kv"><span class="hint-h" title="Numero di processori (core) del server.">Core <i>ⓘ</i></span><b x-text="(g.load && g.load.cores) || '—'"></b></div>
+                        <div class="srvx-kv"><span class="hint-h" title="Il momento di lavoro più pesante misurato su questo server nella notte. Se è oltre il 150% il server fatica: tienilo col freno in Impostazioni.">Picco tra i siti <i>ⓘ</i></span><b :class="loadClass(g.load)" x-text="g.load ? loadPct(g.load.max, g.load.cores) + (loadWord(g.load.max, g.load.cores) ? ' · ' + loadWord(g.load.max, g.load.cores) : '') : '—'"></b></div>
+                        <div class="srvx-kv"><span class="hint-h" title="Spazio libero sul disco del server. Su un hosting condiviso è il disco di tutti: la quota del singolo sito si vede nella diagnostica del sito.">Disco <i>ⓘ</i></span><b x-text="g.disk ? fmtGB(g.disk.free) + ' liberi su ' + fmtGB(g.disk.total) + ' (' + Math.round(100 - g.disk.free / g.disk.total * 100) + '% usato)' : '—'"></b></div>
+                        <div class="load-legend"><span class="ok">● sotto 70% tranquillo</span><span class="warn">● 70–150% impegnato</span><span class="err">● oltre 150% sovraccarico</span></div>
                         <div class="srvx-sub">Software</div>
                         <div class="chips"><template x-for="w in (g.software || [])" :key="g.key+'sw'+w[0]"><span class="chip small"><span x-text="w[0]"></span>&nbsp;<b x-text="w[1]"></b></span></template><span class="mut small" x-show="!(g.software || []).length">dalla prossima diagnostica notturna</span></div>
                         <div class="small mut mono" style="margin-top:6px" x-show="(g.hostnames || []).length" x-text="(g.hostnames || []).join(' · ')" translate="no"></div>
                         <div class="small mut" style="margin-top:6px" x-show="g.load_now" x-text="g.load_now ? 'misurato ' + ago(g.load_now.at) : ''"></div>
                       </div>
-                      <div class="srvx-box"><h4>Peso</h4>
+                      <div class="srvx-box"><h4 class="hint-h" title="File e database dei siti, misurati ogni notte: totale, variazione in 30 giorni, media e i siti più pesanti.">Peso <i>ⓘ</i></h4>
                         <div class="srvx-kv"><span>Totale</span><b x-text="fmtMB(g.size.total)"></b></div>
                         <div class="srvx-kv"><span>In 30 giorni</span><b x-text="g.size.days > 1 ? srvDelta(g) : '—'"></b></div>
                         <div class="srvx-kv"><span>Media per sito</span><b x-text="g.avg_size ? fmtMB(g.avg_size) : '—'"></b></div>
@@ -995,7 +996,7 @@
                         <div class="srvx-sub" x-show="(g.largest || []).length">I più pesanti</div>
                         <template x-for="l in (g.largest || [])" :key="g.key+'lg'+l.id"><div class="srvx-kv"><a :href="'#/site/'+l.id" x-text="l.name" translate="no"></a><b x-text="fmtMB(l.size)"></b></div></template>
                       </div>
-                      <div class="srvx-box"><h4>Aggiornamenti</h4>
+                      <div class="srvx-box"><h4 class="hint-h" title="In sospeso: aggiornamenti disponibili non ancora fatti. Falliti: tentati e non riusciti, ancora da sistemare. Sotto, gli aggiornamenti fatti mese per mese.">Aggiornamenti <i>ⓘ</i></h4>
                         <div class="srvx-kv"><span>In sospeso</span><b x-text="g.counts.pending"></b></div>
                         <div class="srvx-kv"><span>Falliti</span><b :class="g.counts.failed ? 'err' : ''" x-text="g.counts.failed"></b></div>
                         <div class="mbars" style="margin-top:10px">
@@ -1009,17 +1010,17 @@
                         </div>
                         <div class="small mut" style="margin-top:4px"><span style="color:var(--ok)">■</span> riusciti · <span style="color:var(--err)">■</span> falliti</div>
                       </div>
-                      <div class="srvx-box"><h4>Domini</h4>
+                      <div class="srvx-box"><h4 class="hint-h" title="Domini dei siti già scaduti o che scadono entro 30 giorni.">Domini <i>ⓘ</i></h4>
                         <div class="srvx-kv"><span>Scaduti</span><b :class="(g.domains_expired || []).length ? 'err' : ''" x-text="(g.domains_expired || []).length"></b></div>
                         <div class="srvx-kv"><span>In scadenza entro 30 giorni</span><b :class="(g.domains_soon || []).length ? 'warn' : ''" x-text="(g.domains_soon || []).length"></b></div>
                         <template x-for="d in [...(g.domains_expired || []), ...(g.domains_soon || [])].slice(0, 8)" :key="g.key+'d'+d.site_id"><div class="srvx-kv"><a :href="'#/site/'+d.site_id" x-text="d.site" translate="no"></a><span class="small" :class="d.days < 0 ? 'err' : 'warn'" x-text="d.days < 0 ? 'scaduto da ' + (-d.days) + ' giorni' : 'tra ' + d.days + ' giorni'"></span></div></template>
                       </div>
-                      <div class="srvx-box"><h4>Problemi</h4>
+                      <div class="srvx-box"><h4 class="hint-h" title="Ogni tipo di problema con i siti che ce l'hanno.">Problemi <i>ⓘ</i></h4>
                         <div class="small ok" x-show="!g.sites_with_problems">nessuno</div>
-                        <template x-for="k in ['offline','space','failed','logs','php','domain']" :key="g.key+'pb'+k">
+                        <template x-for="k in ['offline','space','failed','php','domain']" :key="g.key+'pb'+k">
                           <div class="srvx-pgroup" x-show="g.problems.some(p => p.kind === k)">
-                            <div class="srvx-sub"><span x-text="problemIcon(k)"></span> <span x-text="problemShort(k)"></span></div>
-                            <template x-for="(p, i) in g.problems.filter(p => p.kind === k)" :key="g.key+k+i"><div class="srvx-kv"><a :href="'#/site/'+p.site_id" x-text="p.site" translate="no"></a><span class="small mut" x-text="p.text"></span></div></template>
+                            <div class="srvx-sub"><span x-text="problemIcon(k)"></span> <span x-text="problemLong(k)"></span></div>
+                            <template x-for="(p, i) in g.problems.filter(p => p.kind === k)" :key="g.key+k+i"><div class="srvx-kv"><a :href="'#/site/'+p.site_id" x-text="p.site" translate="no"></a><span class="small mut" x-text="problemDetail(p)"></span></div></template>
                           </div>
                         </template>
                       </div>

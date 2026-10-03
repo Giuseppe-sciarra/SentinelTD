@@ -1147,7 +1147,7 @@ th.sortable:hover { color: var(--txt); }
 .chip.small { font-size: 11px; padding: 1px 7px; }
 /* Stato server: un server per riga, si apre a tendina */
 .srvx-list { margin-top: 16px; border: 1px solid var(--bd); border-radius: 14px; overflow: hidden; background: var(--panel); }
-.srvx-cols, .srvx-head { display: grid; grid-template-columns: 22px minmax(180px, 1.6fr) 110px minmax(120px, 1fr) 90px 120px 150px minmax(140px, 1fr); gap: 14px; align-items: center; padding: 10px 16px; }
+.srvx-cols, .srvx-head { display: grid; grid-template-columns: 22px minmax(180px, 1.4fr) 185px 140px 170px 115px 185px minmax(170px, 1.1fr); gap: 14px; align-items: center; padding: 10px 16px; }
 .srvx-cols { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); border-bottom: 1px solid var(--bd); }
 .srvx { border-bottom: 1px solid var(--bd); } .srvx:last-child { border-bottom: 0; }
 .srvx-head { cursor: pointer; } .srvx-head:hover, .srvx.open .srvx-head { background: var(--panel-2); }
@@ -1207,3 +1207,11 @@ th.sortable:hover { color: var(--txt); }
 .sev-badge.sev-warn { background: rgba(255,180,60,.14); color: var(--warn); }
 .sec-row td:first-child { border-left: 3px solid transparent; }
 .sec-row.sev-err td:first-child { border-left-color: var(--err); } .sec-row.sev-warn td:first-child { border-left-color: var(--warn); }
+.hint-h { cursor: help; } .hint-h i { font-style: normal; font-size: 10px; opacity: .55; margin-left: 2px; }
+/* riquadro delle spiegazioni (ⓘ) */
+.td-tip { position: absolute; z-index: 9999; padding: 10px 12px; border-radius: 10px; background: var(--panel); color: var(--txt); border: 1px solid var(--bd); box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 12.5px; line-height: 1.5; pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity .12s, transform .12s; white-space: normal; text-transform: none; letter-spacing: normal; font-weight: 400; }
+.td-tip.on { opacity: 1; transform: none; }
+.hint-h i { font-style: normal; font-size: 11px; opacity: .7; margin-left: 3px; color: var(--acc); }
+.load-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; margin-top: 8px; color: var(--mut); }
+.load-legend .ok { color: var(--ok); } .load-legend .warn { color: var(--warn); } .load-legend .err { color: var(--err); }
+.srvx-kv b.ok { color: var(--ok); }

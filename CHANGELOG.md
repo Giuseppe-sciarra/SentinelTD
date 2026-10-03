@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.24.0
+
+### Fixed
+- Server status: fixed column widths — PHP no longer takes the free space, load is wide enough
+  for "6% · calm" on one line, more room for problems
+- Load without a percentage: on hostings that block `/proc/cpuinfo` the connector could not read
+  the cores and the panel showed the bare load average ("13.07"). Connectors WordPress **2.27.0**
+  and Joomla **1.35.0** also read the cores from `/sys/devices/system/cpu/online` and, when
+  `shell_exec` is allowed, from `nproc`; when nothing works the panel says "cores not detected"
+
+## 2.23.4
+
+### Changed
+- Server status, load: next to the percentage a word with fixed thresholds — **calm** under 70%,
+  **busy** 70–150%, **overloaded** over 150% — with the same colours, and a legend in the
+  resources box. The explanations are rewritten in plain words ("how hard the server is working
+  compared to what it can do") without the load-average arithmetic
+- The *Cores* explanation just says it is the number of processors of the server
+
+## 2.23.3
+
+### Changed
+- The ⓘ explanations open in a styled box (panel colours, readable size, shown above the label
+  so it does not cover the values, gone when the mouse leaves) instead of the browser's plain
+  tooltip; the text still comes from the translated `title`. The *Cores* explanation uses the
+  server's own number of cores in its example
+
+## 2.23.2
+
+### Changed
+- Server status, wording reviewed on screen: sites as "17 WordPress" / "36 WordPress · 2 Joomla",
+  PHP as "7.4 ×1" (with a hover text), disk as "85% used", size change "in 30 days", problems in
+  words ("1 space · 1 PHP · 2 domains") instead of bare icons; the subtitle says a row opens on
+  click and points to the ⓘ. Open: "Load average (1 · 5 · 15 min)", "Highest among the sites",
+  problem kinds with the same names as the box on top, and under each kind only the detail
+  ("for 5 days", "7.4.33") instead of repeating the kind. Low space reads "only N MB free"
+  everywhere
+
+## 2.23.1
+
+### Changed
+- Large logs are no longer listed as a problem (Server status, dashboard, reports): too much
+  noise. They still trigger the *Site space and logs* notification and show in the site
+  diagnostics
+- Server status: load shown as a **percentage of the cores** (100% = every core busy, above =
+  work queued), with the raw load average on hover; column headers and box labels carry an ⓘ
+  with what each value means
+
 ## 2.23.0
 
 ### Changed

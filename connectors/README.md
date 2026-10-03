@@ -4,8 +4,8 @@ Sentinel TD talks to each website through a small connector installed on the sit
 
 | Platform | Source | Current version |
 |---|---|---|
-| WordPress | `wordpress/td-panopticon/` | 2.26.1 |
-| Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.34.0 |
+| WordPress | `wordpress/td-panopticon/` | 2.27.0 |
+| Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.35.0 |
 
 The internal identifiers (`td-panopticon` folder, `tdpanopticon` Joomla element, REST
 namespace `tdpanopticon/v1`, token option name) are kept from the original project name
