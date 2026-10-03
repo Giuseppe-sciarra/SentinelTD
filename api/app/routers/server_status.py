@@ -232,7 +232,8 @@ async def overview(by: str = Query("server"), s: AsyncSession = Depends(get_sess
             "sites": sorted(rows, key=lambda r: (r["status"] == "ok", -(r["pending"] + r["failed"]), r["name"].lower())),
         })
     out.sort(key=lambda g: (-g["counts"]["sites"], g["key"]))
-    return {"by": by, "periods": periods, "groups": out, "generated_at": now.isoformat()}
+    return {"by": by, "periods": periods, "groups": out, "generated_at": now.isoformat(),
+            "metrics_interval_minutes": prefs["server_metrics_minutes"]}
 
 
 @router.get("/problems")

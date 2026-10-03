@@ -245,6 +245,10 @@ says which connector it needs.
 
 ---
 
+Resource readings (CPU load, RAM and disk) use an independent timer, every 5 minutes
+by default, configurable in Settings. The server status page refreshes every 30 seconds
+while visible. Each resource shows its measurement age.
+
 ## Updates
 
 ```bash

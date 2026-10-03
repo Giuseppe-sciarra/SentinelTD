@@ -255,6 +255,10 @@ WordPress e 1.30 o successivo su Joomla**. Finché un sito non ha fatto la diagn
 
 ---
 
+Le risorse dei server (carico CPU, RAM e disco) vengono rilevate con un timer autonomo,
+ogni 5 minuti di base, configurabile in Impostazioni. La pagina Stato server si ricarica
+ogni 30 secondi mentre è visibile. Ogni risorsa mostra quanto è recente la misura.
+
 ## Aggiornamenti
 
 ```bash

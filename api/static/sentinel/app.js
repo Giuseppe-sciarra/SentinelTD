@@ -25,7 +25,7 @@ function sentinel() {
     exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, dSort: 'folder' },
     expiryForm: { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 }, expiryEdit: false, expiryErr: '',
     prefsLoaded: false,
-    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], busy: false, msg: '', err: '' },
+    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, server_metrics_minutes: 5, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], busy: false, msg: '', err: '' },
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
@@ -54,16 +54,15 @@ function sentinel() {
     // spiegazioni (ⓘ): riquadro curato invece del suggerimento del browser
     initTips() {
       if (window.__tdTips) return; window.__tdTips = true;
-      const tip = document.createElement('div'); tip.className = 'td-tip'; document.body.appendChild(tip);
+      const tip = document.createElement('div'); tip.className = 'td-tip'; tip.id = 'td-tooltip'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip);
       let cur = null;
-      const hide = () => { tip.classList.remove('on'); if (cur && cur.dataset.tip !== undefined) { cur.setAttribute('title', cur.dataset.tip); delete cur.dataset.tip; } cur = null; };
-      document.addEventListener('mouseover', e => {
-        const el = e.target.closest && e.target.closest('.hint-h');
+      const hide = () => { tip.classList.remove('on'); if (cur && cur.dataset.tip !== undefined) { cur.setAttribute('title', cur.dataset.tip); delete cur.dataset.tip; cur.removeAttribute('aria-describedby'); } cur = null; };
+      const show = el => {
         if (el === cur) return;
         hide();
         if (!el) return;
-        const text = el.getAttribute('title'); if (!text) return;
-        cur = el; el.dataset.tip = text; el.removeAttribute('title');
+        const text = el.matches('.history-cell') ? el.getAttribute('aria-label') : el.getAttribute('title'); if (!text) return;
+        cur = el; el.dataset.tip = text; el.removeAttribute('title'); el.setAttribute('aria-describedby', tip.id);
         tip.textContent = '';
         if (text.includes('•')) {   // elenco: ogni "•" e' una riga a parte
           const lead = !text.trim().startsWith('•');
@@ -79,7 +78,12 @@ function sentinel() {
         let top = r.top - th - 8 > 8 ? r.top - th - 8 : r.bottom + 8;   // sopra la voce, se c'e' spazio
         top = Math.max(8, Math.min(top, window.innerHeight - th - 8));   // sempre dentro lo schermo
         tip.style.left = left + 'px'; tip.style.top = top + 'px';   // fisso alla finestra: non allunga mai la pagina
-      });
+      };
+      document.addEventListener('mouseover', e => show(e.target.closest && e.target.closest('.hint-h')));
+      document.addEventListener('focusin', e => { const cell = e.target.closest && e.target.closest('.history-cell'); if (cell) show(cell); });
+      document.addEventListener('focusout', e => { if (e.target === cur) hide(); });
+      document.addEventListener('click', e => { const cell = e.target.closest && e.target.closest('.history-cell'); if (cell) show(cell); else hide(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
       window.addEventListener('scroll', hide, { passive: true });
     },
     async init() {
@@ -118,6 +122,7 @@ function sentinel() {
       setInterval(() => { if (this.token && !document.hidden) this.watchChanges(); }, 6000);
       document.addEventListener('visibilitychange', () => { if (!document.hidden && this.token) this.watchChanges(); });
       setInterval(() => { if (this.token && !document.hidden) this.load(true); }, 10 * 60 * 1000);
+      setInterval(() => { if (this.token && !document.hidden && this.route.page === 'servers') this.loadServerStatus().catch(() => {}); }, 30000);
     },
     async watchChanges() {
       if (this._watching) return;
@@ -178,7 +183,15 @@ function sentinel() {
     // non possono mandare l'header Authorization). Va rinnovato, altrimenti dopo dieci
     // minuti anteprime, download connettori e PDF report rispondono 401.
     async loadMeta() {
-      try { const r = await this.api('/api/version'); if (r.ok) this.meta = { ...this.meta, ...(await r.json()) }; } catch (e) { }
+      if (this._metaLoading) return;
+      this._metaLoading = true;
+      try {
+        const r = await this.api('/api/version');
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d && typeof d.version === 'string' && d.version.trim()) this.meta = { ...this.meta, ...d };
+      } catch (e) { /* Keep the last successful version when the request fails. */ }
+      finally { this._metaLoading = false; }
     },
     async refreshImageToken() {
       if (!this.token) return '';
@@ -209,7 +222,7 @@ function sentinel() {
       el.src = this.shotUrl(site);
     },
 
-    _setTokens(d) { this.token = d.token; this.imageToken = d.image_token || ''; localStorage.setItem('tdp_token', this.token); localStorage.setItem('tdp_image_token', this.imageToken); },
+    _setTokens(d) { this.token = d.token; this.imageToken = d.image_token || ''; localStorage.setItem('tdp_token', this.token); localStorage.setItem('tdp_image_token', this.imageToken); this.loadMeta(); },
     async api(path, opts = {}) {
       const r = await fetch(path, { ...opts, headers: { ...this.h(), ...(opts.headers || {}) } });
       if (r.status === 401) { this.logout(); throw new Error('Sessione scaduta'); }
@@ -289,6 +302,7 @@ function sentinel() {
     // ---------- data ----------
     async load(silent = false) {
       if (!silent) this.loading = true;
+      if (this.token && !this.meta.version) this.loadMeta();
       try {
         const r = await this.api('/api/sites');
         if (r.ok) this.sites = await r.json();
@@ -1052,7 +1066,7 @@ function sentinel() {
         // una nuova impostazione non richiede di ricordarsi di inserirla anche qui
         // (era successo con screenshot_every_hours: il valore non partiva e tornava al default).
         const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'expiry_warning_days',
-                          'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days',
+                          'expiry_critical_days', 'screenshot_every_hours', 'server_metrics_minutes', 'history_retention_days',
                           'domain_decision_days', 'domain_alert_norenew', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
@@ -1793,11 +1807,14 @@ function sentinel() {
     },
     // ---------- stato server ----------
     async loadServerStatus() {
+      if (this.srvst.busy) return;
       this.srvst.busy = true;
       try {
         const r = await this.api('/api/servers/overview?by=' + this.srvst.by); if (r.ok) this.srvst.data = await r.json();
       } finally { this.srvst.busy = false; }
     },
+    metricAge(t) { return t ? 'Ultima misura ' + this.hhmm(t) + ' · ' + this.ago(new Date(t * 1000).toISOString()) : 'Misura non ancora disponibile'; },
+    metricStale(t) { return !!t && Date.now() / 1000 - t > ((this.srvst.data && this.srvst.data.metrics_interval_minutes) || 5) * 120; },
     async srvSetBy(by) { this.srvst.by = by; await this.loadServerStatus(); },
     fmtGB(b) { return b ? (b / 1073741824).toFixed(b < 10737418240 ? 1 : 0).replace('.', ',') + ' GB' : '—'; },
     fmtMB(b) { if (!b) return '—'; return b >= 1073741824 ? this.fmtGB(b) : Math.round(b / 1048576) + ' MB'; },
@@ -1813,36 +1830,34 @@ function sentinel() {
       return null;
     },
     hhmm(t) { return t ? new Date(t * 1000).toLocaleTimeString(I18n.locale, { hour: '2-digit', minute: '2-digit' }) : ''; },
-    // grafico delle 24 ore: una barra ogni mezz'ora, linea al 100%, colore per livello
-    loadChartSvg(l) {
-      if (!l || !l.series) return '';
-      const W = 300, H = 64, n = l.series.length, bw = W / n, cores = l.cores || 1, cap = 2;   // scala fino al 200%
-      const col = v => ({ ok: 'var(--ok)', warn: 'var(--warn)', err: 'var(--err)' })[this.loadLevel(v, cores)] || 'var(--mut)';
-      let bars = '';
-      l.series.forEach((v, i) => {
-        if (v === null || v === undefined) return;
-        const p = Math.min(v / cores, cap) / cap, bh = Math.max(1.5, p * (H - 2));
-        bars += `<rect x="${(i * bw + 0.6).toFixed(1)}" y="${(H - bh).toFixed(1)}" width="${(bw - 1.2).toFixed(1)}" height="${bh.toFixed(1)}" rx="1" fill="${col(v)}"><title>${this.hhmm(l.series_start + i * l.bucket_seconds)} · ${Math.round(v / cores * 100)}%</title></rect>`;
+    // Storico a caselle: l'intera superficie mostra il valore, anche su touch e tastiera.
+    metricHistory(data, kind) {
+      if (!data || !Array.isArray(data.series)) return '';
+      const esc = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
+      const step = data.bucket_seconds || 1800;
+      const cells = data.series.map((v, i) => {
+        const start = (data.series_start || 0) + i * step;
+        const day = new Date(start * 1000).toLocaleDateString(I18n.locale, { day: '2-digit', month: '2-digit' });
+        const time = day + ' ' + this.hhmm(start) + '–' + this.hhmm(start + step);
+        const measured = v !== null && v !== undefined && Number.isFinite(v);
+        const level = measured ? (kind === 'cpu' ? this.loadLevel(v, data.cores) : this.ramLevel(v)) : null;
+        // Leave source labels in Italian so the UI translator can also handle language changes.
+        const value = !measured ? 'Nessuna misura' : (kind === 'cpu' ? this.loadPct(v, data.cores) : Math.round(v) + '%');
+        const word = measured ? (kind === 'cpu' ? this.loadWord(v, data.cores) : this.ramWord(v)) : '';
+        const label = esc(time + ' · ' + value + (word ? ' · ' + word : ''));
+        const current = i === data.series.length - 1;
+        return `<button type="button" class="history-cell hint-h state-${level || 'empty'}${current ? ' is-current' : ''}"${current ? ' aria-current="time"' : ''} title="${label}" aria-label="${label}"></button>`;
       });
-      const y100 = H - (1 / cap) * (H - 2);
-      return `<svg viewBox="0 0 ${W} ${H}" class="spark" preserveAspectRatio="none" style="height:64px">${bars}<line x1="0" x2="${W}" y1="${y100.toFixed(1)}" y2="${y100.toFixed(1)}" stroke="var(--txt-2)" stroke-dasharray="3 3" stroke-width="0.8"/></svg>`;
+      return `<div class="metric-history">${cells.join('')}</div>`;
+    },
+    loadHistoryHtml(l) {
+      return this.metricHistory(l, 'cpu');
     },
     // RAM usata (%): sotto 75% a posto, 75-90% alta, oltre 90% piena
     ramLevel(p) { return p === null || p === undefined ? null : (p < 75 ? 'ok' : (p <= 90 ? 'warn' : 'err')); },
     ramWord(p) { return ({ ok: 'a posto', warn: 'alta', err: 'piena' })[this.ramLevel(p)] || ''; },
-    // grafico della RAM nelle 24 ore: una barra ogni mezz'ora, altezza = % usata, riga tratteggiata al 90%
-    ramChartSvg(m) {
-      if (!m || !m.series) return '';
-      const W = 300, H = 64, n = m.series.length, bw = W / n;
-      const col = v => ({ ok: 'var(--ok)', warn: 'var(--warn)', err: 'var(--err)' })[this.ramLevel(v)] || 'var(--mut)';
-      let bars = '';
-      m.series.forEach((v, i) => {
-        if (v === null || v === undefined) return;
-        const bh = Math.max(1.5, v / 100 * (H - 2));
-        bars += `<rect x="${(i * bw + 0.6).toFixed(1)}" y="${(H - bh).toFixed(1)}" width="${(bw - 1.2).toFixed(1)}" height="${bh.toFixed(1)}" rx="1" fill="${col(v)}"><title>${this.hhmm((m.series_start || 0) + i * (m.bucket_seconds || 1800))} · ${Math.round(v)}%</title></rect>`;
-      });
-      const y90 = H - 0.9 * (H - 2);
-      return `<svg viewBox="0 0 ${W} ${H}" class="spark" preserveAspectRatio="none" style="height:64px">${bars}<line x1="0" x2="${W}" y1="${y90.toFixed(1)}" y2="${y90.toFixed(1)}" stroke="var(--txt-2)" stroke-dasharray="3 3" stroke-width="0.8"/></svg>`;
+    ramHistoryHtml(m) {
+      return this.metricHistory(m, 'ram');
     },
     loadLevel(v, cores) { if (v === null || v === undefined || !cores) return null; const p = v / cores * 100; return p < 70 ? 'ok' : (p <= 150 ? 'warn' : 'err'); },
     loadWord(v, cores) { return ({ ok: 'tranquillo', warn: 'impegnato', err: 'sovraccarico' })[this.loadLevel(v, cores)] || ''; },

@@ -1,6 +1,6 @@
 """Versione dell'applicazione — unico punto da modificare a ogni rilascio."""
 
-__version__ = "2.28.1"
+__version__ = "2.28.4"
 APP_NAME = "Sentinel TD"
 VENDOR = "Tastiere Digitali"
 VENDOR_URL = "https://www.tastieredigitali.it"

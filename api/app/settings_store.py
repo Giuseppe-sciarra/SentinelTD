@@ -14,6 +14,7 @@ DEFAULTS = {
     "expiry_warning_days": 30,
     "expiry_critical_days": 7,
     "screenshot_every_hours": 12,   # ogni quante ore rigenerare l'anteprima dei siti
+    "server_metrics_minutes": 5,   # CPU/RAM/disco: timer autonomo per server
     "history_retention_days": 400,  # cronologia dettagliata degli update (report dettagliato)
     "domain_decision_days": 60,     # quanti giorni prima chiedere "si rinnova o no?"
     "domain_alert_norenew": 1,      # 1 = avvisa anche per i domini da NON rinnovare
@@ -49,6 +50,7 @@ def normalize(data: dict | None) -> dict:
         ("expiry_warning_days", 1, 3650),
         ("expiry_critical_days", 1, 3650),
         ("screenshot_every_hours", 1, 720),
+        ("server_metrics_minutes", 1, 180),
         ("history_retention_days", 7, 3650),
         ("domain_decision_days", 0, 3650),
         ("domain_alert_norenew", 0, 1),

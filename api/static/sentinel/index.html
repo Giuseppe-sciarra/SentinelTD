@@ -971,82 +971,120 @@
                   <!-- aperto: statistiche estese -->
                   <div class="srvx-body" x-show="srvst.open[g.key]">
                     <div class="srvx-grid">
-                      <div class="srvx-box"><h4 class="hint-h" title="Stato dei siti di questo server: raggiungibili, con l'aggiornamento automatico attivo, componenti bloccati alla versione installata e versioni del CMS.">Siti <i>ⓘ</i></h4>
-                        <div class="srvx-kv"><span>Online</span><b x-text="g.counts.enabled - g.counts.offline"></b></div>
-                        <div class="srvx-kv"><span>Offline</span><b :class="g.counts.offline ? 'err' : ''" x-text="g.counts.offline"></b></div>
-                        <div class="srvx-kv"><span>Aggiornamento automatico</span><b x-text="g.auto_update + ' su ' + g.counts.enabled"></b></div>
-                        <div class="srvx-kv"><span>Componenti bloccati</span><b x-text="g.locked"></b></div>
-                        <div class="srvx-sub">Versioni</div>
-                        <template x-for="v in (g.cms_versions || [])" :key="g.key+'cv'+v[0]"><div class="srvx-kv"><span class="mono" x-text="v[0]"></span><b x-text="v[1]"></b></div></template>
-                      </div>
-                      <div class="srvx-box"><h4 class="hint-h" title="Carico, processori e disco del server, software web e nome della macchina, dall'ultima diagnostica notturna.">Risorse del server <i>ⓘ</i></h4>
-                        <template x-if="g.load24">
-                          <div>
-                            <div class="srvx-kv"><span class="hint-h" title="Quanto lavora adesso il server: nell'ultimo minuto, negli ultimi 5 e negli ultimi 15 minuti. Se i numeri scendono, si sta calmando.">Adesso (1 · 5 · 15 min) <i>ⓘ</i></span><b :class="loadLevel(g.load24.now.load[0], g.load24.cores) || ''" x-text="g.load24.now.load.map(v => loadPct(v, g.load24.cores)).join(' · ')"></b></div>
-                            <div class="srvx-kv"><span class="hint-h" title="Il valore tipico delle ultime 24 ore: metà del tempo il server sta sotto questo valore. Un picco isolato, come un backup notturno, non lo sposta.">Di solito (24 ore) <i>ⓘ</i></span><b :class="loadLevel(g.load24.usual, g.load24.cores) || ''" x-text="loadPct(g.load24.usual, g.load24.cores) + ' · ' + loadWord(g.load24.usual, g.load24.cores)"></b></div>
-                            <div class="srvx-kv"><span class="hint-h" title="Il momento più pesante delle ultime 24 ore e l'ora in cui c'è stato. Un picco di notte di solito è un backup dell'hosting.">Picco (24 ore) <i>ⓘ</i></span><b :class="loadLevel(g.load24.peak.load, g.load24.cores) || ''" x-text="loadPct(g.load24.peak.load, g.load24.cores) + ' alle ' + hhmm(g.load24.peak.t)"></b></div>
-                            <div class="srvx-kv"><span class="hint-h" title="Numero di processori (core) del server.">Core <i>ⓘ</i></span><b x-text="g.load24.cores || 'non rilevati'"></b></div>
-                            <div style="margin-top:8px" x-html="loadChartSvg(g.load24)"></div>
-                            <div class="load-axis"><span>24 ore fa</span><span>- - 100%</span><span>adesso</span></div>
-                            <div class="load-legend"><span class="ok">● sotto 70% tranquillo</span><span class="warn">● 70–150% impegnato</span><span class="err">● oltre 150% sovraccarico</span></div>
-                            <div class="small mut" style="margin-top:4px" x-text="g.load24.samples + ' misure · ultima ' + ago(new Date(g.load24.now.t * 1000).toISOString())"></div>
-                            <template x-if="g.load24.mem">
-                              <div class="ram-block">
-                                <div class="srvx-sub hint-h" title="Memoria (RAM) del server. Si misura quella occupata dai programmi: la cache che il sistema libera subito non conta.">Memoria (RAM) <i>ⓘ</i></div>
-                                <div class="srvx-kv"><span class="hint-h" title="Quanta RAM è occupata adesso, sul totale del server.">Usata adesso <i>ⓘ</i></span><b :class="ramLevel(g.load24.mem.now.used_pct) || ''" x-text="Math.round(g.load24.mem.now.used_pct) + '% · ' + ramWord(g.load24.mem.now.used_pct)"></b></div>
-                                <div class="srvx-kv"><span>Occupata</span><b x-text="fmtGB(g.load24.mem.now.used) + ' di ' + fmtGB(g.load24.mem.total)"></b></div>
-                                <div class="srvx-kv"><span class="hint-h" title="Il valore tipico delle ultime 24 ore: metà del tempo la RAM sta sotto questo valore. Un picco isolato, come un backup notturno, non lo sposta.">Di solito (24 ore) <i>ⓘ</i></span><b :class="ramLevel(g.load24.mem.usual) || ''" x-text="Math.round(g.load24.mem.usual) + '% · ' + ramWord(g.load24.mem.usual)"></b></div>
-                                <div class="srvx-kv"><span class="hint-h" title="Il momento in cui la RAM è stata più piena nelle ultime 24 ore, e l'ora.">Picco (24 ore) <i>ⓘ</i></span><b :class="ramLevel(g.load24.mem.peak.pct) || ''" x-text="Math.round(g.load24.mem.peak.pct) + '% alle ' + hhmm(g.load24.mem.peak.t)"></b></div>
-                                <div class="srvx-kv" x-show="g.load24.mem.now.swap_total"><span class="hint-h" title="Spazio su disco che il server usa come memoria di emergenza quando la RAM finisce: è molto più lento. Se è in uso in modo continuo, al server serve più RAM.">Swap in uso <i>ⓘ</i></span><b x-text="fmtMB(g.load24.mem.now.swap_used || 0) + ' su ' + fmtMB(g.load24.mem.now.swap_total)"></b></div>
-                                <div style="margin-top:8px" x-html="ramChartSvg({ ...g.load24.mem, series_start: g.load24.series_start, bucket_seconds: g.load24.bucket_seconds })"></div>
-                                <div class="load-axis"><span>24 ore fa</span><span>- - 90%</span><span>adesso</span></div>
-                                <div class="load-legend"><span class="ok">● sotto 75% a posto</span><span class="warn">● 75–90% alta</span><span class="err">● oltre 90% piena</span></div>
+                      <div class="srvx-stack">
+                        <div class="srvx-box"><h4 class="hint-h" title="Stato dei siti di questo server: raggiungibili, con l'aggiornamento automatico attivo, componenti bloccati alla versione installata e versioni del CMS.">Siti <i>ⓘ</i></h4>
+                          <div class="srvx-kv"><span>Online</span><b x-text="g.counts.enabled - g.counts.offline"></b></div>
+                          <div class="srvx-kv"><span>Offline</span><b :class="g.counts.offline ? 'err' : ''" x-text="g.counts.offline"></b></div>
+                          <div class="srvx-kv"><span>Aggiornamento automatico</span><b x-text="g.auto_update + ' su ' + g.counts.enabled"></b></div>
+                          <div class="srvx-kv"><span>Componenti bloccati</span><b x-text="g.locked"></b></div>
+                          <div class="srvx-sub">Versioni</div>
+                          <template x-for="v in (g.cms_versions || [])" :key="g.key+'cv'+v[0]"><div class="srvx-kv"><span class="mono" x-text="v[0]"></span><b x-text="v[1]"></b></div></template>
+                        </div>
+                        <div class="srvx-box"><h4 class="hint-h" title="Domini dei siti già scaduti o che scadono entro 30 giorni.">Domini <i>ⓘ</i></h4>
+                          <div class="srvx-kv"><span>Scaduti</span><b :class="(g.domains_expired || []).length ? 'err' : ''" x-text="(g.domains_expired || []).length"></b></div>
+                          <div class="srvx-kv"><span>In scadenza entro 30 giorni</span><b :class="(g.domains_soon || []).length ? 'warn' : ''" x-text="(g.domains_soon || []).length"></b></div>
+                          <template x-for="d in [...(g.domains_expired || []), ...(g.domains_soon || [])].slice(0, 8)" :key="g.key+'d'+d.site_id"><div class="srvx-kv"><a :href="'#/site/'+d.site_id" x-text="d.site" translate="no"></a><span class="small" :class="d.days < 0 ? 'err' : 'warn'" x-text="d.days < 0 ? 'scaduto da ' + (-d.days) + ' giorni' : 'tra ' + d.days + ' giorni'"></span></div></template>
+                        </div>
+                        <div class="srvx-box"><h4 class="hint-h" title="In sospeso: aggiornamenti disponibili non ancora fatti. Falliti: tentati e non riusciti, ancora da sistemare. Sotto, gli aggiornamenti fatti mese per mese.">Aggiornamenti <i>ⓘ</i></h4>
+                          <div class="srvx-kv"><span>In sospeso</span><b x-text="g.counts.pending"></b></div>
+                          <div class="srvx-kv"><span>Falliti</span><b :class="g.counts.failed ? 'err' : ''" x-text="g.counts.failed"></b></div>
+                          <div class="mbars" style="margin-top:10px">
+                            <template x-for="m in g.months" :key="g.key+'m'+m.period">
+                              <div class="mbar" :title="m.period + ': ' + m.ok + ' riusciti, ' + m.failed + ' falliti'">
+                                <div class="mbar-n" x-text="(m.ok + m.failed) || ''"></div>
+                                <div class="mbar-col"><div class="mbar-ko" :style="'height:' + (m.failed / monthMax(g.months) * 100) + '%'"></div><div class="mbar-ok" :style="'height:' + (m.ok / monthMax(g.months) * 100) + '%'"></div></div>
+                                <div class="mbar-l"><span x-text="m.period.slice(5)"></span><span class="mbar-year" x-text="'/' + m.period.slice(2, 4)"></span></div>
                               </div>
                             </template>
-                            <div class="small mut" x-show="!g.load24.mem" style="margin-top:6px">RAM: arriva col connettore nuovo (WordPress 2.29, Joomla 1.37).</div>
                           </div>
-                        </template>
-                        <div class="small mut" x-show="!g.load24" style="margin-bottom:6px">Le misure di carico e RAM arrivano con i controlli normali dopo l'aggiornamento del connettore (WordPress 2.29, Joomla 1.37).</div>
-                        <div class="srvx-kv"><span class="hint-h" title="Spazio libero sul disco del server. Su un hosting condiviso è il disco di tutti: la quota del singolo sito si vede nella diagnostica del sito.">Disco <i>ⓘ</i></span><b x-text="(g.load24 && g.load24.disk) ? fmtGB(g.load24.disk.free) + ' liberi su ' + fmtGB(g.load24.disk.total) + ' (' + Math.round(100 - g.load24.disk.free / g.load24.disk.total * 100) + '% usato)' : (g.disk ? fmtGB(g.disk.free) + ' liberi su ' + fmtGB(g.disk.total) + ' (' + Math.round(100 - g.disk.free / g.disk.total * 100) + '% usato)' : '—')"></b></div>
-                        <div class="srvx-sub">Software</div>
-                        <div class="chips"><template x-for="w in (g.software || [])" :key="g.key+'sw'+w[0]"><span class="chip small"><span x-text="w[0]"></span>&nbsp;<b x-text="w[1]"></b></span></template><span class="mut small" x-show="!(g.software || []).length">dalla prossima diagnostica notturna</span></div>
-                        <div class="small mut mono" style="margin-top:6px" x-show="(g.hostnames || []).length" x-text="(g.hostnames || []).join(' · ')" translate="no"></div>
-                      </div>
-                      <div class="srvx-box"><h4 class="hint-h" title="File e database dei siti, misurati ogni notte: totale, variazione in 30 giorni, media e i siti più pesanti.">Peso <i>ⓘ</i></h4>
-                        <div class="srvx-kv"><span>Totale</span><b x-text="fmtMB(g.size.total)"></b></div>
-                        <div class="srvx-kv"><span>In 30 giorni</span><b x-text="g.size.days > 1 ? srvDelta(g) : '—'"></b></div>
-                        <div class="srvx-kv"><span>Media per sito</span><b x-text="g.avg_size ? fmtMB(g.avg_size) : '—'"></b></div>
-                        <svg viewBox="0 0 220 44" class="spark" style="margin:8px 0" x-show="g.size.series.length > 1"><path :d="sparkPath(g.size.series)" fill="none" stroke="var(--acc)" stroke-width="2"/></svg>
-                        <div class="srvx-sub" x-show="(g.largest || []).length">I più pesanti</div>
-                        <template x-for="l in (g.largest || [])" :key="g.key+'lg'+l.id"><div class="srvx-kv"><a :href="'#/site/'+l.id" x-text="l.name" translate="no"></a><b x-text="fmtMB(l.size)"></b></div></template>
-                      </div>
-                      <div class="srvx-box"><h4 class="hint-h" title="In sospeso: aggiornamenti disponibili non ancora fatti. Falliti: tentati e non riusciti, ancora da sistemare. Sotto, gli aggiornamenti fatti mese per mese.">Aggiornamenti <i>ⓘ</i></h4>
-                        <div class="srvx-kv"><span>In sospeso</span><b x-text="g.counts.pending"></b></div>
-                        <div class="srvx-kv"><span>Falliti</span><b :class="g.counts.failed ? 'err' : ''" x-text="g.counts.failed"></b></div>
-                        <div class="mbars" style="margin-top:10px">
-                          <template x-for="m in g.months" :key="g.key+'m'+m.period">
-                            <div class="mbar" :title="m.period + ': ' + m.ok + ' riusciti, ' + m.failed + ' falliti'">
-                              <div class="mbar-n" x-text="(m.ok + m.failed) || ''"></div>
-                              <div class="mbar-col"><div class="mbar-ko" :style="'height:' + (m.failed / monthMax(g.months) * 100) + '%'"></div><div class="mbar-ok" :style="'height:' + (m.ok / monthMax(g.months) * 100) + '%'"></div></div>
-                              <div class="mbar-l" x-text="m.period.slice(5) + '/' + m.period.slice(2, 4)"></div>
+                          <div class="small mut" style="margin-top:4px"><span style="color:var(--ok)">■</span> riusciti · <span style="color:var(--err)">■</span> falliti</div>
+                        </div>
+                        <div class="srvx-box"><h4 class="hint-h" title="Ogni tipo di problema con i siti che ce l'hanno.">Problemi <i>ⓘ</i></h4>
+                          <div class="small ok" x-show="!g.sites_with_problems">nessuno</div>
+                          <template x-for="k in ['offline','space','failed','php','domain']" :key="g.key+'pb'+k">
+                            <div class="srvx-pgroup" x-show="g.problems.some(p => p.kind === k)">
+                              <div class="srvx-sub"><span x-text="problemIcon(k)"></span> <span x-text="problemLong(k)"></span></div>
+                              <template x-for="(p, i) in g.problems.filter(p => p.kind === k)" :key="g.key+k+i"><div class="srvx-kv"><a :href="'#/site/'+p.site_id" x-text="p.site" translate="no"></a><span class="small mut" x-text="problemDetail(p)"></span></div></template>
                             </div>
                           </template>
                         </div>
-                        <div class="small mut" style="margin-top:4px"><span style="color:var(--ok)">■</span> riusciti · <span style="color:var(--err)">■</span> falliti</div>
-                      </div>
-                      <div class="srvx-box"><h4 class="hint-h" title="Domini dei siti già scaduti o che scadono entro 30 giorni.">Domini <i>ⓘ</i></h4>
-                        <div class="srvx-kv"><span>Scaduti</span><b :class="(g.domains_expired || []).length ? 'err' : ''" x-text="(g.domains_expired || []).length"></b></div>
-                        <div class="srvx-kv"><span>In scadenza entro 30 giorni</span><b :class="(g.domains_soon || []).length ? 'warn' : ''" x-text="(g.domains_soon || []).length"></b></div>
-                        <template x-for="d in [...(g.domains_expired || []), ...(g.domains_soon || [])].slice(0, 8)" :key="g.key+'d'+d.site_id"><div class="srvx-kv"><a :href="'#/site/'+d.site_id" x-text="d.site" translate="no"></a><span class="small" :class="d.days < 0 ? 'err' : 'warn'" x-text="d.days < 0 ? 'scaduto da ' + (-d.days) + ' giorni' : 'tra ' + d.days + ' giorni'"></span></div></template>
-                      </div>
-                      <div class="srvx-box"><h4 class="hint-h" title="Ogni tipo di problema con i siti che ce l'hanno.">Problemi <i>ⓘ</i></h4>
-                        <div class="small ok" x-show="!g.sites_with_problems">nessuno</div>
-                        <template x-for="k in ['offline','space','failed','php','domain']" :key="g.key+'pb'+k">
-                          <div class="srvx-pgroup" x-show="g.problems.some(p => p.kind === k)">
-                            <div class="srvx-sub"><span x-text="problemIcon(k)"></span> <span x-text="problemLong(k)"></span></div>
-                            <template x-for="(p, i) in g.problems.filter(p => p.kind === k)" :key="g.key+k+i"><div class="srvx-kv"><a :href="'#/site/'+p.site_id" x-text="p.site" translate="no"></a><span class="small mut" x-text="problemDetail(p)"></span></div></template>
+                        <div class="srvx-box"><h4 class="hint-h" title="File e database dei siti, misurati ogni notte: totale, variazione in 30 giorni, media e i siti più pesanti.">Peso <i>ⓘ</i></h4>
+                          <div class="srvx-weight" :class="(g.largest || []).length ? 'has-largest' : ''">
+                            <div>
+                              <div class="srvx-kv"><span>Totale</span><b x-text="fmtMB(g.size.total)"></b></div>
+                              <div class="srvx-kv"><span>In 30 giorni</span><b x-text="g.size.days > 1 ? srvDelta(g) : '—'"></b></div>
+                              <div class="srvx-kv"><span>Media per sito</span><b x-text="g.avg_size ? fmtMB(g.avg_size) : '—'"></b></div>
+                              <svg viewBox="0 0 220 44" class="spark" style="margin:6px 0 0;height:34px" x-show="g.size.series.length > 1"><path :d="sparkPath(g.size.series)" fill="none" stroke="var(--acc)" stroke-width="2"/></svg>
+                            </div>
+                            <div x-show="(g.largest || []).length">
+                              <div class="srvx-sub" x-show="(g.largest || []).length">I più pesanti</div>
+                              <template x-for="l in (g.largest || [])" :key="g.key+'lg'+l.id"><div class="srvx-kv"><a :href="'#/site/'+l.id" x-text="l.name" translate="no"></a><b x-text="fmtMB(l.size)"></b></div></template>
+                            </div>
                           </div>
-                        </template>
+                        </div>
+                      </div>
+                      <div class="srvx-stack srvx-resources">
+                        <div class="srvx-box"><h4 class="hint-h" title="CPU, RAM e disco rilevati periodicamente dai connettori. Ogni sezione mostra l'ultima misura disponibile e il suo andamento.">Risorse del server <i>ⓘ</i></h4>
+                          <div class="metric-history-key" x-show="g.load24 && (g.load24.now.load.length || g.load24.mem)">
+                            <p><b>Legenda dello storico</b></p>
+                            <p>Ogni casella = media di 30 min. Lettura da sinistra a destra, riga per riga: dalle più vecchie alle più recenti.</p>
+                            <div class="metric-key-colors">
+                              <span><i class="metric-key-dot state-ok" aria-hidden="true"></i>Normale</span>
+                              <span><i class="metric-key-dot state-warn" aria-hidden="true"></i>Elevato</span>
+                              <span><i class="metric-key-dot state-err" aria-hidden="true"></i>Molto elevato</span>
+                              <span><i class="metric-key-dot state-empty" aria-hidden="true"></i>Non disponibile</span>
+                            </div>
+                            <p>Bordo blu: mezz’ora in corso. Le caselle precedenti restano nello storico per 24 ore.</p>
+                          </div>
+                          <div class="metric-section">
+                            <div class="metric-heading"><span class="hint-h" title="Carico medio del server rapportato ai core disponibili: non è la percentuale di utilizzo della CPU. • Sotto 70%: tranquillo • 70–150%: impegnato • Oltre 150%: sovraccarico">CPU (carico) <i>ⓘ</i></span></div>
+                            <template x-if="g.load24 && g.load24.now.load.length">
+                              <div>
+                                <div class="srvx-kv metric-live"><span class="hint-h" title="Carico medio nell'ultimo minuto, rapportato ai core del server.">Attuale <i>ⓘ</i></span><b :class="loadLevel(g.load24.now.load[0], g.load24.cores) || ''" x-text="loadPct(g.load24.now.load[0], g.load24.cores) + ' · ' + loadWord(g.load24.now.load[0], g.load24.cores)"></b></div>
+                                <div class="metric-time"><span x-text="metricAge(g.load24.now.t)"></span><span class="warn" x-show="metricStale(g.load24.now.t)">Dati non recenti</span></div>
+                                <div class="srvx-kv"><span>Media 5 / 15 min</span><b x-text="g.load24.now.load.slice(1).map(v => loadPct(v, g.load24.cores)).join(' / ') || '—'"></b></div>
+                                <div class="srvx-kv"><span class="hint-h" title="Il valore tipico delle ultime 24 ore: metà del tempo il server sta sotto questo valore. Un picco isolato, come un backup notturno, non lo sposta.">Di solito (24 ore) <i>ⓘ</i></span><b :class="loadLevel(g.load24.usual, g.load24.cores) || ''" x-text="loadPct(g.load24.usual, g.load24.cores)"></b></div>
+                                <div class="srvx-kv"><span class="hint-h" title="Il momento più pesante delle ultime 24 ore e l'ora in cui c'è stato. Un picco di notte di solito è un backup dell'hosting.">Picco (24 ore) <i>ⓘ</i></span><b :class="loadLevel(g.load24.peak.load, g.load24.cores) || ''" x-text="loadPct(g.load24.peak.load, g.load24.cores) + ' alle ' + hhmm(g.load24.peak.t)"></b></div>
+                                <div class="srvx-kv"><span>Core</span><b x-text="g.load24.cores || 'non rilevati'"></b></div>
+                                <div class="metric-history-caption"><span>Storico 24 ore</span><span class="hint-h" title="Ogni casella riassume una mezz’ora fissa (:00–:30 oppure :30–:00). Tocca o passa sopra per leggere data, fascia oraria e valore medio. La casella con il bordo blu è ancora in corso; si aggiorna con le nuove misure.">Fasce fisse di 30 min <i>ⓘ</i></span></div>
+                                <div x-html="loadHistoryHtml(g.load24)"></div>
+                              </div>
+                            </template>
+                            <div class="small mut" x-show="!g.load24 || !g.load24.now.load.length">Misura CPU non ancora disponibile.</div>
+                          </div>
+                          <div class="metric-section">
+                            <div class="metric-heading"><span class="hint-h" title="Memoria occupata dai programmi; la cache che il sistema può liberare non conta. • Sotto 75%: a posto • 75–90%: alta • Oltre 90%: piena">Memoria (RAM) <i>ⓘ</i></span></div>
+                            <template x-if="g.load24 && g.load24.mem">
+                              <div>
+                                <div class="srvx-kv metric-live"><span>Attuale</span><b :class="ramLevel(g.load24.mem.now.used_pct) || ''" x-text="Math.round(g.load24.mem.now.used_pct) + '% · ' + ramWord(g.load24.mem.now.used_pct)"></b></div>
+                                <div class="metric-time"><span x-text="metricAge(g.load24.mem.now.t)"></span><span class="warn" x-show="metricStale(g.load24.mem.now.t)">Dati non recenti</span></div>
+                                <div class="srvx-kv"><span>Occupata</span><b x-text="fmtGB(g.load24.mem.now.used) + ' di ' + fmtGB(g.load24.mem.total)"></b></div>
+                                <div class="srvx-kv"><span class="hint-h" title="Il valore tipico delle ultime 24 ore: metà del tempo la RAM sta sotto questo valore. Un picco isolato, come un backup notturno, non lo sposta.">Di solito (24 ore) <i>ⓘ</i></span><b :class="ramLevel(g.load24.mem.usual) || ''" x-text="Math.round(g.load24.mem.usual) + '%'"></b></div>
+                                <div class="srvx-kv"><span class="hint-h" title="Il momento in cui la RAM è stata più piena nelle ultime 24 ore, e l'ora.">Picco (24 ore) <i>ⓘ</i></span><b :class="ramLevel(g.load24.mem.peak.pct) || ''" x-text="Math.round(g.load24.mem.peak.pct) + '% alle ' + hhmm(g.load24.mem.peak.t)"></b></div>
+                                <div class="srvx-kv" x-show="g.load24.mem.now.swap_total"><span class="hint-h" title="Spazio su disco che il server usa come memoria di emergenza quando la RAM finisce: è molto più lento. Se è in uso in modo continuo, al server serve più RAM.">Swap in uso <i>ⓘ</i></span><b x-text="fmtMB(g.load24.mem.now.swap_used || 0) + ' su ' + fmtMB(g.load24.mem.now.swap_total)"></b></div>
+                                <div class="metric-history-caption"><span>Storico 24 ore</span><span class="hint-h" title="Ogni casella riassume una mezz’ora fissa (:00–:30 oppure :30–:00). Tocca o passa sopra per leggere data, fascia oraria e valore medio. La casella con il bordo blu è ancora in corso; si aggiorna con le nuove misure.">Fasce fisse di 30 min <i>ⓘ</i></span></div>
+                                <div x-html="ramHistoryHtml({ ...g.load24.mem, series_start: g.load24.series_start, bucket_seconds: g.load24.bucket_seconds })"></div>
+                              </div>
+                            </template>
+                            <div class="small mut" x-show="!g.load24 || !g.load24.mem">Misura RAM non ancora disponibile.</div>
+                          </div>
+                          <div class="metric-section">
+                            <div class="metric-heading"><span class="hint-h" title="Disco del server: su un hosting condiviso è lo spazio di tutti, non la quota del singolo sito.">Disco <i>ⓘ</i></span></div>
+                            <template x-if="g.load24 && g.load24.disk">
+                              <div>
+                                <div class="srvx-kv metric-live"><span>Attuale</span><b x-text="Math.round(100 - g.load24.disk.free / g.load24.disk.total * 100) + '% usato'"></b></div>
+                                <div class="metric-time"><span x-text="metricAge(g.load24.disk.t)"></span><span class="warn" x-show="metricStale(g.load24.disk.t)">Dati non recenti</span></div>
+                                <div class="srvx-kv"><span>Spazio libero</span><b x-text="fmtGB(g.load24.disk.free)"></b></div>
+                                <div class="srvx-kv"><span>Totale</span><b x-text="fmtGB(g.load24.disk.total)"></b></div>
+                              </div>
+                            </template>
+                            <div class="small mut" x-show="!g.load24 || !g.load24.disk">Misura disco non ancora disponibile.</div>
+                          </div>
+                          <div class="small mut" style="margin-top:8px" x-show="!g.load24">Le misure richiedono un connettore compatibile e raggiungibile.</div>
+                          <div class="srvx-sub">Software</div>
+                          <div class="chips"><template x-for="w in (g.software || [])" :key="g.key+'sw'+w[0]"><span class="chip small"><span x-text="w[0]"></span>&nbsp;<b x-text="w[1]"></b></span></template><span class="mut small" x-show="!(g.software || []).length">dalla prossima diagnostica notturna</span></div>
+                          <div class="small mut mono" style="margin-top:6px" x-show="(g.hostnames || []).length" x-text="(g.hostnames || []).join(' · ')" translate="no"></div>
+                        </div>
                       </div>
                     </div>
                     <button class="srv-more" @click.stop="srvst.sites = { ...(srvst.sites || {}), [g.key]: !(srvst.sites || {})[g.key] }" x-text="((srvst.sites || {})[g.key] ? 'Nascondi i ' : 'Mostra tutti i ') + g.counts.sites + ' siti'"></button>
@@ -1612,6 +1650,7 @@
                     <div class="field"><label>Email dei report di aggiornamento</label><select class="input" x-model="prefs.email_report_mode"><option value="site" :selected="prefs.email_report_mode==='site'">Un'email per ogni sito</option><option value="cycle" :selected="prefs.email_report_mode==='cycle'">Un riepilogo unico per ciclo</option></select><div class="hint">Con il riepilogo unico arriva una sola email a fine ciclo, con tutti i siti aggiornati, invece di una per sito. Telegram non cambia.</div></div>
                     <label class="check" style="padding:4px 0 10px;grid-column:1/-1"><input type="checkbox" x-model="prefs.auto_rollback"> Ripristino automatico: se la home si rompe dopo un aggiornamento, rimetti le copie fatte prima e blocca quei componenti</label>
                     <div class="field"><label>Avvisa che un sito non risponde dopo</label><div class="input-suffix"><input class="input" type="number" min="0" max="120" x-model.number="prefs.offline_alert_minutes"><span>minuti</span></div><div class="hint">Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.</div></div>
+                    <div class="field"><label>Rileva CPU, RAM e disco ogni</label><div class="input-suffix"><input class="input" type="number" min="1" max="180" x-model.number="prefs.server_metrics_minutes"><span>minuti</span></div><div class="hint">Controllo autonomo delle risorse, anche quando il controllo dei siti è meno frequente.</div></div>
                     <div class="field"><label>Aggiorna anteprime siti ogni</label><div class="input-suffix"><input class="input" type="number" min="1" max="720" x-model.number="prefs.screenshot_every_hours"><span>ore</span></div>
                       <button class="btn sm" style="margin-top:6px" @click="shootBulk(false)">🖼 Rigenera tutte adesso</button></div>
                     <div class="field"><label>Soglia gialla</label><div class="input-suffix"><input class="input" type="number" min="1" x-model.number="prefs.expiry_warning_days"><span>giorni</span></div></div>

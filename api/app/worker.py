@@ -32,6 +32,7 @@ from .diagnostics import store_diagnostics, store_diag_error, prune_sizes
 from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
 from .screenshot_schedule import screenshot_due, enqueue_screenshot
+from .server_metrics import server_metrics_tick, sample_server_metrics
 from .telegram import send_telegram
 from .i18n import DEFAULT_LANGUAGE, t
 from . import security
@@ -2269,10 +2270,12 @@ async def diag_all(ctx):
 class WorkerSettings:
     functions = [poll_site, arq_func(shoot_site, keep_result=0), update_site, cycle_summary, mass_update_now,
                  mass_update_selected, security_scan, vendor_scan, domain_expiry_scan, monthly_report,
-                 diag_site, diag_all, connector_rollout, plugin_catalog_scan, install_site]
+                 diag_site, diag_all, connector_rollout, plugin_catalog_scan, install_site,
+                 arq_func(sample_server_metrics, keep_result=0)]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),
+        cron(server_metrics_tick, minute=set(range(60)), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
         cron(auto_update_cycle, minute={0}),   # ogni ora, al minuto 0 (installa i pending)
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30

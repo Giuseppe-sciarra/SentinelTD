@@ -1,5 +1,58 @@
 # Changelog
 
+## 2.28.4
+
+### Fixed
+- The sidebar footer stays visible after the folder list loads, on smaller screens
+  and while the menu scrolls. Only navigation scrolls; logo, version and credits stay
+  in place. Version metadata also loads after password, TOTP or passkey login.
+  Empty or failed metadata responses preserve the last successful version.
+- CPU and RAM history now uses fixed half-hour intervals starting at :00 or :30.
+  Refreshes no longer shift every tile's time label. Previous readings stay in the
+  same completed interval when the current interval advances. Both partial edge
+  intervals retain the actual measurements from the full rolling 24-hour window.
+
+### Added
+- A compact history legend explains averages, reading order, colors and 24-hour
+  retention. The current half-hour tile has a blue border; hover/touch includes the
+  date to distinguish today from yesterday. Existing current-reading timestamps
+  and configurable sample intervals are preserved.
+- Three regression tests cover stationary labels, completed-interval rollover and
+  retention at the 24-hour edge. All 26 Python tests and the translation suite pass.
+
+## 2.28.3
+
+### Changed
+- Expanded server details use two equal-width columns. Sites, domains, updates,
+  problems and weight form a compact stack on the left; CPU, RAM and disk remain
+  on the right. Desktop columns finish at the same height as their contents change.
+  On narrow screens, cards flow in one column without a fixed height.
+- CPU and RAM history now uses larger, full-surface buttons. Hover, keyboard focus
+  or touch shows the half-hour interval, average value and status. Missing readings
+  remain gray; zero readings are retained and unavailable CPU cores are explicit.
+- Resource spacing and section separators are more compact. Removed the dashed
+  100% and 90% chart guides and their standalone labels; thresholds stay in tooltips.
+- Weight totals and the largest sites share the wider card without another outer
+  column. Screenshot scheduling and configurable resource sampling are preserved.
+
+## 2.28.2
+
+### Added
+- CPU (load), RAM and disk now have separate sections and separators. Current readings,
+  measurement age, typical values and peaks are clearly distinguished. Thresholds are
+  explained in the section title tooltips; missing and outdated readings are explicit.
+- Resources use an independent passive timer, every 5 minutes by default, configurable
+  from 1 to 180 minutes in Settings. It schedules at startup and once per server or
+  configured machine split, independently of normal site polling. Failed attempts retry
+  at the chosen interval; another site is tried when the representative is unavailable.
+- The server status page refreshes every 30 seconds while visible, even when only Redis
+  measurements change. No connector changes or additional file scans are required.
+
+### Fixed
+- Current-second samples are included in the final chart bucket. Small CPU loads have a
+  visible bar height. RAM and disk remain available when CPU measurements are unsupported.
+- The settings save button reads "Salva impostazioni". Previous screenshot fixes remain.
+
 ## 2.28.1
 
 ### Fixed

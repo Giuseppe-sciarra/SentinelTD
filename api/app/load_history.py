@@ -10,8 +10,9 @@ import json
 import time
 
 KEEP_SECONDS = 24 * 3600
-MAX_SAMPLES = 800          # per sito: abbondante anche con controlli ogni minuto
-BUCKET_SECONDS = 1800      # andamento a mezz'ore: 48 punti
+MAX_SAMPLES = 1600         # almeno 24 ore anche col timer risorse impostato a 1 minuto
+BUCKET_SECONDS = 1800      # fasce fisse ai minuti :00 / :30
+HISTORY_BUCKETS = KEEP_SECONDS // BUCKET_SECONDS + 1  # 24 ore, più la fascia corrente
 
 _redis = None
 
@@ -29,11 +30,12 @@ def _key(site_id: int) -> str:
     return f"load:site:{site_id}"
 
 
-async def record(site_id: int, server: dict) -> None:
+async def record(site_id: int, server: dict) -> bool:
     """Salva una misura. Mai bloccante: se Redis non risponde si perde una misura e basta."""
     load = (server or {}).get("load")
-    if not isinstance(load, list) or not load:
-        return
+    load = load if isinstance(load, list) else []
+    if not load and not server.get("mem_total") and not server.get("disk_total"):
+        return False
     try:
         sample = {"t": int(time.time()), "l": [round(float(x), 2) for x in load[:3]],
                   "c": int(server.get("cores") or 0) or None,
@@ -46,8 +48,9 @@ async def record(site_id: int, server: dict) -> None:
         await r.lpush(_key(site_id), json.dumps(sample, separators=(",", ":")))
         await r.ltrim(_key(site_id), 0, MAX_SAMPLES - 1)
         await r.expire(_key(site_id), 2 * KEEP_SECONDS)
+        return True
     except Exception:  # noqa: BLE001
-        pass
+        return False
 
 
 async def samples_for(site_ids: list[int]) -> dict[int, list[dict]]:
@@ -97,9 +100,9 @@ def _mem_summary(samples: list[dict], start: int) -> dict | None:
     pcts = [used(d) for d in ms]
     last = ms[-1]
     peak = max(ms, key=used)
-    buckets: list[list[float]] = [[] for _ in range(KEEP_SECONDS // BUCKET_SECONDS)]
+    buckets: list[list[float]] = [[] for _ in range(HISTORY_BUCKETS)]
     for d, pct in zip(ms, pcts):
-        i = int((d["t"] - start) // BUCKET_SECONDS)
+        i = min(len(buckets) - 1, int((d["t"] - start) // BUCKET_SECONDS))
         if 0 <= i < len(buckets):
             buckets[i].append(pct)
     st, sf = last.get("st"), last.get("sf")
@@ -121,20 +124,25 @@ def summarize(samples: list[dict]) -> dict | None:
     samples = sorted(samples, key=lambda d: d["t"])
     cores = max((d.get("c") or 0) for d in samples) or None
     l1 = [d["l"][0] for d in samples if d.get("l")]
-    peak = max(samples, key=lambda d: d["l"][0] if d.get("l") else 0)
+    cpu_samples = [d for d in samples if d.get("l")]
+    peak = max(cpu_samples, key=lambda d: d["l"][0]) if cpu_samples else samples[-1]
     now_t = int(time.time())
-    start = now_t - KEEP_SECONDS
-    buckets: list[list[float]] = [[] for _ in range(KEEP_SECONDS // BUCKET_SECONDS)]
+    # Stabilizza gli orari delle caselle. La prima e l'ultima fascia possono essere
+    # parziali: samples_for() conserva solo le misure reali delle ultime 24 ore.
+    start = now_t // BUCKET_SECONDS * BUCKET_SECONDS - KEEP_SECONDS
+    buckets: list[list[float]] = [[] for _ in range(HISTORY_BUCKETS)]
     for d in samples:
-        i = int((d["t"] - start) // BUCKET_SECONDS)
+        i = min(len(buckets) - 1, int((d["t"] - start) // BUCKET_SECONDS))
         if 0 <= i < len(buckets) and d.get("l"):
             buckets[i].append(d["l"][0])
     series = [round(sum(b) / len(b), 2) if b else None for b in buckets]
     last = samples[-1]
-    disk = next(({"total": d["dt"], "free": d["df"]} for d in reversed(samples) if d.get("dt")), None)
+    last_cpu = next((d for d in reversed(samples) if d.get("l")), None)
+    disk = next(({"total": d["dt"], "free": d["df"], "t": d["t"]}
+                 for d in reversed(samples) if d.get("dt") and d.get("df") is not None), None)
     return {
         "cores": cores,
-        "now": {"t": last["t"], "load": last.get("l")},
+        "now": {"t": (last_cpu or last)["t"], "load": last_cpu["l"] if last_cpu else []},
         # "di solito": la MEDIANA, non la media. Un'ora di backup notturno al 1000% tirerebbe su
         # la media di tutta la giornata; la mediana dice dove sta il server meta' del tempo
         "usual": (sorted(l1)[len(l1) // 2] if len(l1) % 2 else round((sorted(l1)[len(l1) // 2 - 1] + sorted(l1)[len(l1) // 2]) / 2, 2)) if l1 else None,
