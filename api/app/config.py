@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import field_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     SHOOTER_URL: str = "http://shooter:8090"
     SCHEDULER_TICK_MINUTES: int = 5
     SCREENSHOT_EVERY_HOURS: int = 12
+
+    # Tentativi GET del connettore per errori di connessione/DNS temporanei.
+    STATUS_CHECK_ATTEMPTS: int = Field(default=3, ge=1, le=5)
+    STATUS_CHECK_RETRY_SECONDS: int = Field(default=15, ge=1, le=60)
 
     # --- Conferma offline (debounce) ---
     # Prima di marcare un sito "offline" lo si ricontrolla piu' volte a distanza, cosi'

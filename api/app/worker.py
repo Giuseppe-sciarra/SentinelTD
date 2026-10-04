@@ -25,7 +25,7 @@ from sqlalchemy import select, delete, func
 from .config import settings
 from .db import SessionLocal, engine, run_migrations
 from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
-from .connectors import apply_status, fetch_status, _category, wp_rest_url, fetch_diagnostics, ConnectorTooOld
+from .connectors import apply_status, fetch_status, _category, wp_rest_url, fetch_diagnostics, ConnectorTooOld, schedule_dns_recheck
 from .errtext import clean_error
 from .servers import server_of, acquire as srv_acquire, release as srv_release
 from .diagnostics import store_diagnostics, store_diag_error, prune_sizes
@@ -631,6 +631,12 @@ async def poll_site(ctx, site_id: int, force: bool = False):
         # quando lo stato cambia, non a ogni check mentre resta offline)
         prev_status = site.status
         await apply_status(s, site, force=force)
+
+        if site.status == "dns_error":
+            # Resolver del monitor in difficolta': non e' una conferma di sito offline.
+            await s.commit()
+            await schedule_dns_recheck(ctx["redis"], site_id)
+            return
 
         # --- conferma "non raggiungibile" (senza bloccare il worker) ---
         # Siti su server lenti hanno buchi di qualche minuto: l'avviso parte solo dopo
@@ -1326,7 +1332,11 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # nessuno se ne accorgesse (caso reale: core WP di shop). Ora lascia traccia.
             log.warning("UPDATE SALTATO '%s' (id=%s): sito in errore dopo il refresh (%s) — riprovo al prossimo ciclo",
                         site.name, site.id, (site.error or "status=" + str(site.status))[:200])
-            outcome["text"] = f"il sito non risponde: {(site.error or str(site.status))[:200]}"
+            if site.status == "dns_error":
+                await schedule_dns_recheck(ctx["redis"], site_id)
+                outcome["text"] = f"verifica DNS non riuscita: {(site.error or '')[:200]}"
+            else:
+                outcome["text"] = f"il sito non risponde: {(site.error or str(site.status))[:200]}"
             return
 
         now = datetime.now(timezone.utc)
@@ -2102,6 +2112,11 @@ async def _startup(ctx):
     await migrate_legacy(ctx.get("redis"))
 
 
+async def _shutdown(ctx):
+    from .connectors import close_status_client
+    await close_status_client()
+
+
 # --------------------------------------------------------------------------
 # INSTALLAZIONE IN BLOCCO (2.9.4): un lavoro per sito, nel worker
 # --------------------------------------------------------------------------
@@ -2322,6 +2337,7 @@ class WorkerSettings:
         cron(plugin_catalog_scan, weekday={6}, hour={5}, minute={0}, run_at_startup=True),   # catalogo plugin da wordpress.org: la domenica, e al primo avvio
     ]
     on_startup = _startup
+    on_shutdown = _shutdown
     redis_settings = _redis_settings()
     max_jobs = 4             # max job concorrenti: limita quanti siti si aggiornano insieme
     job_timeout = 1800       # gli update di un sito possono durare diversi minuti

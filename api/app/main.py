@@ -20,7 +20,11 @@ async def lifespan(app: FastAPI):
         await run_migrations(conn)
     from .load_history import migrate_legacy
     await migrate_legacy()
-    yield
+    try:
+        yield
+    finally:
+        from .connectors import close_status_client
+        await close_status_client()
 
 
 app = FastAPI(title="Panopticon Lite", lifespan=lifespan)

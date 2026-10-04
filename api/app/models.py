@@ -56,7 +56,7 @@ class Site(Base):
 
     # stato ultimo check (denormalizzato: con 30-100 siti va benissimo)
     last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="unknown")   # ok | error | unknown
+    status: Mapped[str] = mapped_column(String(20), default="unknown")   # ok | error | dns_error | unknown
     error: Mapped[str] = mapped_column(Text, default="")
     # True se per l'episodio offline corrente la notifica Telegram e' GIA' partita con
     # successo. Evita doppioni e, soprattutto, permette di RITENTARE la notifica ai check

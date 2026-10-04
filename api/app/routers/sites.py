@@ -380,6 +380,16 @@ async def refresh_now(site_id: int, s: AsyncSession = Depends(get_session)):
     await apply_status(s, site, force=(site.status == "ok"))
     await s.commit()
     await s.refresh(site)
+    if site.status == "dns_error":
+        from ..connectors import schedule_dns_recheck
+        try:
+            pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+            try:
+                await schedule_dns_recheck(pool, site.id)
+            finally:
+                await pool.aclose()
+        except Exception:
+            pass  # il risultato del check resta disponibile anche se Redis e' giu'
     return site
 
 

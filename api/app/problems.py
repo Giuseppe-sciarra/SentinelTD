@@ -3,9 +3,9 @@ report). Un aggiornamento fallito conta solo finche' e' ANCORA fallito (Extensio
 tolto quando poi riesce): niente avvisi rimasti indietro dallo storico."""
 from datetime import datetime, timezone
 
-KINDS = ("offline", "space", "failed", "logs", "php", "domain")
+KINDS = ("offline", "space", "failed", "logs", "php", "domain", "dns")
 LABELS = {"offline": "offline", "space": "spazio quasi esaurito", "failed": "aggiornamenti falliti",
-          "logs": "log grandi", "php": "PHP fuori supporto", "domain": "dominio scaduto"}
+          "logs": "log grandi", "php": "PHP fuori supporto", "domain": "dominio scaduto", "dns": "verifica DNS non riuscita"}
 
 
 def site_problems(site, failed_names: list[str] | None = None, now: datetime | None = None) -> list[dict]:
@@ -14,7 +14,9 @@ def site_problems(site, failed_names: list[str] | None = None, now: datetime | N
     out = []
     if not site.enabled:
         return out
-    if site.status != "ok":
+    if site.status == "dns_error":
+        out.append({"kind": "dns", "text": (site.error or "verifica DNS non riuscita da Sentinel")[:160]})
+    elif site.status != "ok":
         out.append({"kind": "offline", "text": (site.error or "non risponde")[:160]})
     diag = site.diag or {}
     sp = diag.get("space") or {}

@@ -16,7 +16,10 @@ Vengono restituite TUTTE le estensioni installate (update true/false); i contato
 per categoria li calcola qui il backend.
 """
 import html
+import asyncio
 import logging
+import socket
+import ssl
 import time
 import re
 from urllib.parse import quote
@@ -25,6 +28,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Site, Extension
+from .config import settings
 
 log = logging.getLogger("sentinel.connectors")
 
@@ -58,12 +62,50 @@ def _category(ext_type: str) -> str:
 # "semplici"). Il fetch prova la preferita e, se fallisce, l'altra: quella buona
 # viene ricordata qui (in-process; al riavvio si ri-scopre da sola al primo check).
 _WP_REST_STYLE: dict[int, str] = {}
+_STATUS_CLIENT = None
+_STATUS_LOOP = None
+_STATUS_LIMIT = None
+_STATUS_LIMIT_LOOP = None
 
 
-def wp_rest_url(site: Site, path: str, qs: str = "") -> str:
+async def status_client():
+    """Riusa connessioni HTTP per evitare un nuovo lookup DNS a ogni campione."""
+    global _STATUS_CLIENT, _STATUS_LOOP
+    loop = asyncio.get_running_loop()
+    if _STATUS_CLIENT is None or _STATUS_CLIENT.is_closed or _STATUS_LOOP is not loop:
+        await close_status_client()
+        _STATUS_CLIENT = httpx.AsyncClient(follow_redirects=True,
+            limits=httpx.Limits(max_connections=128, max_keepalive_connections=128, keepalive_expiry=600))
+        _STATUS_LOOP = loop
+    return _STATUS_CLIENT
+
+
+async def close_status_client():
+    global _STATUS_CLIENT, _STATUS_LOOP, _STATUS_LIMIT, _STATUS_LIMIT_LOOP
+    client, _STATUS_CLIENT, _STATUS_LOOP = _STATUS_CLIENT, None, None
+    _STATUS_LIMIT = _STATUS_LIMIT_LOOP = None
+    if client is not None and not client.is_closed:
+        try:
+            await client.aclose()
+        except RuntimeError:  # loop precedente gia' terminato (test / reload)
+            pass
+
+
+async def _status_get(client, endpoint, headers, timeout):
+    global _STATUS_LIMIT, _STATUS_LIMIT_LOOP
+    loop = asyncio.get_running_loop()
+    if _STATUS_LIMIT is None or _STATUS_LIMIT_LOOP is not loop:
+        _STATUS_LIMIT, _STATUS_LIMIT_LOOP = asyncio.Semaphore(4), loop
+    # Il pool conserva connessioni a piu' domini; solo quattro GET contemporanee
+    # per processo. Il posto viene liberato prima di aspettare un retry.
+    async with _STATUS_LIMIT:
+        return await client.get(endpoint, headers=headers, timeout=timeout)
+
+
+def wp_rest_url(site: Site, path: str, qs: str = "", *, style: str | None = None) -> str:
     """URL dell'endpoint REST del connettore WP nello stile giusto per il sito."""
     base = site.url.rstrip("/")
-    style = _WP_REST_STYLE.get(site.id, "wpjson")
+    style = style or _WP_REST_STYLE.get(site.id, "wpjson")
     if style == "restroute":
         url = f"{base}/index.php?rest_route=/tdpanopticon/v1/{path}"
         return url + (("&" + qs) if qs else "")
@@ -71,7 +113,61 @@ def wp_rest_url(site: Site, path: str, qs: str = "") -> str:
     return url + (("?" + qs) if qs else "")
 
 
+def _causes(exc: BaseException):
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        yield exc
+        exc = exc.__cause__ or exc.__context__
+
+
+def temporary_dns_error(exc: BaseException) -> bool:
+    return any((isinstance(cause, socket.gaierror) and cause.errno == socket.EAI_AGAIN)
+               or "temporary failure in name resolution" in str(cause).lower()
+               or f"[Errno {socket.EAI_AGAIN}]" in str(cause)
+               for cause in _causes(exc))
+
+
+def _retry_connection(exc: BaseException) -> bool:
+    if temporary_dns_error(exc):
+        return True
+    if any(isinstance(cause, (socket.gaierror, ssl.SSLError)) for cause in _causes(exc)):
+        return False  # nome inesistente o certificato errato: non sono buchi temporanei
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+
+
+async def schedule_dns_recheck(redis, site_id: int):
+    try:
+        await redis.enqueue_job("poll_site", site_id, _defer_by=60,
+                                _job_id=f"dns-recheck:{site_id}:{int(time.time()) // 60}")
+    except Exception as exc:
+        log.warning("Ricontrollo DNS non accodato (id=%s): %s", site_id, type(exc).__name__)
+
+
 async def fetch_status(site: Site, timeout: float = 20.0, force: bool = False) -> dict:
+    """Tre tentativi distanziati solo per errori di connessione, prima di cambiare stato.
+
+    Gli errori DNS non attivano l'URL REST alternativo: il dominio e' lo stesso.
+    POST di aggiornamento/installazione non vengono ritentate da questa funzione.
+    """
+    for attempt in range(1, settings.STATUS_CHECK_ATTEMPTS + 1):
+        try:
+            result = await _fetch_status_once(site, timeout, force)
+            if attempt > 1:
+                log.info("CHECK RECUPERATO '%s' (id=%s): tentativo %s/%s", site.name, site.id,
+                         attempt, settings.STATUS_CHECK_ATTEMPTS)
+            return result
+        except Exception as exc:
+            if not _retry_connection(exc) or attempt == settings.STATUS_CHECK_ATTEMPTS:
+                raise
+            log.warning("CHECK RETRY '%s' (id=%s): tentativo %s/%s, riprovo tra %ss: %s: %s",
+                        site.name, site.id, attempt, settings.STATUS_CHECK_ATTEMPTS,
+                        settings.STATUS_CHECK_RETRY_SECONDS, type(exc).__name__, str(exc)[:300])
+            await asyncio.sleep(settings.STATUS_CHECK_RETRY_SECONDS)
+    raise RuntimeError("Nessun tentativo di controllo configurato")
+
+
+async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = False) -> dict:
     """GET autenticata verso il connettore. Solleva eccezione su errore.
 
     force=False (default): CHECK PASSIVO. Il connettore legge i dati di update gia'
@@ -100,25 +196,25 @@ async def fetch_status(site: Site, timeout: float = 20.0, force: bool = False) -
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        try:
-            r = await client.get(endpoint, headers=headers)
-            r.raise_for_status()
-            payload = r.json()
-        except Exception:  # noqa: BLE001
-            if site.cms != "wp":
-                raise
-            # WP: la forma REST giusta dipende dal sito (permalink/proxy). Se quella
-            # preferita fallisce, prova l'ALTRA; se funziona, ricordala per i prossimi
-            # check e per update/install. Cosi' il pannello lavora con qualsiasi sito
-            # senza configurare niente.
-            cur = _WP_REST_STYLE.get(site.id, "wpjson")
-            _WP_REST_STYLE[site.id] = "restroute" if cur == "wpjson" else "wpjson"
-            refresh = "&refresh=1" if force else ""
-            alt = wp_rest_url(site, "status", f"_={cb}" + refresh)
-            r = await client.get(alt, headers=headers)
-            r.raise_for_status()
-            payload = r.json()
+    client = await status_client()
+    request_timeout = httpx.Timeout(timeout, connect=min(timeout, 8.0))
+    try:
+        r = await _status_get(client, endpoint, headers, request_timeout)
+        r.raise_for_status()
+        payload = r.json()
+    except (httpx.HTTPStatusError, ValueError):
+        if site.cms != "wp":
+            raise
+        # Solo errori HTTP/formato provano la forma REST alternativa. Un problema
+        # di DNS/connessione non dipende dal percorso e non deve raddoppiare le GET.
+        cur = _WP_REST_STYLE.get(site.id, "wpjson")
+        alternate = "restroute" if cur == "wpjson" else "wpjson"
+        refresh = "&refresh=1" if force else ""
+        alt = wp_rest_url(site, "status", f"_={cb}" + refresh, style=alternate)
+        r = await _status_get(client, alt, headers, request_timeout)
+        r.raise_for_status()
+        payload = r.json()
+        _WP_REST_STYLE[site.id] = alternate
 
     # WordPress: payload diretto. Joomla com_ajax: {"success":bool,"data":[ {...} ]}
     if site.cms == "joomla":
@@ -171,7 +267,7 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             core_known = True
         unverified = not (core_known and all(known_cat.values()))
 
-        # carico e disco del server a ogni controllo (WP 2.28+/Joomla 1.36+): 24 ore in Redis
+        # Risorse a ogni controllo: storico persistente nel database, grafico di 24 ore.
         if isinstance(data.get("server"), dict):
             from .load_history import record as _record_load
             await _record_load(site.id, data["server"])
@@ -289,15 +385,24 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
                         site.name, site.id, ", dopo un ricalcolo forzato" if force else "")
         site.status = "ok"
         site.error = ""
+        site.offline_since = None
         site.last_checked = datetime.now(timezone.utc)
     except httpx.HTTPStatusError as ex:
         site.status = "error"
         site.error = f"HTTP {ex.response.status_code}"
         site.last_checked = datetime.now(timezone.utc)
+        log.warning("CHECK FALLITO '%s' (id=%s): %s", site.name, site.id, site.error)
     except Exception as ex:  # noqa: BLE001
-        site.status = "error"
-        site.error = str(ex)[:480]
+        if temporary_dns_error(ex):
+            site.status = "dns_error"
+            site.error = ("DNS temporaneo: verifica non riuscita da Sentinel. " + str(ex))[:480]
+            site.offline_since = None
+        else:
+            site.status = "error"
+            site.error = str(ex)[:480] or type(ex).__name__
         site.last_checked = datetime.now(timezone.utc)
+        log.warning("CHECK FALLITO '%s' (id=%s): %s: %s", site.name, site.id,
+                    type(ex).__name__, site.error)
 
 # --------------------------------------------------------------------------
 # Diagnostica e pacchetti (connettore WordPress 2.19.0 / Joomla 1.30.0)

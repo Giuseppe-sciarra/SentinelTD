@@ -2324,5 +2324,13 @@
   "Spazio scrivibile quasi esaurito": "Writable space almost exhausted",
   "Nessun problema rilevato": "No issues detected",
   "Orario non valido: usa HH:MM": "Invalid time: use HH:MM",
-  "Fuso orario non valido": "Invalid timezone"
+  "Fuso orario non valido": "Invalid timezone",
+  "Verifica DNS non riuscita": "DNS check failed",
+  "verifica DNS non riuscita": "DNS check failed",
+  "Verifica DNS": "DNS check",
+  "verifica DNS": "DNS check",
+  "verifiche DNS": "DNS checks",
+  "siti da ricontrollare. Il loro stato attuale non è verificato.": "sites need another check. Their current status is unverified.",
+  "{0}: verifica DNS non riuscita — {1}": "{0}: DNS check failed — {1}",
+  "DNS temporaneo: verifica non riuscita da Sentinel. {0}": "Temporary DNS failure: Sentinel could not verify the site. {0}"
 }

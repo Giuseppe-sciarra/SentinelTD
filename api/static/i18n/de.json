@@ -2324,5 +2324,13 @@
   "Spazio scrivibile quasi esaurito": "Beschreibbarer Speicherplatz fast voll",
   "Nessun problema rilevato": "Keine Probleme festgestellt",
   "Orario non valido: usa HH:MM": "Ungültige Uhrzeit: HH:MM verwenden",
-  "Fuso orario non valido": "Ungültige Zeitzone"
+  "Fuso orario non valido": "Ungültige Zeitzone",
+  "Verifica DNS non riuscita": "DNS-Prüfung fehlgeschlagen",
+  "verifica DNS non riuscita": "DNS-Prüfung fehlgeschlagen",
+  "Verifica DNS": "DNS-Prüfung",
+  "verifica DNS": "DNS-Prüfung",
+  "verifiche DNS": "DNS-Prüfungen",
+  "siti da ricontrollare. Il loro stato attuale non è verificato.": "Websites müssen erneut geprüft werden. Ihr aktueller Status ist nicht bestätigt.",
+  "{0}: verifica DNS non riuscita — {1}": "{0}: DNS-Prüfung fehlgeschlagen — {1}",
+  "DNS temporaneo: verifica non riuscita da Sentinel. {0}": "Vorübergehender DNS-Fehler: Sentinel konnte die Website nicht prüfen. {0}"
 }

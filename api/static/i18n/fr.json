@@ -2324,5 +2324,13 @@
   "Spazio scrivibile quasi esaurito": "Espace inscriptible presque épuisé",
   "Nessun problema rilevato": "Aucun problème détecté",
   "Orario non valido: usa HH:MM": "Heure invalide : utilisez HH:MM",
-  "Fuso orario non valido": "Fuseau horaire invalide"
+  "Fuso orario non valido": "Fuseau horaire invalide",
+  "Verifica DNS non riuscita": "Échec de la vérification DNS",
+  "verifica DNS non riuscita": "échec de la vérification DNS",
+  "Verifica DNS": "Vérification DNS",
+  "verifica DNS": "vérification DNS",
+  "verifiche DNS": "vérifications DNS",
+  "siti da ricontrollare. Il loro stato attuale non è verificato.": "sites à vérifier à nouveau. Leur état actuel n’est pas vérifié.",
+  "{0}: verifica DNS non riuscita — {1}": "{0} : échec de la vérification DNS — {1}",
+  "DNS temporaneo: verifica non riuscita da Sentinel. {0}": "Erreur DNS temporaire : Sentinel n’a pas pu vérifier le site. {0}"
 }

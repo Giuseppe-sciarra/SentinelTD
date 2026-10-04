@@ -2324,5 +2324,13 @@
   "Spazio scrivibile quasi esaurito": "Spazio scrivibile quasi esaurito",
   "Nessun problema rilevato": "Nessun problema rilevato",
   "Orario non valido: usa HH:MM": "Orario non valido: usa HH:MM",
-  "Fuso orario non valido": "Fuso orario non valido"
+  "Fuso orario non valido": "Fuso orario non valido",
+  "Verifica DNS non riuscita": "Verifica DNS non riuscita",
+  "verifica DNS non riuscita": "verifica DNS non riuscita",
+  "Verifica DNS": "Verifica DNS",
+  "verifica DNS": "verifica DNS",
+  "verifiche DNS": "verifiche DNS",
+  "siti da ricontrollare. Il loro stato attuale non è verificato.": "siti da ricontrollare. Il loro stato attuale non è verificato.",
+  "{0}: verifica DNS non riuscita — {1}": "{0}: verifica DNS non riuscita — {1}",
+  "DNS temporaneo: verifica non riuscita da Sentinel. {0}": "DNS temporaneo: verifica non riuscita da Sentinel. {0}"
 }

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.28.9
+
+### Fixed
+- Status GET requests retry temporary DNS and connection failures up to three times,
+  with 15 seconds between attempts. WordPress no longer changes REST paths on DNS
+  failures; the alternate path is remembered only after a successful HTTP response.
+- Exhausted temporary DNS failures are shown as an unverified DNS check, separately
+  from offline sites. They do not send site-offline/online notifications; a new check
+  is queued after one minute. Pre-update checks preserve pending updates and skip
+  installation until the connector can be reached.
+- Status requests reuse a managed HTTP connection pool and allow at most four
+  concurrent GETs per process. Connections are closed on API/worker shutdown.
+- All failed checks and delayed retries leave their exact error in the logs.
+
+### Verified
+- Regression tests cover DNS recovery/exhaustion, WordPress and Joomla, REST fallback,
+  permanent DNS/TLS errors, cancellation, preserved update counts, rechecks and
+  notification suppression. Real local HTTP requests verify TCP connection reuse.
+
 ## 2.28.8
 
 ### Fixed
