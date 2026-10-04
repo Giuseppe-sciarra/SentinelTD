@@ -743,6 +743,8 @@ async def poll_site(ctx, site_id: int, force: bool = False):
         elif site.status == "ok" and site.offline_since is not None:
             site.offline_since = None            # ha risposto: episodio chiuso
 
+        from .availability import record_availability
+        await record_availability(s, site)
         await s.commit()
 
         # --- notifica Telegram robusta (parte A) ---

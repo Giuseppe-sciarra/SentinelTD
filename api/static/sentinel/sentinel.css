@@ -1196,3 +1196,11 @@ th.sortable:hover { color: var(--txt); }
   .topbar > .btn { flex-shrink: 0; }
   .dash-line { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Passive offline journal: compact summaries and scrollable tables on mobile. */
+.offline-log{margin-top:16px}.offline-log>.card{margin-bottom:14px}
+.offline-log .table-scroll{max-width:100%;overflow:auto}
+.offline-filters{display:flex;flex-wrap:wrap;align-items:end;gap:12px}.offline-filters .field{flex:1;min-width:160px;margin:0}.offline-filters .input{width:100%;max-width:100%}
+.offline-note{margin:12px 0;line-height:1.55}.offline-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.offline-totals strong{display:block;font-size:27px;line-height:1.4}
+.offline-summary{margin-bottom:14px}.offline-summary-scroll{max-height:260px;overflow:auto}.offline-table{width:100%;border-collapse:collapse;min-width:620px}.offline-table th{font-size:12px;color:var(--mut);text-align:left;background:var(--bg)}.offline-table td,.offline-table th{padding:12px 10px;border-bottom:1px solid var(--bd)}.offline-table .num{text-align:right}.offline-table .name{display:block;font-weight:600}.offline-filter-link{border:0;background:none;color:var(--acc);text-align:left;cursor:pointer;font:inherit;padding:4px 0;min-height:34px}.offline-episodes{min-width:1000px}.offline-reason{max-width:270px;overflow-wrap:anywhere}.offline-pager{justify-content:space-between;gap:10px;margin-top:14px}
+@media(max-width:600px){.offline-totals{gap:8px}.offline-totals .card{padding:12px}.offline-totals .small{font-size:11px}.offline-filters .field{min-width:100%;max-width:100%}.offline-log .card{min-width:0}.offline-log .table-scroll{max-width:100%;overflow:auto}}

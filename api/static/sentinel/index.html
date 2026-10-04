@@ -249,8 +249,12 @@
         <!-- ===== STATISTICHE ===== -->
         <template x-if="route.page==='stats'">
           <div>
-            <div class="row" style="flex-wrap:wrap"><div><h1 class="page-title">Statistiche aggiornamenti</h1><div class="page-sub">Andamento mensile, classifiche e confronto fra periodi — su tutto lo storico disponibile</div></div></div>
-            <div style="margin-top:16px">
+            <div class="row" style="flex-wrap:wrap"><div><h1 class="page-title" x-text="statsTab==='offline' ? 'Registro offline' : 'Statistiche aggiornamenti'"></h1><div class="page-sub" x-show="statsTab==='updates'">Andamento mensile, classifiche e confronto fra periodi — su tutto lo storico disponibile</div><div class="page-sub" x-show="statsTab==='offline'">Episodi confermati dai check esistenti · orari Europe/Rome · UTC nel tooltip</div></div></div>
+            <div class="seg" style="margin-top:16px">
+              <button :class="statsTab==='updates'?'on':''" @click="pickStatsTab('updates')">Aggiornamenti</button>
+              <button :class="statsTab==='offline'?'on':''" @click="pickStatsTab('offline')">Registro offline</button>
+            </div>
+            <div style="margin-top:16px" x-show="statsTab==='updates'">
 <div class="card" style="margin-top:16px" x-show="stats.data">
               <div class="row" style="flex-wrap:wrap;gap:10px">
                 <div class="seg">
@@ -473,7 +477,55 @@
               </template>
             </div>
             </div>
-            <div class="empty" x-show="!stats.data&&!stats.busy">Ancora nessun dato: le statistiche si popolano con i cicli di aggiornamento.</div>
+            <div class="empty" x-show="statsTab==='updates'&&!stats.data&&!stats.busy">Ancora nessun dato: le statistiche si popolano con i cicli di aggiornamento.</div>
+            <section class="offline-log" x-show="statsTab==='offline'">
+              <div class="card">
+                <div class="offline-filters">
+                  <div class="field"><label>Periodo del registro</label><select class="input" x-model.number="outages.days" @change="loadOutages(true)"><option value="7">7 giorni</option><option value="30">30 giorni</option><option value="90">90 giorni</option><option value="365">365 giorni</option></select></div>
+                  <div class="field"><label>Sito</label><select class="input" x-model="outages.site" @change="loadOutages(true)"><option value="">Tutti i siti</option><template x-for="s in (outages.data ? outages.data.sites : [])" :key="'ofs'+s.site_id"><option :value="String(s.site_id)" x-text="s.site_name"></option></template></select></div>
+                  <div class="field"><label>IP / server</label><select class="input" x-model="outages.server" @change="loadOutages(true)"><option value="">Tutti gli IP / server</option><template x-for="s in (outages.data ? outages.data.servers : [])" :key="'ofip'+s.server"><option :value="s.server" x-text="outageServer(s.server)"></option></template></select></div>
+                  <button class="btn" @click="loadOutages()" :disabled="outages.busy">Aggiorna registro</button>
+                  <span class="spinner" x-show="outages.busy"></span>
+                </div>
+                <div class="small mut offline-note">Una riga per episodio, dal primo errore al primo check riuscito. I retry e gli errori temporanei non confermati non sono nuovi offline. Durata rilevata ai check, non uptime misurato continuamente.</div>
+                <div class="msg err" x-show="outages.error">Registro non aggiornato. Riprova: gli ultimi dati restano visibili.</div>
+                <div class="empty" x-show="!outages.data&&!outages.error">Caricamento del registro…</div>
+              </div>
+              <template x-if="outages.data">
+                <div>
+                  <div class="offline-totals">
+                    <div class="card"><span class="small mut">Episodi offline</span><strong x-text="outages.data.total"></strong></div>
+                    <div class="card"><span class="small mut">Ancora senza risposta</span><strong x-text="outages.data.active"></strong></div>
+                    <div class="card"><span class="small mut">Check offline</span><strong x-text="outages.data.failed_checks"></strong></div>
+                  </div>
+                  <div class="card offline-summary">
+                    <div class="row" style="flex-wrap:wrap;gap:10px"><h3 style="margin:0">Riepilogo del periodo (tutti i siti)</h3><div class="sp"></div><div class="seg"><button :class="outages.group==='sites'?'on':''" @click="outages.group='sites'">Per sito</button><button :class="outages.group==='servers'?'on':''" @click="outages.group='servers'">Per IP / server</button></div></div>
+                    <div class="small mut offline-note">Il totale per IP somma gli episodi dei siti su quell’IP. Gli episodi ancora aperti restano visibili anche se iniziati prima del periodo.</div>
+                    <div class="table-scroll offline-summary-scroll">
+                      <table class="offline-table"><thead><tr><th x-text="outages.group==='sites'?'Sito':'IP / server'"></th><th class="n">Episodi dei siti</th><th class="n">Aperti</th><th class="n">Check offline</th><th>Ultimo errore (Roma)</th></tr></thead>
+                        <tbody><template x-for="r in (outages.group==='sites' ? outages.data.sites : outages.data.servers)" :key="'osm'+outages.group+(r.site_id || r.server)"><tr><td><button class="offline-filter-link" @click="outageFilter(outages.group==='sites'?r.site_id:'',outages.group==='servers'?r.server:'')" x-text="outages.group==='sites'?r.site_name:outageServer(r.server)" translate="no"></button></td><td class="num" x-text="r.episodes"></td><td class="num" x-text="r.active"></td><td class="num" x-text="r.failed_checks"></td><td class="mono small" :title="outageUtc(r.last_failed_at)" x-text="outageDate(r.last_failed_at)"></td></tr></template></tbody>
+                      </table>
+                    </div>
+                    <div class="empty" x-show="!outages.data.sites.length">Nessun offline confermato nel periodo. Il registro inizia da questo aggiornamento.</div>
+                  </div>
+                  <div class="card">
+                    <div class="row" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0">Lista degli episodi</h3><div class="sp"></div><button class="btn" x-show="outages.site || outages.server" @click="outageFilter()">Togli filtri</button></div>
+                    <div class="table-scroll">
+                      <table class="offline-table offline-episodes"><thead><tr><th>Sito / IP</th><th>Primo errore (Roma)</th><th>Tornato online (Roma)</th><th>Durata rilevata</th><th class="n">Check offline</th><th>Ultimo errore</th></tr></thead>
+                        <tbody><template x-for="r in outages.data.items" :key="'oe'+r.id"><tr>
+                          <td><span class="name" x-text="r.site_name" translate="no"></span><div class="small mono mut" x-text="outageServer(r.server)" translate="no"></div><a class="small" x-show="sites.some(s=>s.id===r.site_id)" :href="'#/site/'+r.site_id">Apri sito</a></td>
+                          <td class="small mono" :title="outageUtc(r.started_at)" x-text="outageDate(r.started_at)"></td>
+                          <td><span class="badge warn" x-show="!r.ended_at">Ancora senza risposta</span><span class="small mono" x-show="r.ended_at" :title="outageUtc(r.ended_at)" x-text="outageDate(r.ended_at)"></span><div class="small mut" x-show="!r.ended_at"><span>Ultima conferma:</span> <span :title="outageUtc(r.last_failed_at)" x-text="outageDate(r.last_failed_at)"></span></div></td>
+                          <td class="mono small" x-text="outageDuration(r)"></td><td class="num" x-text="r.failed_checks"></td><td class="offline-reason small" x-text="r.reason" translate="no"></td>
+                        </tr></template></tbody>
+                      </table>
+                    </div>
+                    <div class="empty" x-show="!outages.data.items.length && outages.data.total===0">Nessun episodio corrisponde ai filtri.</div>
+                    <div class="row offline-pager"><button class="btn" @click="outagePage(-1)" :disabled="outages.busy || outages.offset===0">Precedenti</button><span class="small mut" x-text="(outages.data.total ? outages.offset+1 : 0)+'–'+Math.min(outages.offset+outages.data.items.length,outages.data.total)+' / '+outages.data.total"></span><button class="btn" @click="outagePage(1)" :disabled="outages.busy || outages.offset+outages.data.limit>=outages.data.total">Successivi</button></div>
+                  </div>
+                </div>
+              </template>
+            </section>
           </div>
         </template>
 

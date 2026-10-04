@@ -17,6 +17,8 @@ _redis = None
 _loop = None
 updating_server = ContextVar("updating_server", default="")
 queue_seconds = ContextVar("check_queue_seconds", default=None)
+# Already resolved by the existing check; the passive journal performs no DNS lookup.
+observed_server = ContextVar("observed_server", default="")
 
 # Redis' clock is shared across processes. Claims and both limits are atomic.
 _ACQUIRE = """
@@ -80,6 +82,7 @@ async def status_slot(endpoint, network_budget, *, redis=None, identify=None):
         server = await resolve(r, endpoint)
     except (RedisError, OSError) as exc:
         raise CheckDeferred("Coordinamento controlli non disponibile; ricontrollo programmato") from exc
+    observed_server.set(server)
     digest = hashlib.sha256(server.encode()).hexdigest()[:32]
     keys = ["status:active", f"status:server:{digest}", f"status:cool:{digest}"]
     # Respect the existing update brake: do not start a check on an updating server.

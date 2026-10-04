@@ -275,6 +275,9 @@ async def schedule_pending_recheck(redis, site_id: int):
 async def apply_status(session: AsyncSession, site: Site, force: bool = False) -> None:
     """Polla il sito e scrive lo stato a DB. Non solleva: registra l'errore sul Site.
     force=True forza il refresh lato connettore (vedi fetch_status)."""
+    from .check_gate import observed_server
+    observed_server.set("")
+    site._availability_observed = True
     try:
         # timeout proporzionato: il check passivo deve essere reattivo (20s), ma con
         # force=True il connettore esegue sul sito il refresh COMPLETO (wp_version_check +
@@ -428,10 +431,12 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         log.warning("CHECK FALLITO '%s' (id=%s): %s", site.name, site.id, site.error)
     except Exception as ex:  # noqa: BLE001
         if temporary_dns_error(ex):
+            site._availability_observed = False
             site.status = "dns_error"
             site.error = ("DNS temporaneo: verifica non riuscita da Sentinel. " + str(ex))[:480]
             site.offline_since = None
         elif isinstance(ex, CheckDeferred):
+            site._availability_observed = False
             if site.status != "error":
                 site.status = "check_pending"
                 site.error = str(ex)[:480]
@@ -444,6 +449,10 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         site.last_checked = datetime.now(timezone.utc)
         log.warning("CHECK FALLITO '%s' (id=%s): %s: %s", site.name, site.id,
                     type(ex).__name__, site.error)
+
+    site._status_server = observed_server.get()
+    from .availability import record_availability
+    await record_availability(session, site)
 
 # --------------------------------------------------------------------------
 # Diagnostica e pacchetti (connettore WordPress 2.19.0 / Joomla 1.30.0)

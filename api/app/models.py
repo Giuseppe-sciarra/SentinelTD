@@ -109,6 +109,25 @@ class Site(Base):
     )
 
 
+class OfflineEpisode(Base):
+    """Passive journal: one row per confirmed outage, preserved independently of notifications."""
+    __tablename__ = "offline_episodes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Historical snapshots survive removal/renaming of a monitored site.
+    site_id: Mapped[int] = mapped_column(Integer, index=True)
+    site_name: Mapped[str] = mapped_column(String(190))
+    site_url: Mapped[str] = mapped_column(String(255))
+    server_key: Mapped[str] = mapped_column(String(255), default="", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_failed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_checks: Mapped[int] = mapped_column(Integer, default=1)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    __table_args__ = (Index("ux_offline_episode_open", "site_id", unique=True,
+                           postgresql_where=ended_at.is_(None), sqlite_where=ended_at.is_(None)),)
+
+
 class Extension(Base):
     __tablename__ = "extensions"
 

@@ -38,6 +38,7 @@ function sentinel() {
     account: { username: '', oldPw: '', newPw: '', msg: '', err: '' },
     notif: { events: [], cur: null, edit: null, preview: null, msg: '', err: '', busy: false, tab: 'email', previewTab: 'email', source: false },
     stats: { period: '', scope: '__all__', months: 12, data: null, trend: null, periods: [], scopes: [], mode: 'month', cmpA: '', cmpB: '', cmp: null, busy: false, hover: null, days: 30 },
+    statsTab: 'updates', outages: { days: 30, site: '', server: '', offset: 0, data: null, busy: false, error: false, request: 0, group: 'sites' },
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
@@ -288,7 +289,7 @@ function sentinel() {
       if (this.route.page === 'security') await this.loadSecurity();
       if (this.route.page === 'history') await this.loadHistory();
       if (this.route.page === 'dashboard') { await this.loadDashboard(); }
-      if (this.route.page === 'stats') { await this.loadStats(); }
+      if (this.route.page === 'stats') { if (this.statsTab === 'offline') await this.loadOutages(); else await this.loadStats(); }
       if (this.route.page === 'settings') { await this.loadConn(); await this.loadPrefs(); await this.loadPackages(); }
       if (this.route.page === 'account') { await this.load2fa(); }
       if (this.route.page === 'notifications') { await this.loadNotif(); }
@@ -355,6 +356,7 @@ function sentinel() {
       else if (page === 'security') await this.loadSecurity();
       else if (page === 'domain-expiries' && !this.exp.loadingDomains) await this.loadDomainExpiries();
       else if (page === 'component-expiries' && !this.exp.loadingComponents) await this.loadComponentExpiries();
+      else if (page === 'stats' && this.statsTab === 'offline') await this.loadOutages();
     },
     get historyRows() {
       const q = (this.histQ || '').trim().toLowerCase(), t = this.histType;
@@ -1522,6 +1524,45 @@ function sentinel() {
     previewFull: '',
     openPreviewFull(html) { this.previewFull = html || ''; },
 
+    // ---------- registro offline (solo lettura, nessun nuovo check) ----------
+    async pickStatsTab(tab) {
+      this.statsTab = tab;
+      if (tab === 'offline') await this.loadOutages(); else await this.loadStats();
+    },
+    async loadOutages(reset = false) {
+      if (reset) this.outages.offset = 0;
+      const o = this.outages, request = ++o.request;
+      const query = `days=${o.days}&offset=${o.offset}` + (o.site ? `&site_id=${encodeURIComponent(o.site)}` : '') + (o.server ? `&server=${encodeURIComponent(o.server)}` : '');
+      o.busy = true;
+      try {
+        const r = await this.api('/api/availability?' + query);
+        if (!r.ok) throw Error('availability');
+        const data = await r.json();
+        if (!data || !Array.isArray(data.items)) throw Error('availability');
+        if (request === o.request) { o.data = data; o.error = false; }
+      } catch (e) { if (request === o.request) o.error = true; }
+      finally { if (request === o.request) o.busy = false; }
+    },
+    async outageFilter(site = '', server = '') {
+      this.outages.site = String(site); this.outages.server = server;
+      await this.loadOutages(true);
+    },
+    async outagePage(delta) {
+      if (this.outages.busy || !this.outages.data) return;
+      this.outages.offset = Math.max(0, this.outages.offset + delta * this.outages.data.limit);
+      await this.loadOutages();
+    },
+    outageDate(value) {
+      if (!value) return '—';
+      return new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'shortOffset' }).format(new Date(value));
+    },
+    outageUtc(value) { return value ? new Date(value).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : ''; },
+    outageDuration(row) {
+      const n = row.ended_at ? row.duration_seconds : Math.max(0, Math.floor((Date.now() - new Date(row.started_at).getTime()) / 1000));
+      const hours = Math.floor(n / 3600), minutes = Math.floor(n % 3600 / 60), seconds = n % 60;
+      return (hours ? hours + ' h ' : '') + (minutes || hours ? minutes + ' min ' : '') + seconds + ' s';
+    },
+    outageServer(key) { return key.startsWith('host:') ? key.slice(5) : key; },
     // ---------- statistiche ----------
     async loadStats(first = true) {
       this.stats.busy = true;
