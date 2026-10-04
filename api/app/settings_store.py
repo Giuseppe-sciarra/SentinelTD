@@ -2,6 +2,7 @@
 import json
 from copy import deepcopy
 
+from .config import settings
 from .db import SessionLocal
 from .models import AppSetting
 
@@ -19,6 +20,8 @@ DEFAULTS = {
     "history_retention_days": 400,  # cronologia dettagliata degli update (report dettagliato)
     "domain_decision_days": 60,     # quanti giorni prima chiedere "si rinnova o no?"
     "domain_alert_norenew": 1,      # 1 = avvisa anche per i domini da NON rinnovare
+    "status_check_attempts": settings.STATUS_CHECK_ATTEMPTS,
+    "status_check_retry_seconds": settings.STATUS_CHECK_RETRY_SECONDS,
     "offline_alert_minutes": 5,     # avvisa "non raggiungibile" solo dopo N minuti di errori continui (0 = subito)
     "email_report_mode": "site",    # "site" = un'email per ogni sito; "cycle" = un riepilogo unico per ciclo
     "server_parallel": 1,           # siti in contemporanea sullo stesso server
@@ -55,6 +58,8 @@ def normalize(data: dict | None) -> dict:
         ("history_retention_days", 7, 3650),
         ("domain_decision_days", 0, 3650),
         ("domain_alert_norenew", 0, 1),
+        ("status_check_attempts", 1, 5),
+        ("status_check_retry_seconds", 1, 60),
         ("offline_alert_minutes", 0, 120),
         ("server_parallel", 1, 4),
         ("server_pause_seconds", 0, 600),

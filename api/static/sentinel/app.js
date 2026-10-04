@@ -11,21 +11,21 @@ function sentinel() {
     token: localStorage.getItem('tdp_token') || '',
     imageToken: localStorage.getItem('tdp_image_token') || '',
     imgNonce: 0,
-    dashHover: null,
+    dashHover: null, dashBusy: false, dashProblemsLoaded: false, dashSecurityLoaded: false, dashError: false,
     meta: { version: '', name: 'Sentinel TD', vendor: 'Tastiere Digitali', vendor_url: 'https://www.tastieredigitali.it', author: 'Giuseppe Sciarra' },
     pendingToken: '', step: 'pwd', user: '', pwd: '', code: '', methods: [], err: '', needs2faSetup: false,
 
     // ---------- data ----------
-    sites: [], loading: false, busy: {}, toast: '', toastTimer: null,
-    detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [], siteSizes: [], diagBusy: {}, coreOpen: false,
+    sites: [], loading: false, checkAllBusy: false, busy: {}, toast: '', toastTimer: null,
+    detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [], 
     sec: { summary: null, items: [], loading: false, sev: '' },
     conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false, rollout: null, rolling: '', rolloutKind: '', rolloutOpen: false },
     pkg: { list: [], msg: '', err: '', busy: false, q: '', cands: [], searching: false, hbusy: '' }, servers: [], serversLoading: false, srvOpen: {},
     brand: { logo_url: '/static/logo.png', favicon_url: '/static/favicon.png', custom_logo: false, custom_favicon: false, busy: false },
-    exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, dSort: 'folder' },
+    exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, whoisProgress: null, dSort: 'folder' },
     expiryForm: { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 }, expiryEdit: false, expiryErr: '',
     prefsLoaded: false,
-    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 4, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, server_metrics_minutes: 5, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], busy: false, msg: '', err: '' },
+    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 1, domain_pause_seconds: 30, domain_source_attempts: 3, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, status_check_attempts: 3, status_check_retry_seconds: 15, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], busy: false, msg: '', err: '' },
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
@@ -41,9 +41,7 @@ function sentinel() {
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
-    srvst: { data: null, by: 'server', open: {}, busy: false, kind: '' },
-    // Stato server: di base per nome server, dalla A alla Z
-    tsort: { srv: { k: 'name', d: 1 } }, histQ: '', histType: '', problems: [],
+    tsort: {}, histQ: '', histType: '', problems: [],
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
            open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
@@ -120,9 +118,10 @@ function sentinel() {
       // completa ogni 10 minuti resta come rete di sicurezza.
       this._rev = { all: '', site: '', sid: '', etag: '' };
       setInterval(() => { if (this.token && !document.hidden) this.watchChanges(); }, 6000);
-      document.addEventListener('visibilitychange', () => { if (!document.hidden && this.token) this.watchChanges(); });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && this.token) { this.watchChanges(); this.refreshActiveView().catch(() => {}); } });
       setInterval(() => { if (this.token && !document.hidden) this.load(true); }, 10 * 60 * 1000);
-      setInterval(() => { if (this.token && !document.hidden && this.route.page === 'servers') this.loadServerStatus().catch(() => {}); }, 30000);
+      // Security scans and calendar deadlines can change without a CMS check.
+      setInterval(() => { if (this.token && !document.hidden && this.token) this.refreshActiveView().catch(() => {}); }, 60000);
     },
     async watchChanges() {
       if (this._watching) return;
@@ -137,7 +136,10 @@ function sentinel() {
         const prev = this._rev;
         this._rev = { all: d.rev, site: d.site, sid, etag: r.headers.get('ETag') || '' };
         if (!prev.all) return;                                   // prima impronta: niente da fare
-        if (d.rev !== prev.all) await this.load(true);           // qualcosa e' cambiato nel parco
+        if (d.rev !== prev.all) {
+          await this.load(true);
+          if (this.route.page !== 'dashboard') await this.refreshActiveView();
+        }
         if (sid && sid === prev.sid && d.site !== prev.site) await this.refreshDetail(this.detail.id);
       } catch (e) { /* rete assente: si riprova al giro dopo */ } finally { this._watching = false; }
     },
@@ -275,7 +277,7 @@ function sentinel() {
       else if (p[0] === 'folder') { r.page = 'sites'; r.folder = decodeURIComponent(p[1] || ''); }
       else if (p[0] === 'site') { r.page = 'site'; r.siteId = parseInt(p[1]); r.tab = ['overview','ext','history'].includes(p[2]) ? p[2] : 'overview'; }
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
-      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers'].includes(p[0])) r.page = p[0];
+      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins'].includes(p[0])) r.page = p[0];
       this.route = r; this.sideOpen = false;
     },
     go(path) { location.hash = '#/' + path; },
@@ -285,7 +287,7 @@ function sentinel() {
       if (this.route.page === 'site' && this.route.siteId) await this.loadDetail(this.route.siteId);
       if (this.route.page === 'security') await this.loadSecurity();
       if (this.route.page === 'history') await this.loadHistory();
-      if (this.route.page === 'dashboard') { await this.loadHistory(); }
+      if (this.route.page === 'dashboard') { await this.loadDashboard(); }
       if (this.route.page === 'stats') { await this.loadStats(); }
       if (this.route.page === 'settings') { await this.loadConn(); await this.loadPrefs(); await this.loadPackages(); }
       if (this.route.page === 'account') { await this.load2fa(); }
@@ -293,7 +295,6 @@ function sentinel() {
       if (this.route.page === 'reports') { await this.loadReports(); }
       if (this.route.page === 'clients') { await this.loadClients(); }
       if (this.route.page === 'plugins') { await this.loadPluginCatalog(); }
-      if (this.route.page === 'servers') { await this.loadServerStatus(); }
       if (this.route.page === 'domain-expiries') { await this.loadPrefs(); await this.loadDomainExpiries(); }
       if (this.route.page === 'component-expiries') { await this.loadPrefs(); await this.loadComponentExpiries(); }
       window.scrollTo(0, 0);
@@ -307,8 +308,7 @@ function sentinel() {
         const r = await this.api('/api/sites');
         if (r.ok) this.sites = await r.json();
         if (!silent) await this._onRoute();
-        else if (this.route.page === 'dashboard') this.loadHistory();
-        if (this.route.page === 'dashboard') this.loadProblems();
+        else if (this.route.page === 'dashboard') await this.loadDashboard();
       } catch (e) { /* logout gestito in api() */ }
       this.loading = false;
     },
@@ -317,37 +317,6 @@ function sentinel() {
       if (r.ok) this.detail = await r.json();
       const h = await this.api(`/api/history?site_id=${id}&days=7`);
       if (h.ok) this.siteHistory = await h.json();
-      this.coreOpen = false;
-      await this.loadSizes(id);
-    },
-    async loadSizes(id) {
-      this.siteSizes = [];
-      try { const z = await this.api(`/api/sites/${id}/sizes?days=365`); if (z.ok) this.siteSizes = await z.json(); } catch (e) { }
-    },
-
-    // ---------- diagnostica del sito ----------
-    // Gira nel worker (puo' superare il minuto): si avvia e si controlla diag_at finche' cambia.
-    async runDiag(d) {
-      if (this.diagBusy[d.id]) return;
-      this.diagBusy[d.id] = true;
-      this.say(`Diagnostica di ${d.name} in corso…`);
-      try {
-        const since = d.diag_at || '';
-        const r = await this.api(`/api/sites/${d.id}/diagnostics?space=150`, { method: 'POST' });
-        if (!r.ok) { this.say(`Diagnostica di ${d.name} non avviata`); return; }
-        for (let i = 0; i < 80; i++) {          // fino a 4 minuti
-          await new Promise(res => setTimeout(res, 3000));
-          const x = await this.api(`/api/sites/${d.id}`);
-          if (!x.ok) continue;
-          const nd = await x.json();
-          if ((nd.diag_at || '') !== since) {
-            if (this.detail && this.detail.id === d.id) { this.detail = nd; await this.loadSizes(d.id); }
-            this.say(nd.diag && nd.diag.error ? `Diagnostica di ${d.name}: ${nd.diag.error}` : `Diagnostica di ${d.name} completata`, 5000);
-            return;
-          }
-        }
-        this.say(`La diagnostica di ${d.name} sta impiegando molto: ricarica la pagina tra qualche minuto`, 5000);
-      } finally { this.diagBusy[d.id] = false; }
     },
     fmtBytes(b) {
       b = Number(b) || 0;
@@ -355,44 +324,38 @@ function sentinel() {
       if (b >= 1048576) return (b / 1048576).toFixed(1).replace('.', ',') + ' MB';
       return Math.max(0, Math.round(b / 1024)) + ' KB';
     },
-    diagSpace(d) {
-      const sp = d && d.diag && d.diag.space;
-      if (!sp) return { cls: '', text: 'non misurato' };
-      const n = v => String(v).replace('.', ',');
-      if (sp.ok) return { cls: 'ok', text: `almeno ${n(sp.tested_mb)} MB` };
-      return { cls: 'err', text: `solo ${n(sp.written_mb)} MB` };
+    async loadProblems() {
+      try {
+        const r = await this.api('/api/dashboard/problems');
+        if (!r.ok) return false;
+        const data = await r.json(); if (!Array.isArray(data)) return false;
+        this.problems = data; this.dashProblemsLoaded = true; return true;
+      } catch (e) { return false; }
     },
-    coreSummary(c) {
-      const parts = [];
-      if (c.modified_count) parts.push(`${c.modified_count} ${this.pl(c.modified_count, 'modificato', 'modificati')}`);
-      if (c.missing_count) parts.push(`${c.missing_count} ${this.pl(c.missing_count, 'mancante', 'mancanti')}`);
-      if (c.extra_count) parts.push(`${c.extra_count} in più`);
-      return parts.join(' · ');
+    async loadSecuritySummary() {
+      try {
+        const r = await this.api('/api/security/summary');
+        if (!r.ok) return false;
+        const data = await r.json();
+        if (!data || !Number.isFinite(data.critical) || !Number.isFinite(data.exploited)) return false;
+        this.sec.summary = data; this.dashSecurityLoaded = true; return true;
+      } catch (e) { return false; }
     },
-    coreFiles(c) {
-      return [...(c.modified || []).map(f => ({ f, k: 'modificato' })), ...(c.missing || []).map(f => ({ f, k: 'mancante' })),
-              ...(c.extra || []).map(f => ({ f, k: 'in più' }))];
+    async loadDashboard() {
+      if (this.dashBusy) return;
+      this.dashBusy = true;
+      try {
+        const results = await Promise.allSettled([this.loadProblems(), this.loadSecuritySummary(), this.loadHistory()]);
+        this.dashError = results.slice(0, 2).some(r => r.status !== 'fulfilled' || !r.value);
+      } finally { this.dashBusy = false; }
     },
-    sizeNow(d) { return (d && d.diag && d.diag.sizes && d.diag.sizes.total) ? d.diag.sizes : null; },
-    _sizePts(w, h) {
-      const v = this.siteSizes.map(r => r.total);
-      if (v.length < 2) return [];
-      const lo = Math.min(...v), hi = Math.max(...v), span = (hi - lo) || 1, pad = 6;
-      return v.map((y, i) => [(i / (v.length - 1)) * w, hi === lo ? h / 2 : pad + (1 - (y - lo) / span) * (h - 2 * pad)]);
+    async refreshActiveView() {
+      const page = this.route.page;
+      if (page === 'dashboard') await this.loadDashboard();
+      else if (page === 'security') await this.loadSecurity();
+      else if (page === 'domain-expiries' && !this.exp.loadingDomains) await this.loadDomainExpiries();
+      else if (page === 'component-expiries' && !this.exp.loadingComponents) await this.loadComponentExpiries();
     },
-    sizePath(w, h) { return this._sizePts(w, h).map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' '); },
-    sizeArea(w, h) { const p = this.sizePath(w, h); return p ? `${p} L${w} ${h} L0 ${h} Z` : ''; },
-    sizeTrend() {
-      const a = this.siteSizes;
-      if (a.length < 2) return '';
-      const last = a[a.length - 1], lastDay = new Date(last.day);
-      const ref = a.find(r => (lastDay - new Date(r.day)) / 86400000 <= 30) || a[0];
-      const days = Math.max(1, Math.round((lastDay - new Date(ref.day)) / 86400000));
-      const delta = last.total - ref.total;
-      if (Math.abs(delta) < 1048576) return `stabile negli ultimi ${days} ${this.pl(days, 'giorno', 'giorni')}`;
-      return `${delta > 0 ? '+' : '−'}${this.fmtBytes(Math.abs(delta))} negli ultimi ${days} ${this.pl(days, 'giorno', 'giorni')}`;
-    },
-    async loadProblems() { try { const r = await this.api('/api/servers/problems'); if (r.ok) this.problems = await r.json(); } catch (e) { } },
     get historyRows() {
       const q = (this.histQ || '').trim().toLowerCase(), t = this.histType;
       return this.history.filter(h => (!t || (t === 'failed' ? !h.ok : (t === 'backup' ? (h.ok && h.backup) : h.type === t)))
@@ -424,17 +387,23 @@ function sentinel() {
     },
     async loadSecurity() {
       this.sec.loading = true;
-      const [a, b] = await Promise.all([this.api('/api/security/summary'), this.api('/api/security/matches')]);
-      if (a.ok) this.sec.summary = await a.json();
-      if (b.ok) this.sec.items = (await b.json()).items || [];
-      this.sec.loading = false;
+      try {
+        await Promise.all([this.loadSecuritySummary(), (async () => {
+          const r = await this.api('/api/security/matches');
+          if (r.ok) this.sec.items = (await r.json()).items || [];
+        })()]);
+      } finally { this.sec.loading = false; }
     },
     async scanNow() { await this.api('/api/security/scan-now', { method: 'POST' }); this.say('Scansione avviata: risultati tra qualche minuto'); },
 
     // ---------- helpers ----------
     siteTags(s) { return (s.tags || '').split(',').map(t => t.trim()).filter(Boolean); },
     hasUpd(s) { return s.core_update || (s.updates_count || 0) > 0; },
-    isOff(s) { return s.status && s.status !== 'ok'; },
+    isDnsIssue(s) { return s.status === 'dns_error'; },
+    isCheckPending(s) { return s.status === 'check_pending'; },
+    isOff(s) { return s.status && s.status !== 'ok' && !this.isDnsIssue(s) && !this.isCheckPending(s); },
+    statusTone(s) { return this.isCheckPending(s) ? 'warn' : this.isDnsIssue(s) ? 'warn' : (this.isOff(s) ? 'err' : (this.hasUpd(s) ? 'warn' : 'ok')); },
+    statusTitle(s) { return this.isCheckPending(s) ? (s.error || 'Verifica da confermare') : this.isDnsIssue(s) ? (s.error || 'Verifica DNS non riuscita') : (this.isOff(s) ? (s.error || 'offline') : (this.hasUpd(s) ? 'update disponibili' : 'ok')); },
     coreLabel(s) { return s.core_current || '—'; },
     fmtDate(d) { if (!d) return '—'; const x = new Date(d); return x.toLocaleString(I18n.locale, { dateStyle: 'short', timeStyle: 'short' }); },
     fmtDay(d) { if (!d) return '—'; const x = new Date(d); return Number.isNaN(x.getTime()) ? '—' : x.toLocaleDateString(I18n.locale); },
@@ -446,6 +415,26 @@ function sentinel() {
     daysUntil(d) { if (!d) return null; const a = new Date(d); if (Number.isNaN(a.getTime())) return null; const today = new Date(); const u1 = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()); const u2 = Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate()); return Math.round((u2-u1)/86400000); },
     expiryText(d) { const n = this.daysUntil(d); if (n === null) return '—'; if (n < 0) return `scaduto da ${Math.abs(n)} g`; if (n === 0) return 'scade oggi'; return `scade tra ${n} giorni`; },
     expiryClass(d) { return this.expiryDaysClass(this.daysUntil(d)); },
+    domainSourceSummary(s) {
+      if (s.source_summary) return s.source_summary;
+      try { return JSON.parse(s.domain_check_details || '{}'); } catch(e) { return {}; }
+    },
+    domainRenewalPending(s) {
+      if (s.error || s.domain_check_error) return false;
+      if (s.renewal_pending !== undefined) return s.renewal_pending;
+      const info = this.domainSourceSummary(s), chosen = (info.sources || []).find(x=>x.selected);
+      const age = -this.daysUntil(s.domain_expires_at);
+      if (!(s.domain_name || '').endsWith('.it') || !s.domain_expires_at || age < 0 || age >= 15 || info.warning || !chosen) return false;
+      const status = (chosen.statuses || []).join(' ').toLowerCase().replace(/\s/g,'');
+      const elapsed = Date.now() - new Date(chosen.snapshot_at || 0).getTime();
+      return !!((chosen.authoritative || (elapsed >= 0 && elapsed <= 2*86400000)) && status.includes('autorenewperiod') && !/inactive|pendingdelete|notrenewed/.test(status));
+    },
+    domainSourceTitle(x) {
+      return [x.error, x.updated_at ? 'Record aggiornato: '+this.fmtDate(x.updated_at) : '',
+        x.snapshot_at ? 'Dati rilevati: '+this.fmtDate(x.snapshot_at) : '', (x.statuses || []).join(', ')].filter(Boolean).join('\n');
+    },
+    domainExpiryText(s) { return s.domain_check_error ? 'Data da verificare' : this.domainRenewalPending(s) ? 'Rinnovo in corso' : this.expiryText(s.domain_expires_at); },
+    domainExpiryClass(s) { return s.domain_check_error || this.domainRenewalPending(s) ? 'warn' : this.expiryClass(s.domain_expires_at); },
     expiryDaysClass(n) { if (n === null || n === undefined) return ''; if (n < 0 || n <= Number(this.prefs.expiry_critical_days||7)) return 'err'; if (n <= Number(this.prefs.expiry_warning_days||30)) return 'warn'; return 'ok'; },
     expiryDaysText(n) { if (n === null || n === undefined) return '—'; if (n < 0) return `scaduto da ${Math.abs(n)} giorni`; if (n === 0) return 'scade oggi'; return `tra ${n} giorni`; },
     platformLabel(p) { return p === 'wp' ? 'WordPress' : (p === 'joomla' ? 'Joomla' : 'WordPress + Joomla'); },
@@ -482,7 +471,7 @@ function sentinel() {
       });
     },
     get noFolder() { return this.sites.filter(s => this.siteTags(s).length === 0); },
-    _stats(arr) { return { count: arr.length, upd: arr.filter(s => this.hasUpd(s)).length, off: arr.filter(s => this.isOff(s)).length }; },
+    _stats(arr) { return { count: arr.length, upd: arr.filter(s => this.hasUpd(s)).length, off: arr.filter(s => this.isOff(s)).length, dns: arr.filter(s => this.isDnsIssue(s)).length, checking: arr.filter(s => this.isCheckPending(s)).length }; },
     get totStats() { return { ...this._stats(this.sites), auto: this.sites.filter(s => s.auto_update).length, wp: this.sites.filter(s => s.cms === 'wp').length, joomla: this.sites.filter(s => s.cms === 'joomla').length }; },
     folderSites(tag) {
       if (tag === '__none') return this.noFolder;
@@ -526,7 +515,7 @@ function sentinel() {
         const r = await this.api(`/api/sites/${s.id}/refresh`, { method: 'POST' });
         if (r.ok) {
           const d = await r.json(); Object.assign(s, d); if (this.detail && this.detail.id === s.id) this.detail = d;
-          this.say(d.status === 'ok' ? `${s.name}: online` : `${s.name}: ancora non raggiungibile — ${d.error || 'errore'}`);
+          this.say(this.isCheckPending(d) ? `${s.name}: verifica da confermare — ${d.error || 'ricontrollo programmato'}` : this.isDnsIssue(d) ? `${s.name}: verifica DNS non riuscita — ${d.error || 'errore DNS'}` : (d.status === 'ok' ? `${s.name}: online` : `${s.name}: ancora non raggiungibile — ${d.error || 'errore'}`));
         } else if (r.status === 502 || r.status === 504) {
           // il proxy ha chiuso la richiesta prima della fine: il controllo prosegue sul server
           this.say(`${s.name} risponde lentamente: il controllo continua, ricarica la pagina tra un minuto`);
@@ -538,7 +527,19 @@ function sentinel() {
         this.say(`Check non riuscito su ${s.name}: connessione interrotta`);
       } finally { this.busy[s.id] = false; }
     },
-    async checkAll() { this.say('Check di tutti i siti in corso…'); for (const s of this.sites) { try { const r = await this.api(`/api/sites/${s.id}/refresh`, { method: 'POST' }); if (r.ok) Object.assign(s, await r.json()); } catch (e) { } } this.say('Check completato'); },
+    async checkAll() {
+      if (this.checkAllBusy) return;
+      this.checkAllBusy = true; this.say('Check di tutti i siti in corso…');
+      try {
+        const sites = this.sites.filter(s => s.enabled);
+        for (let i = 0; i < sites.length; i++) {
+          const s = sites[i];
+          try { const r = await this.api(`/api/sites/${s.id}/refresh`, { method: 'POST' }); if (r.ok) Object.assign(s, await r.json()); } catch (e) { }
+          if (i < sites.length - 1) await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        await this.load(true); this.say('Check completato');
+      } finally { this.checkAllBusy = false; }
+    },
     // Aggiorna su un sito: si segue l'aggiornamento e alla fine si dice com'e' andata.
     // Prima il pannello scriveva "accodato" anche quando non partiva niente.
     async updateNow(s) {
@@ -604,7 +605,7 @@ function sentinel() {
     exportCsv() {
       const esc = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
       const rows = [['Nome','URL','CMS','Core','PHP','Cartelle','Stato','Update','Ultimo check','Scadenza dominio','Notifiche']];
-      for (const x of this.filtered) rows.push([x.name,x.url,x.cms,x.core_current||'',x.php_version||'',this.siteTags(x).join(' | '),this.isOff(x)?'offline':'ok',x.updates_count||0,x.last_checked||'',x.domain_expires_at||'',x.notifications_silenced?'silenziate':'attive']);
+      for (const x of this.filtered) rows.push([x.name,x.url,x.cms,x.core_current||'',x.php_version||'',this.siteTags(x).join(' | '),this.isDnsIssue(x)?'verifica DNS non riuscita':(this.isOff(x)?'offline':'ok'),x.updates_count||0,x.last_checked||'',x.domain_expires_at||'',x.notifications_silenced?'silenziate':'attive']);
       const csv = '\ufeff' + rows.map(r => r.map(esc).join(';')).join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `sentinel-siti-${new Date().toISOString().slice(0,10)}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     },
@@ -827,7 +828,7 @@ function sentinel() {
         if (this.exp.dRenew === 'todo' && d.renew) return false;
         if (this.exp.dRenew === 'yes' && d.renew !== 'yes') return false;
         if (this.exp.dRenew === 'no' && d.renew !== 'no') return false;
-        if (this.exp.dRenew === 'soon' && !(d.days !== null && d.days <= this.prefs.expiry_warning_days)) return false;
+        if (this.exp.dRenew === 'soon' && !( !d.renewal_pending && !d.error && d.days !== null && d.days <= this.prefs.expiry_warning_days)) return false;
         return true;
       });
     },
@@ -949,19 +950,52 @@ function sentinel() {
       if (note === null) return;
       await this.setRenew([d.name], d.renew || '', note);
     },
-    async refreshWhois(domains) {
+    async refreshWhois(domains, sequential = false) {
       const list = Array.isArray(domains) ? domains : [domains];
+      if (this.exp.busy) return;
       this.exp.busy = true;
       try {
-        const r = await this.api('/api/domain-expiries/scan', { method: 'POST', body: JSON.stringify({ domains: list }) });
-        if (!r.ok) { this.say('Aggiornamento non avviato'); return; }
+        await this.loadDomainExpiries();
+        const watched = this.exp.domains.filter(x => !list.length || list.includes(x.name));
+        const previous = new Map(watched.map(x => [x.name, x.checked_at]));
+        this.exp.whoisPrevious = Object.fromEntries(previous);
+        this.exp.whoisProgress = {done: 0, total: previous.size, errors: 0};
+        const r = await this.api('/api/domain-expiries/scan', { method: 'POST', body: JSON.stringify({ domains: list, sequential }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); this.say(d.detail || 'Aggiornamento non avviato', 6000); return; }
         this.say(list.length ? `Aggiornamento avviato per ${list.length} ${this.pl(list.length, 'dominio', 'domini')}` : 'Aggiornamento avviato');
-        setTimeout(() => { if (this.route.page === 'domain-expiries') this.loadDomainExpiries(); }, 12000);
+        const maxAttempts = Math.max(60, previous.size * 100 + 180);
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          await this.loadDomainExpiries();
+          const rows = this.exp.domains.filter(x => previous.has(x.name));
+          const completed = rows.filter(x => x.checked_at && x.checked_at !== previous.get(x.name));
+          this.exp.whoisProgress = {done: completed.length, total: previous.size, errors: completed.filter(x => x.error).length};
+          if (rows.length === previous.size && rows.every(x => x.checked_at && x.checked_at !== previous.get(x.name))) {
+            await this.load(true);
+            if (this.route.page === 'site' && this.detail) await this.refreshDetail(this.detail.id);
+            this.say(rows.some(x => x.error) ? 'Controllo WHOIS terminato con errori: controlla le date da verificare.' : 'Dati WHOIS aggiornati');
+            return;
+          }
+          if (!['domain-expiries', 'site'].includes(this.route.page)) return;
+        }
+        this.say('Controllo WHOIS ancora in coda: il pannello si aggiornerà al completamento.', 6000);
+      } catch (e) {
+        this.say('Errore durante il controllo WHOIS', 6000);
       } finally { this.exp.busy = false; }
     },
     async loadDomainExpiries() {
       this.exp.loadingDomains = true;
-      try { const r = await this.api('/api/domain-expiries'); if (r.ok) this.exp.domains = await r.json(); }
+      try {
+        const r = await this.api('/api/domain-expiries');
+        if (r.ok) {
+          this.exp.domains = await r.json();
+          const previous = this.exp.whoisPrevious;
+          if (previous) {
+            const completed = this.exp.domains.filter(x => Object.hasOwn(previous, x.name) && x.checked_at && x.checked_at !== previous[x.name]);
+            this.exp.whoisProgress = {done: completed.length, total: Object.keys(previous).length, errors: completed.filter(x => x.error).length};
+          }
+        }
+      }
       finally { this.exp.loadingDomains = false; }
     },
     async loadComponentExpiries() {
@@ -970,13 +1004,7 @@ function sentinel() {
       finally { this.exp.loadingComponents = false; }
     },
     async scanDomains() {
-      const r = await this.api('/api/domain-expiries/scan', { method: 'POST' });
-      if (!r.ok) { this.say('Errore nell’avvio del controllo'); return; }
-      this.say('Scansione domini avviata');
-      [5000, 15000, 30000, 60000, 120000].forEach(ms => setTimeout(async () => {
-        if (this.route.page === 'domain-expiries') await this.loadDomainExpiries();
-        if (this.route.page === 'site' && this.detail) await this.loadDetail(this.detail.id);
-      }, ms));
+      await this.refreshWhois([], true);
     },
     newExpiry() {
       this.expiryForm = { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 };
@@ -1042,13 +1070,6 @@ function sentinel() {
       return Object.values(groups).sort((a, b) => (a.folder === '') - (b.folder === '') || a.folder.localeCompare(b.folder, 'it', { numeric: true }));
     },
     srvOthers(sv, folder) { return (sv.folders || []).filter(f => f.name !== folder); },
-    // IP con piu' macchine: "Dividi per macchina" le tratta come server a parte
-    isSplit(ip) { return (this.prefs.server_split || []).includes(ip); },
-    toggleSplit(ip) {
-      const cur = this.prefs.server_split || [];
-      this.prefs.server_split = cur.includes(ip) ? cur.filter(x => x !== ip) : [...cur, ip];
-    },
-    machineName(ip, hostname) { return this.srvLabel(ip + '|' + hostname); },
     isLimited(ip) { return (this.prefs.server_limited || []).includes(ip); },
     toggleLimited(ip) {
       const cur = this.prefs.server_limited || [];
@@ -1065,13 +1086,12 @@ function sentinel() {
         // NB: i campi numerici si costruiscono da una lista, non a mano: cosi' aggiungere
         // una nuova impostazione non richiede di ricordarsi di inserirla anche qui
         // (era successo con screenshot_every_hours: il valore non partiva e tornava al default).
-        const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'expiry_warning_days',
-                          'expiry_critical_days', 'screenshot_every_hours', 'server_metrics_minutes', 'history_retention_days',
-                          'domain_decision_days', 'domain_alert_norenew', 'offline_alert_minutes',
+        const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'domain_pause_seconds', 'domain_source_attempts', 'expiry_warning_days',
+                          'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days',
+                          'domain_decision_days', 'domain_alert_norenew', 'status_check_attempts', 'status_check_retry_seconds', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
-                       server_limited: this.prefs.server_limited || [], server_split: this.prefs.server_split || [], connector_auto_update: this.prefs.connector_auto_update !== false,
-                       auto_rollback: this.prefs.auto_rollback !== false, server_labels: this.prefs.server_labels || {} };
+                       server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, server_labels: this.prefs.server_labels || {} };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
           if (Number.isFinite(v)) body[k] = v;
@@ -1241,7 +1261,6 @@ function sentinel() {
       if (!this.notif.cur || !this.notif.edit) return;
       const e = this.notif.edit;
       const payload = { subject: e.subject, body_email: e.body_email, body_telegram: e.body_telegram };
-      if (this.notif.cur.event === 'nightly_summary') Object.assign(payload, {send_time: e.send_time, timezone: e.timezone});
       const r = await this.api(`/api/notifications/${this.notif.cur.event}/preview`, { method: 'POST', body: JSON.stringify(payload) });
       if (r.ok) this.notif.preview = await r.json();
       else { const d = await r.json().catch(() => ({})); this.notif.preview = { subject: '', body_email: '', body_telegram: '', error: d.detail || 'Anteprima non disponibile' }; }
@@ -1792,118 +1811,12 @@ function sentinel() {
         ext: { name: e => e.name, type: e => e.type, cur: e => ver(e.current_version), avail: e => e.update_available ? ver(e.new_version) : null, state: e => this.isLocked(e) ? 2 : (e.update_available ? 0 : 1) },
         comp: { name: x => x.name, platform: x => x.platform, provider: x => x.provider, date: x => x.expires_at, left: x => x.expires_at },
         sec: { sev: m => ({ critical: 0, high: 1, medium: 2, low: 3 })[m.severity] ?? 4, site: m => m.site_name, ext: m => m.ext_name || m.ext_slug, cve: m => m.cve_id, cur: m => ver(m.site_version), fix: m => ver(m.version_fixed) },
-        srvsites: { name: s => s.name, cms: s => s.cms, php: s => ver(s.php), state: s => !s.enabled ? 3 : (s.status === 'ok' ? (s.space_low || s.big_logs ? 1 : 2) : 0), upd: s => -(s.pending + s.failed * 10), size: s => s.size, conn: s => ver(s.connector), check: s => s.last_checked },
-        srv: {
-          name: g => String(g.title || g.key || '').toLowerCase(),
-          sites: g => g.counts.sites,
-          php: g => { const v = (g.php || []).map(p => { const m = String(p[0]).match(/(\d+)\.(\d+)/); return m ? +m[1] * 100 + +m[2] : null; }).filter(x => x !== null); return v.length ? Math.min(...v) : null; },   // la versione piu' vecchia in uso
-          load: g => { const l = this.srvLoad(g); return l && l.cores ? l.v / l.cores * 100 : null; },
-          ram: g => (g.load24 && g.load24.mem) ? g.load24.mem.usual : null,
-          disk: g => (g.disk && g.disk.total) ? 100 - g.disk.free / g.disk.total * 100 : null,
-          size: g => g.size ? g.size.total : null,
-          problems: g => g.sites_with_problems || 0,
-        },
         dom: { name: x => x.name, site: x => (x.site_names || [])[0] || '', exp: x => x.days ?? null, renew: x => ({ '': 0, yes: 1, no: 2 })[x.renew || ''] },
         plug: { name: p => p.name, status: p => ({ closed: 0, abandoned: 1, stale: 2, ok: 3, unchecked: 4 })[p.status], last: p => p.last_updated || p.closed_date, tested: p => ver(p.tested), ver: p => ver(p.versions[0]), sites: p => -p.sites_count },
       };
     },
-    // ---------- stato server ----------
-    async loadServerStatus() {
-      if (this.srvst.busy) return;
-      this.srvst.busy = true;
-      try {
-        const r = await this.api('/api/servers/overview?by=' + this.srvst.by); if (r.ok) this.srvst.data = await r.json();
-      } finally { this.srvst.busy = false; }
-    },
-    metricAge(t) { return t ? 'Ultima misura ' + this.hhmm(t) + ' · ' + this.ago(new Date(t * 1000).toISOString()) : 'Misura non ancora disponibile'; },
-    metricStale(t) { return !!t && Date.now() / 1000 - t > ((this.srvst.data && this.srvst.data.metrics_interval_minutes) || 5) * 120; },
-    async srvSetBy(by) { this.srvst.by = by; await this.loadServerStatus(); },
     fmtGB(b) { return b ? (b / 1073741824).toFixed(b < 10737418240 ? 1 : 0).replace('.', ',') + ' GB' : '—'; },
     fmtMB(b) { if (!b) return '—'; return b >= 1073741824 ? this.fmtGB(b) : Math.round(b / 1048576) + ' MB'; },
-    // carico medio in % dei core: 100% = tutti i core occupati, oltre = processi in coda
-    loadPct(v, cores) { if (v === null || v === undefined) return '—'; return cores ? Math.round(v / cores * 100) + '%' : 'core non rilevati'; },
-    loadTitle(v, cores) { return v === null || v === undefined ? '' : `load average ${v}${cores ? ' su ' + cores + ' core' : ''}`; },
-    // stato del carico a parole, con soglie fisse (percentuale = quanto lavora rispetto a quanto puo')
-    // carico della riga chiusa: "di solito" nelle 24 ore se ci sono le misure, altrimenti la foto notturna
-    srvLoad(g) {
-      const l = g.load24;
-      if (l && l.usual !== null && l.usual !== undefined) return { v: l.usual, cores: l.cores || (g.load && g.load.cores), live: true };
-      if (g.load) return { v: g.load.max, cores: g.load.cores, live: false };
-      return null;
-    },
-    hhmm(t) { return t ? new Date(t * 1000).toLocaleTimeString(I18n.locale, { hour: '2-digit', minute: '2-digit' }) : ''; },
-    // Storico a caselle: l'intera superficie mostra il valore, anche su touch e tastiera.
-    metricHistory(data, kind) {
-      if (!data || !Array.isArray(data.series)) return '';
-      const esc = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
-      const step = data.bucket_seconds || 1800;
-      const cells = data.series.map((v, i) => {
-        const start = (data.series_start || 0) + i * step;
-        const day = new Date(start * 1000).toLocaleDateString(I18n.locale, { day: '2-digit', month: '2-digit' });
-        const time = day + ' ' + this.hhmm(start) + '–' + this.hhmm(start + step);
-        const measured = v !== null && v !== undefined && Number.isFinite(v);
-        const level = measured ? (kind === 'cpu' ? this.loadLevel(v, data.cores) : this.ramLevel(v)) : null;
-        // Leave source labels in Italian so the UI translator can also handle language changes.
-        const value = !measured ? 'Nessuna misura' : (kind === 'cpu' ? this.loadPct(v, data.cores) : Math.round(v) + '%');
-        const word = measured ? (kind === 'cpu' ? this.loadWord(v, data.cores) : this.ramWord(v)) : '';
-        const label = esc(time + ' · ' + value + (word ? ' · ' + word : ''));
-        const current = i === data.series.length - 1;
-        return `<button type="button" class="history-cell hint-h state-${level || 'empty'}${current ? ' is-current' : ''}"${current ? ' aria-current="time"' : ''} title="${label}" aria-label="${label}"></button>`;
-      });
-      return `<div class="metric-history">${cells.join('')}</div>`;
-    },
-    loadHistoryHtml(l) {
-      return this.metricHistory(l, 'cpu');
-    },
-    // RAM usata (%): sotto 75% a posto, 75-90% alta, oltre 90% piena
-    ramLevel(p) { return p === null || p === undefined ? null : (p < 75 ? 'ok' : (p <= 90 ? 'warn' : 'err')); },
-    ramWord(p) { return ({ ok: 'a posto', warn: 'alta', err: 'piena' })[this.ramLevel(p)] || ''; },
-    ramHistoryHtml(m) {
-      return this.metricHistory(m, 'ram');
-    },
-    loadLevel(v, cores) { if (v === null || v === undefined || !cores) return null; const p = v / cores * 100; return p < 70 ? 'ok' : (p <= 150 ? 'warn' : 'err'); },
-    loadWord(v, cores) { return ({ ok: 'tranquillo', warn: 'impegnato', err: 'sovraccarico' })[this.loadLevel(v, cores)] || ''; },
-    loadClass(l) { return l && l.max !== undefined ? (this.loadLevel(l.max, l.cores) || '') : ''; },
-    // grafici in SVG: andamento del peso (linea) e aggiornamenti per mese (barre)
-    sparkPath(series, w = 220, h = 44) {
-      const v = (series || []).map(p => p.total); if (v.length < 2) return '';
-      const min = Math.min(...v), max = Math.max(...v), span = (max - min) || 1;
-      return v.map((y, i) => `${i ? 'L' : 'M'}${(i / (v.length - 1) * w).toFixed(1)},${(h - 3 - (y - min) / span * (h - 6)).toFixed(1)}`).join(' ');
-    },
-    // barre dei mesi come SVG pronto (un template Alpine dentro un <svg> non funziona)
-    monthBarsSvg(months, w = 220, h = 54) {
-      const m = months || []; const max = Math.max(1, ...m.map(x => x.ok + x.failed)); const bw = w / Math.max(1, m.length);
-      h = h; const top = 11;   // spazio sopra la barra piu' alta per il numero
-      const esc = s => String(s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-      const parts = m.map((x, i) => {
-        const okh = x.ok / max * (h - 14 - top), koh = x.failed / max * (h - 14 - top), bx = (i * bw + 3).toFixed(1), bwid = (bw - 6).toFixed(1);
-        const okY = (h - 12 - okh).toFixed(1), koY = (h - 12 - okh - koh).toFixed(1), tot = x.ok + x.failed;
-        return `<rect x="${bx}" y="${okY}" width="${bwid}" height="${okh.toFixed(1)}" fill="var(--ok)" rx="2"/>`
-          + (koh > 0 ? `<rect x="${bx}" y="${koY}" width="${bwid}" height="${koh.toFixed(1)}" fill="var(--err)" rx="2"/>` : '')
-          + `<text x="${(i * bw + bw / 2).toFixed(1)}" y="${h - 2}" text-anchor="middle" font-size="9" fill="var(--mut)">${esc(String(x.period).slice(5))}</text>`
-          + (tot ? `<text x="${(i * bw + bw / 2).toFixed(1)}" y="${(h - 14 - okh - koh).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--txt-2)">${tot}</text>` : '');
-      });
-      return `<svg viewBox="0 0 ${w} ${h}" class="spark">${parts.join('')}</svg>`;
-    },
-    // tutti i problemi di tutti i gruppi, per il riquadro "Cosa non va"
-    get srvProblems() {
-      const d = this.srvst.data; if (!d) return [];
-      const out = [];
-      for (const g of d.groups) for (const p of g.problems) out.push({ ...p, group: g.title || g.key || 'Senza cartella', host: g.host });
-      const order = { offline: 0, space: 1, failed: 2, logs: 3, php: 4 };
-      return out.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9) || a.site.localeCompare(b.site, 'it'));
-    },
-    // una riga per sito, con tutti i suoi problemi (prima: una riga per problema, nome ripetuto)
-    get srvProblemSites() {
-      const by = {};
-      for (const p of this.srvProblems) {
-        const s = by[p.site_id] || (by[p.site_id] = { site: p.site, site_id: p.site_id, group: p.group, problems: [] });
-        s.problems.push(p);
-      }
-      const order = { offline: 0, space: 1, failed: 2, logs: 3, php: 4, domain: 5 };
-      return Object.values(by).filter(s => !this.srvst.kind || s.problems.some(p => p.kind === this.srvst.kind))
-        .sort((a, b) => Math.min(...a.problems.map(p => order[p.kind] ?? 9)) - Math.min(...b.problems.map(p => order[p.kind] ?? 9)) || b.problems.length - a.problems.length || a.site.localeCompare(b.site, 'it'));
-    },
     secSev(s) { return ({ critical: 'err', high: 'err', medium: 'warn', low: 'info' })[s] || 'info'; },
     // dettaglio del problema senza ripetere il tipo (sotto l'intestazione del tipo)
     problemDetail(p) {
@@ -1915,26 +1828,15 @@ function sentinel() {
     },
     // problemi della riga chiusa, a parole: "1 spazio · 1 PHP · 2 domini"
     problemWords(g) {
-      const w = { offline: ['offline', 'offline'], space: ['spazio', 'spazio'], failed: ['aggiornamento fallito', 'aggiornamenti falliti'], php: ['PHP', 'PHP'], domain: ['dominio', 'domini'] };
+      const w = { offline: ['offline', 'offline'], space: ['spazio', 'spazio'], failed: ['aggiornamento fallito', 'aggiornamenti falliti'], php: ['PHP', 'PHP'], domain: ['dominio', 'domini'], dns: ['verifica DNS', 'verifiche DNS'], check: ['verifica da confermare', 'verifiche da confermare'] };
       return Object.keys(w).filter(k => g.problem_counts && g.problem_counts[k]).map(k => ({ kind: k, n: g.problem_counts[k], label: g.problem_counts[k] === 1 ? w[k][0] : w[k][1] }));
     },
-    problemLong(k) { return { offline: 'offline', space: 'spazio quasi esaurito', failed: 'aggiornamenti falliti', php: 'PHP fuori supporto', domain: 'dominio scaduto' }[k] || k; },
-    problemSev(k) { return ({ offline: 'err', domain: 'err', space: 'warn', failed: 'warn', php: 'info', logs: 'info' })[k] || 'info'; },
+    problemLong(k) { return { offline: 'offline', space: 'spazio quasi esaurito', failed: 'aggiornamenti falliti', php: 'PHP fuori supporto', domain: 'dominio scaduto', dns: 'verifica DNS non riuscita', check: 'verifica da confermare' }[k] || k; },
+    problemSev(k) { return ({ offline: 'err', domain: 'err', failed: 'warn', dns: 'warn', check: 'warn', php: 'info' })[k] || 'info'; },
     siteSev(s) { const r = { err: 0, warn: 1, info: 2 }; return s.problems.map(p => this.problemSev(p.kind)).sort((a, b) => r[a] - r[b])[0] || 'info'; },
-    get srvProblemSitesAll() { return new Set(this.srvProblems.map(p => p.site_id)).size; },
-    get srvTotalSites() { return ((this.srvst.data && this.srvst.data.groups) || []).reduce((n, g) => n + g.counts.sites, 0); },
-    problemShort(k) { return { offline: 'offline', space: 'spazio', failed: 'aggiornamenti falliti', logs: 'log grandi', php: 'PHP vecchio', domain: 'dominio scaduto' }[k] || k; },
-    get srvProblemKinds() {
-      const labels = { offline: 'offline', space: 'spazio quasi esaurito', failed: 'aggiornamenti falliti', logs: 'log grandi', php: 'PHP fuori supporto', domain: 'dominio scaduto' };
-      const c = {}; for (const p of this.srvProblems) c[p.kind] = (c[p.kind] || 0) + 1;   // problemi, non righe
-      return Object.keys(labels).filter(k => c[k]).map(k => ({ kind: k, label: labels[k], count: c[k] }));
-    },
-    srvDelta(g) {
-      const d = g.size.delta || 0;
-      return Math.abs(d) < 1048576 ? 'stabile' : (d > 0 ? '+' : '−') + this.fmtMB(Math.abs(d));
-    },
+    problemShort(k) { return { offline: 'offline', dns: 'verifica DNS', check: 'verifica da confermare', failed: 'aggiornamenti falliti', php: 'PHP vecchio', domain: 'dominio scaduto' }[k] || k; },
     monthMax(months) { return Math.max(1, ...(months || []).map(m => m.ok + m.failed)); },
-    problemIcon(k) { return { offline: '🔴', space: '💾', failed: '⚠️', logs: '📄', php: '🐘', domain: '🌐' }[k] || '•'; },
+    problemIcon(k) { return { offline: '🔴', dns: '🌐', failed: '⚠️', php: '🐘', domain: '🌐' }[k] || '•'; },
     get srvLabelList() { return [...new Set(Object.values((this.prefs && this.prefs.server_labels) || {}))].sort((a, b) => a.localeCompare(b, 'it')); },
     srvLabel(ip) { return ((this.prefs && this.prefs.server_labels) || {})[ip] || ''; },
     setSrvLabel(ip, v) { const l = { ...((this.prefs && this.prefs.server_labels) || {}) }; v = String(v || '').trim(); if (v) l[ip] = v; else delete l[ip]; this.prefs.server_labels = l; },
@@ -2388,15 +2290,21 @@ function sentinel() {
     async passkeyDelete(id) { if (!confirm('Rimuovere questa passkey?')) return; await this.api('/api/webauthn/register/delete', { method: 'POST', body: JSON.stringify({ label: id }) }); await this.load2fa(); },
 
     // ---------- dashboard ----------
-    get attention() {
+    get attentionAll() {
       const out = [];
-      // stessi problemi di Stato server e report: un aggiornamento fallito conta solo finche' e'
+      // stessi problemi della dashboard e dei report: un aggiornamento fallito conta solo finche' e'
       // ancora fallito (prima veniva dallo storico e restava li' una settimana anche se risolto)
-      const lab = { offline: 'Offline', space: 'Spazio quasi esaurito', failed: 'Aggiornamenti falliti', logs: 'Log grandi', php: 'PHP fuori supporto', domain: 'Dominio scaduto' };
-      for (const p of this.problems) out.push({ kind: p.kind === 'offline' || p.kind === 'domain' ? 'err' : 'warn', site: this.sites.find(s => s.id === p.site_id), text: `${lab[p.kind] || p.kind}: ${p.text}` });
+      const lab = { offline: 'Offline', space: 'Spazio quasi esaurito', failed: 'Aggiornamenti falliti', logs: 'Log grandi', php: 'PHP fuori supporto', domain: 'Dominio scaduto', dns: 'Verifica DNS non riuscita', check: 'Verifica da confermare' };
       if (this.sec.summary && (this.sec.summary.critical || this.sec.summary.exploited)) out.push({ kind: 'err', text: `${this.sec.summary.critical} vulnerabilità critiche, ${this.sec.summary.exploited} sfruttate attivamente`, link: 'security' });
-      return out.slice(0, 12);
+      for (const p of this.problems) {
+        const site = this.sites.find(s => s.id === p.site_id);
+        if (!site || !site.enabled) continue;
+        out.push({ kind: this.problemSev(p.kind), site, text: `${lab[p.kind] || p.kind}: ${p.text}` });
+      }
+      return out;
     },
+    get attention() { return this.attentionAll.slice(0, 12); },
+    get attentionRemaining() { return Math.max(0, this.attentionAll.length - 12); },
     // ---- grafico "ultimi 7 giorni" in dashboard: stessa resa delle statistiche ----
     get dashScale() {
       const ds = (this.histSummary && this.histSummary.days) || [];

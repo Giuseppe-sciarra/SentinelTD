@@ -2371,5 +2371,9 @@
   "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre. Dai lo stesso nome a più server per vederli come un gruppo solo nei report.": "Limit servers that struggle, such as shared hosting. Servers without limits work as usual. Give servers the same name to group them in reports.",
   "Avvisi della diagnostica manuale su spazio e log grandi.": "Manual diagnostic alerts for storage and large logs.",
   "Stato dei siti (versioni, PHP e dominio)": "Site status (versions, PHP and domain)",
-  "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.": "Each client receives a monthly report for their own sites: updates, comparisons, trends, security, domain expiry and site status. Client settings are separate from your monthly report."
+  "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.": "Each client receives a monthly report for their own sites: updates, comparisons, trends, security, domain expiry and site status. Client settings are separate from your monthly report.",
+  "Tentativi totali per un check del sito": "Total attempts per site check",
+  "Comprende il primo controllo. 1 = nessun retry; 3 = primo controllo più 2 retry.": "Includes the first check. 1 = no retries; 3 = first check plus 2 retries.",
+  "Pausa tra i retry del sito": "Delay between site retries",
+  "Vale per errori di connessione e DNS temporanei. I timeout di lettura passano al ricontrollo successivo, evitando richieste duplicate.": "Applies to connection errors and temporary DNS failures. Read timeouts wait for the next check to avoid duplicate requests."
 }

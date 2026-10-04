@@ -2371,5 +2371,9 @@
   "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre. Dai lo stesso nome a più server per vederli come un gruppo solo nei report.": "Begrenzen Sie schwache Server, etwa Shared Hosting. Andere arbeiten wie gewohnt. Gleiche Servernamen bilden eine Gruppe in Berichten.",
   "Avvisi della diagnostica manuale su spazio e log grandi.": "Meldungen manueller Diagnosen zu Speicher und großen Protokollen.",
   "Stato dei siti (versioni, PHP e dominio)": "Website-Status (Versionen, PHP und Domain)",
-  "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.": "Jeder Kunde erhält monatlich einen Bericht über seine Websites: Updates, Vergleiche, Trends, Sicherheit, Domainablauf und Website-Status. Kundeneinstellungen sind von Ihrem Monatsbericht getrennt."
+  "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.": "Jeder Kunde erhält monatlich einen Bericht über seine Websites: Updates, Vergleiche, Trends, Sicherheit, Domainablauf und Website-Status. Kundeneinstellungen sind von Ihrem Monatsbericht getrennt.",
+  "Tentativi totali per un check del sito": "Gesamtversuche pro Website-Prüfung",
+  "Comprende il primo controllo. 1 = nessun retry; 3 = primo controllo più 2 retry.": "Enthält die erste Prüfung. 1 = keine Wiederholung; 3 = erste Prüfung plus 2 Wiederholungen.",
+  "Pausa tra i retry del sito": "Pause zwischen Website-Wiederholungen",
+  "Vale per errori di connessione e DNS temporanei. I timeout di lettura passano al ricontrollo successivo, evitando richieste duplicate.": "Gilt für Verbindungsfehler und vorübergehende DNS-Probleme. Lesezeitüberschreitungen warten auf die nächste Prüfung, um doppelte Anfragen zu vermeiden."
 }

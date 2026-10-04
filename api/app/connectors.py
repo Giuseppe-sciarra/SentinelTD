@@ -155,25 +155,29 @@ async def schedule_dns_recheck(redis, site_id: int):
 
 
 async def fetch_status(site: Site, timeout: float = 20.0, force: bool = False) -> dict:
-    """Tre tentativi distanziati solo per errori di connessione, prima di cambiare stato.
+    """Tentativi configurabili distanziati solo per errori di connessione, prima di cambiare stato.
 
     Gli errori DNS non attivano l'URL REST alternativo: il dominio e' lo stesso.
     POST di aggiornamento/installazione non vengono ritentate da questa funzione.
     """
-    for attempt in range(1, settings.STATUS_CHECK_ATTEMPTS + 1):
+    from .settings_store import get_operational_settings
+    prefs = await get_operational_settings()
+    attempts = prefs["status_check_attempts"]
+    retry_seconds = prefs["status_check_retry_seconds"]
+    for attempt in range(1, attempts + 1):
         try:
             result = await _fetch_status_once(site, timeout, force)
             if attempt > 1:
                 log.info("CHECK RECUPERATO '%s' (id=%s): tentativo %s/%s", site.name, site.id,
-                         attempt, settings.STATUS_CHECK_ATTEMPTS)
+                         attempt, attempts)
             return result
         except Exception as exc:
-            if not _retry_connection(exc) or attempt == settings.STATUS_CHECK_ATTEMPTS:
+            if not _retry_connection(exc) or attempt == attempts:
                 raise
             log.warning("CHECK RETRY '%s' (id=%s): tentativo %s/%s, riprovo tra %ss: %s: %s",
-                        site.name, site.id, attempt, settings.STATUS_CHECK_ATTEMPTS,
-                        settings.STATUS_CHECK_RETRY_SECONDS, type(exc).__name__, str(exc)[:300])
-            await asyncio.sleep(settings.STATUS_CHECK_RETRY_SECONDS)
+                        site.name, site.id, attempt, attempts,
+                        retry_seconds, type(exc).__name__, str(exc)[:300])
+            await asyncio.sleep(retry_seconds)
     raise RuntimeError("Nessun tentativo di controllo configurato")
 
 

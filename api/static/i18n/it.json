@@ -2371,5 +2371,9 @@
   "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre. Dai lo stesso nome a più server per vederli come un gruppo solo nei report.": "Metti il freno ai server che non reggono, per esempio gli hosting condivisi dei clienti. Quelli senza freno lavorano come sempre. Dai lo stesso nome a più server per vederli come un gruppo solo nei report.",
   "Avvisi della diagnostica manuale su spazio e log grandi.": "Avvisi della diagnostica manuale su spazio e log grandi.",
   "Stato dei siti (versioni, PHP e dominio)": "Stato dei siti (versioni, PHP e dominio)",
-  "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.": "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile."
+  "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.": "Ogni cliente riceve ogni mese il report dei soli siti suoi: aggiornamenti, confronto e andamento, sicurezza, scadenza del dominio e stato dei siti. Le impostazioni sono uniche per tutti i clienti e separate dal tuo Report mensile.",
+  "Tentativi totali per un check del sito": "Tentativi totali per un check del sito",
+  "Comprende il primo controllo. 1 = nessun retry; 3 = primo controllo più 2 retry.": "Comprende il primo controllo. 1 = nessun retry; 3 = primo controllo più 2 retry.",
+  "Pausa tra i retry del sito": "Pausa tra i retry del sito",
+  "Vale per errori di connessione e DNS temporanei. I timeout di lettura passano al ricontrollo successivo, evitando richieste duplicate.": "Vale per errori di connessione e DNS temporanei. I timeout di lettura passano al ricontrollo successivo, evitando richieste duplicate."
 }
