@@ -33,6 +33,9 @@ from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
 from .screenshot_schedule import screenshot_due, enqueue_screenshot
 from .server_metrics import server_metrics_tick, sample_server_metrics
+from .nightly import create_batch, complete_item, site_payload, nightly_summary_tick
+from .models import NightlyBatch
+from .servers import machine_key, site_hostname
 from .telegram import send_telegram
 from .i18n import DEFAULT_LANGUAGE, t
 from . import security
@@ -2095,6 +2098,8 @@ async def _startup(ctx):
     dipendere dal boot dell'API. Stessi ALTER idempotenti del lifespan API."""
     async with engine.begin() as conn:
         await run_migrations(conn)
+    from .load_history import migrate_legacy
+    await migrate_legacy(ctx.get("redis"))
 
 
 # --------------------------------------------------------------------------
@@ -2158,30 +2163,46 @@ async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
 # --------------------------------------------------------------------------
 # DIAGNOSTICA DEI SITI (2.9.0)
 # --------------------------------------------------------------------------
-async def diag_site(ctx, site_id: int, space_mb: int = 0):
+async def diag_site(ctx, site_id: int, space_mb: int = 0, nightly_batch: str = ""):
     """Diagnostica di un sito: spazio scrivibile (prova vera, solo se space_mb > 0),
     cartelle, peso (nello storico, una riga al giorno), verifica dei file del core.
-    Pulsante "Esegui diagnostica": space_mb=150. Giro notturno: space_mb=0, nessuna
-    scrittura di prova sui siti."""
+    Pulsante "Esegui diagnostica": space_mb=150. Giro notturno: space_mb=50;
+    gli esiti vengono raccolti, senza notifiche immediate."""
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
         if site is None or not site.enabled or not site.token:
+            if nightly_batch:
+                await complete_item(s, nightly_batch, site_id, {})
+                await s.commit()
             return
         try:
             data = await fetch_diagnostics(site, space_mb=space_mb, sizes=True, core=True)
         except ConnectorTooOld as ex:
             await store_diag_error(site, str(ex))
+            if nightly_batch:
+                await complete_item(s, nightly_batch, site_id, site_payload(site, {}, error=str(ex)))
             await s.commit()
             return
         except Exception as ex:  # noqa: BLE001
             await store_diag_error(site, f"diagnostica non riuscita: {str(ex)[:300] or type(ex).__name__}")
+            if nightly_batch:
+                await complete_item(s, nightly_batch, site_id, site_payload(site, {}, error=str(ex)[:300] or type(ex).__name__))
             await s.commit()
             return
         diag, core_changed = await store_diagnostics(s, site, data)
+        if nightly_batch:
+            prefs = await get_operational_settings()
+            ip = await server_of(ctx["redis"], site.url)
+            key = machine_key(ip, site_hostname(site), set(prefs["server_split"]))
+            payload = site_payload(site, site.diag, key)
+            payload["server_label"] = prefs["server_labels"].get(key) or prefs["server_labels"].get(ip) or ""
+            await complete_item(s, nightly_batch, site_id, payload)
         await s.commit()
         log.info("Diagnostica '%s' (id=%s): spazio %s, peso %s, core %s", site.name, site.id,
                  (diag.get("space") or {}).get("written_mb", "-"), (diag.get("sizes") or {}).get("total", "-"),
                  (diag.get("core") or {}).get("status", "-"))
+        if nightly_batch:
+            return
         if core_changed and not site.notifications_silenced:
             await notify_dispatch("core_integrity", {
                 "site_name": site.name, "site_url": site.url, "folder": _folder_label(site),
@@ -2257,13 +2278,27 @@ async def plugin_catalog_scan(ctx, force: bool = False):
 async def diag_all(ctx):
     """Giro notturno: diagnostica leggera di tutti i siti (peso e verifica del core)."""
     async with SessionLocal() as s:
-        ids = [sid for (sid,) in (await s.execute(select(Site.id).where(Site.enabled == True))).all()]  # noqa: E712
+        ids = [sid for (sid,) in (await s.execute(select(Site.id).where(Site.enabled == True, Site.token != "").order_by(Site.id))).all()]  # noqa: E712
         await prune_sizes(s)
         await s.commit()
     # prova di spazio leggera (50 MB): quanto serve a un aggiornamento medio. Se non ci stanno
     # nemmeno quelli, il sito e' di fatto bloccato e vale la pena saperlo prima che fallisca
+    batch, created = await create_batch(ids, datetime.now(timezone.utc))
+    if not created:
+        return
     for i, sid in enumerate(ids):
-        await ctx["redis"].enqueue_job("diag_site", sid, 50, _defer_by=i * 20)
+        try:
+            await ctx["redis"].enqueue_job("diag_site", sid, 50, batch,
+                                           _job_id=f"nightly:{batch}:{sid}", _defer_by=i * 20)
+        except Exception as ex:
+            async with SessionLocal() as s:
+                site = await s.get(Site, sid)
+                await complete_item(s, batch, sid, site_payload(site, {}, error=f"Accodamento fallito: {str(ex)[:200]}") if site else {})
+                await s.commit()
+    async with SessionLocal() as s:
+        row = await s.get(NightlyBatch, batch)
+        row.ready = True
+        await s.commit()
     log.info("diag_all: accodate %d diagnostiche", len(ids))
 
 
@@ -2276,6 +2311,7 @@ class WorkerSettings:
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),
         cron(server_metrics_tick, minute=set(range(60)), run_at_startup=True),
+        cron(nightly_summary_tick, minute=set(range(60)), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
         cron(auto_update_cycle, minute={0}),   # ogni ora, al minuto 0 (installa i pending)
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30

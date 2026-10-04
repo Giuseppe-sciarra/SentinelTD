@@ -1,18 +1,28 @@
 """Carico e disco dei server nelle ultime 24 ore.
 
 A ogni controllo normale il connettore (WP 2.28+ / Joomla 1.36+) manda carico (1, 5, 15 min),
-core e disco: misure istantanee che costano niente. Qui si tengono 24 ore per sito in Redis
-(una lista per sito, si pulisce da sola) e si riassumono per server: adesso, media, picco
+core e disco: misure istantanee che costano niente. Qui si tengono le misure nel database
+persistente e si riassumono le ultime 24 ore per server: adesso, media, picco
 con l'ora, e l'andamento a mezz'ore. Prima carico e disco erano solo una foto notturna delle
 3:40, quando i siti non li visita nessuno: non diceva com'e' il server di giorno.
 """
 import json
+import hashlib
+import logging
 import time
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from .db import SessionLocal
+from .models import AppSetting, ServerResourceSample, Site
 
 KEEP_SECONDS = 24 * 3600
 MAX_SAMPLES = 1600         # almeno 24 ore anche col timer risorse impostato a 1 minuto
 BUCKET_SECONDS = 1800      # fasce fisse ai minuti :00 / :30
 HISTORY_BUCKETS = KEEP_SECONDS // BUCKET_SECONDS + 1  # 24 ore, più la fascia corrente
+STORAGE_SECONDS = 2 * KEEP_SECONDS
+MIGRATION_KEY = "migr:server_resources_persistent"
+log = logging.getLogger("panopticon.resources")
 
 _redis = None
 
@@ -30,11 +40,61 @@ def _key(site_id: int) -> str:
     return f"load:site:{site_id}"
 
 
+def _insert(session, model):
+    return (sqlite_insert if session.get_bind().dialect.name == "sqlite" else pg_insert)(model)
+
+
+def _row(site_id: int, sample: dict) -> dict:
+    payload = json.dumps(sample, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return {"sample_key": hashlib.sha256(f"{site_id}:{payload}".encode()).hexdigest(),
+            "site_id": site_id, "captured_at": int(sample["t"]), "payload": payload}
+
+
+async def migrate_legacy(redis=None) -> int:
+    """Importa una sola volta le misure ancora presenti in Redis, senza duplicarle."""
+    count = 0
+    try:
+        async with SessionLocal() as session:
+            if await session.get(AppSetting, MIGRATION_KEY):
+                return 0
+            ids = set((await session.execute(select(Site.id))).scalars())
+            r = redis if redis is not None else _r()
+            cutoff = time.time() - KEEP_SECONDS
+            async for key in r.scan_iter(match="load:site:*"):
+                try:
+                    sid = int((key.decode() if isinstance(key, bytes) else key).rsplit(":", 1)[-1])
+                except (ValueError, AttributeError):
+                    continue
+                if sid not in ids:
+                    continue
+                rows = []
+                for raw in await r.lrange(key, 0, MAX_SAMPLES - 1):
+                    try:
+                        sample = json.loads(raw)
+                        if not isinstance(sample, dict) or not cutoff <= sample.get("t", 0) <= time.time():
+                            continue
+                        rows.append(_row(sid, sample))
+                    except (ValueError, TypeError, KeyError):
+                        continue
+                for start in range(0, len(rows), 100):
+                    # Deduplica anche le copie identiche nello stesso batch PostgreSQL.
+                    batch = list({row["sample_key"]: row for row in rows[start:start + 100]}.values())
+                    await session.execute(_insert(session, ServerResourceSample).values(batch).on_conflict_do_nothing())
+                    count += len(batch)
+            await session.execute(_insert(session, AppSetting).values(key=MIGRATION_KEY, value="1").on_conflict_do_nothing())
+            await session.commit()
+        log.info("Storico risorse persistente: importate %s misure da Redis", count)
+        return count
+    except Exception as exc:  # retry al prossimo avvio, nessun flag salvato su errore
+        log.warning("Importazione storico risorse non completata: %s", type(exc).__name__)
+        return 0
+
+
 async def record(site_id: int, server: dict) -> bool:
-    """Salva una misura. Mai bloccante: se Redis non risponde si perde una misura e basta."""
+    """Salva una misura nel database persistente, indipendentemente da Redis."""
     load = (server or {}).get("load")
     load = load if isinstance(load, list) else []
-    if not load and not server.get("mem_total") and not server.get("disk_total"):
+    if not load and not server.get("cores") and not server.get("mem_total") and not server.get("disk_total"):
         return False
     try:
         sample = {"t": int(time.time()), "l": [round(float(x), 2) for x in load[:3]],
@@ -44,12 +104,14 @@ async def record(site_id: int, server: dict) -> bool:
         if server.get("mem_total"):
             sample.update({"mt": server.get("mem_total"), "ma": server.get("mem_available"),
                            "st": server.get("swap_total"), "sf": server.get("swap_free")})
-        r = _r()
-        await r.lpush(_key(site_id), json.dumps(sample, separators=(",", ":")))
-        await r.ltrim(_key(site_id), 0, MAX_SAMPLES - 1)
-        await r.expire(_key(site_id), 2 * KEEP_SECONDS)
+        async with SessionLocal() as session:
+            await session.execute(_insert(session, ServerResourceSample).values(_row(site_id, sample)).on_conflict_do_nothing())
+            await session.execute(delete(ServerResourceSample).where(
+                ServerResourceSample.captured_at < time.time() - STORAGE_SECONDS))
+            await session.commit()
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as exc:
+        log.warning("Salvataggio storico risorse fallito: %s", type(exc).__name__)
         return False
 
 
@@ -60,24 +122,18 @@ async def samples_for(site_ids: list[int]) -> dict[int, list[dict]]:
         return out
     cutoff = time.time() - KEEP_SECONDS
     try:
-        r = _r()
-        pipe = r.pipeline()
-        for sid in site_ids:
-            pipe.lrange(_key(sid), 0, MAX_SAMPLES - 1)
-        rows = await pipe.execute()
-    except Exception:  # noqa: BLE001
+        async with SessionLocal() as session:
+            rows = (await session.execute(select(ServerResourceSample.site_id, ServerResourceSample.payload)
+                .where(ServerResourceSample.site_id.in_(site_ids), ServerResourceSample.captured_at >= cutoff)
+                .order_by(ServerResourceSample.captured_at.desc()))).all()
+    except Exception as exc:
+        log.warning("Lettura storico risorse fallita: %s", type(exc).__name__)
         return out
-    for sid, raw in zip(site_ids, rows):
-        items = []
-        for x in raw or []:
-            try:
-                d = json.loads(x)
-            except Exception:  # noqa: BLE001
-                continue
-            if d.get("t", 0) >= cutoff:
-                items.append(d)
-        if items:
-            out[sid] = items
+    for sid, raw in rows:
+        try:
+            out.setdefault(sid, []).append(json.loads(raw))
+        except (ValueError, TypeError):
+            continue
     return out
 
 

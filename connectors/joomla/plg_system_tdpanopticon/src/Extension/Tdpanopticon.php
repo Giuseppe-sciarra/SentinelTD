@@ -8,6 +8,9 @@ use Joomla\CMS\Factory;
 use Joomla\CMS\Updater\Updater;
 use Joomla\CMS\Installer\Installer;
 use Joomla\CMS\Installer\InstallerHelper;
+use TastiereDigitali\Sentinel\LinuxMetrics;
+
+require_once dirname(__DIR__) . "/Support/LinuxMetrics.php";
 
 final class Tdpanopticon extends CMSPlugin
 {
@@ -91,92 +94,27 @@ final class Tdpanopticon extends CMSPlugin
         return preg_match('/<version>\s*([^<\s]+)\s*<\/version>/', $raw, $m) ? $m[1] : '0';
     }
 
-    /** Testo di /proc/meminfo -> byte (MemAvailable, o MemFree + Buffers + Cached sui kernel vecchi). */
     public static function parseMeminfo(string $raw): array
     {
-        $out = ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
-        $kb = static function (string $key) use ($raw): ?int {
-            return preg_match('/^' . $key . ':\s+(\d+)\s*kB/mi', $raw, $m) ? (int) $m[1] * 1024 : null;
-        };
-        $out['total'] = $kb('MemTotal');
-        $out['available'] = $kb('MemAvailable');
-        if ($out['available'] === null && $out['total'] !== null) {
-            $free = $kb('MemFree');
-            if ($free !== null) {
-                $out['available'] = $free + (int) $kb('Buffers') + (int) $kb('Cached');
-            }
-        }
-        $out['swap_total'] = $kb('SwapTotal');
-        $out['swap_free'] = $kb('SwapFree');
-        return $out;
+        return LinuxMetrics::parseMeminfo($raw);
     }
 
-    /** Uscita di "free -b" -> byte: ripiego per gli hosting che chiudono /proc/meminfo. */
     public static function parseFree(string $raw): array
     {
-        $out = ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
-        if (preg_match('/^Mem:\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?(?:\s+(\d+))?(?:\s+(\d+))?/mi', $raw, $m)) {
-            $out['total'] = (int) $m[1];
-            $free = (int) $m[3];
-            $out['available'] = stripos($raw, 'available') !== false
-                ? (isset($m[6]) && $m[6] !== '' ? (int) $m[6] : $free)
-                : $free + (int) ($m[5] ?? 0) + (int) ($m[6] ?? 0);
-        }
-        if (preg_match('/^Swap:\s+(\d+)\s+(\d+)\s+(\d+)/mi', $raw, $w)) {
-            $out['swap_total'] = (int) $w[1];
-            $out['swap_free'] = (int) $w[3];
-        }
-        return $out;
+        return LinuxMetrics::parseFree($raw);
     }
 
-    /** Memoria del server: /proc/meminfo, o "free -b" se shell_exec e' permesso. */
     private function memInfo(): array
     {
-        $raw = is_readable('/proc/meminfo') ? (string) @file_get_contents('/proc/meminfo') : '';
-        $m = $raw !== '' ? self::parseMeminfo($raw) : ['total' => null, 'available' => null, 'swap_total' => null, 'swap_free' => null];
-        if (!$m['total'] && function_exists('shell_exec')
-            && !in_array('shell_exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
-            $m = self::parseFree((string) @shell_exec('free -b 2>/dev/null'));
-        }
-        return $m;
+        return LinuxMetrics::memoryInfo();
     }
 
-    /** Numeri del server per la pagina "Stato server": carico medio, disco del server, software. */
     private function serverInfo(): array
     {
-        $load = function_exists('sys_getloadavg') ? @sys_getloadavg() : false;
-        $cores = 0;
-        if (is_readable('/proc/cpuinfo')) {
-            $cores = (int) preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo'));
-        }
-        // hosting che chiudono /proc/cpuinfo: si prova con l'elenco delle CPU attive ("0-15") e
-        // con nproc, se shell_exec e' permesso. Senza core la percentuale del carico non si calcola.
-        if (!$cores && is_readable('/sys/devices/system/cpu/online')) {
-            foreach (explode(',', trim((string) @file_get_contents('/sys/devices/system/cpu/online'))) as $part) {
-                $ab = array_map('intval', explode('-', $part));
-                $cores += count($ab) === 2 ? $ab[1] - $ab[0] + 1 : 1;
-            }
-        }
-        if (!$cores && function_exists('shell_exec') && !in_array('shell_exec', array_map('trim', explode(',', (string) ini_get('disable_functions'))), true)) {
-            $cores = (int) trim((string) @shell_exec('nproc 2>/dev/null'));
-        }
-        $mem = $this->memInfo();
-        $total = @disk_total_space(JPATH_ROOT);
-        $free  = @disk_free_space(JPATH_ROOT);
-        return [
-            'load'       => is_array($load) ? array_map(static fn($x) => round((float) $x, 2), array_slice($load, 0, 3)) : null,
-            'cores'      => $cores ?: null,
-            'disk_total' => $total ? (int) $total : null,
-            'disk_free'  => $free ? (int) $free : null,
-            'software'   => isset($_SERVER['SERVER_SOFTWARE']) ? substr((string) $_SERVER['SERVER_SOFTWARE'], 0, 80) : '',
-            'sapi'       => PHP_SAPI,
-            'os'         => PHP_OS_FAMILY,
-            'hostname'   => (string) @gethostname(),
-            // memoria (RAM) e swap, in byte: MemAvailable conta anche la cache che il sistema libera subito
-            'mem_total'      => $mem['total'],
-            'mem_available'  => $mem['available'],
-            'swap_total'     => $mem['swap_total'],
-            'swap_free'      => $mem['swap_free'],
+        return LinuxMetrics::collect(JPATH_ROOT) + [
+            'software' => isset($_SERVER['SERVER_SOFTWARE']) ? substr((string) $_SERVER['SERVER_SOFTWARE'], 0, 80) : '',
+            'sapi' => PHP_SAPI, 'os' => PHP_OS_FAMILY,
+            'hostname' => function_exists('gethostname') ? (string) @gethostname() : '',
         ];
     }
 

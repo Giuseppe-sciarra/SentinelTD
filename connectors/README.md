@@ -4,8 +4,8 @@ Sentinel TD talks to each website through a small connector installed on the sit
 
 | Platform | Source | Current version |
 |---|---|---|
-| WordPress | `wordpress/td-panopticon/` | 2.29.0 |
-| Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.37.0 |
+| WordPress | `wordpress/td-panopticon/` | 2.30.0 |
+| Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.38.0 |
 
 The internal identifiers (`td-panopticon` folder, `tdpanopticon` Joomla element, REST
 namespace `tdpanopticon/v1`, token option name) are kept from the original project name
@@ -56,3 +56,5 @@ Upload the new packages to *Settings → Connectors* (the archive keeps them as 
 then use *Install* from the sites list on all WordPress or Joomla sites: the same folder
 and element names mean the new version installs over the old one, keeping each site's
 token and connection.
+
+Linux resource fallbacks are documented in [the 2.28.6 update](../docs/AGGIORNAMENTO-2.28.6.md).

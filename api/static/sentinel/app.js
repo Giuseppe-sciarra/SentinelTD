@@ -1240,7 +1240,9 @@ function sentinel() {
     async previewNotif() {
       if (!this.notif.cur || !this.notif.edit) return;
       const e = this.notif.edit;
-      const r = await this.api(`/api/notifications/${this.notif.cur.event}/preview`, { method: 'POST', body: JSON.stringify({ subject: e.subject, body_email: e.body_email, body_telegram: e.body_telegram }) });
+      const payload = { subject: e.subject, body_email: e.body_email, body_telegram: e.body_telegram };
+      if (this.notif.cur.event === 'nightly_summary') Object.assign(payload, {send_time: e.send_time, timezone: e.timezone});
+      const r = await this.api(`/api/notifications/${this.notif.cur.event}/preview`, { method: 'POST', body: JSON.stringify(payload) });
       if (r.ok) this.notif.preview = await r.json();
       else { const d = await r.json().catch(() => ({})); this.notif.preview = { subject: '', body_email: '', body_telegram: '', error: d.detail || 'Anteprima non disponibile' }; }
     },

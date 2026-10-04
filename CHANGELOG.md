@@ -1,5 +1,73 @@
 # Changelog
 
+## 2.28.8
+
+### Fixed
+- CPU, RAM and disk readings are stored in PostgreSQL, in the existing persistent
+  database volume. Redis resets, service restarts and container recreation no longer
+  clear resource history. The chart still displays the latest 24 hours.
+- API and worker automatically create the new table and import any available Redis
+  history once at startup, preserving timestamps and avoiding duplicate samples.
+  A failed import is retried on the next startup. No Redis configuration changes.
+- Stored readings older than 48 hours are pruned as new measurements arrive.
+
+### Verified
+- Regression coverage includes Redis reset, application/database reconnection,
+  legacy import and retries, timestamp preservation, deduplication and retention.
+
+## 2.28.7
+
+### Changed
+- Fresh complete release archive with application version 2.28.7 in the backend.
+  All changes through 2.28.6 are retained, including WordPress 2.30.0 and Joomla 1.38.0.
+- Added release identification and explicit deployment instructions for the existing
+  /root/panopticon-lite project, avoiding an extra nested panopticon-lite directory.
+
+## 2.28.6
+
+### Added
+- Shared Linux resource collector in WordPress 2.30.0 and Joomla 1.38.0. Load falls
+  back to /proc/loadavg and uptime; CPU count also tries getconf and lscpu; RAM
+  accepts byte/KiB and legacy/BusyBox free output; disk falls back to POSIX df.
+- Fixed command locale/PATH, permission-aware PHP runners and bounded command
+  execution. Direct/native readings remain the first choice.
+- Neutral installable connector ZIPs in packages/ and 45 PHP regression checks.
+
+### Fixed
+- Partial RAM now triggers fallback even when total RAM is known. Zero free space,
+  available RAM and swap remain valid readings. Truncated cpuinfo cannot undercount
+  large servers; lscpu honors offline CPUs where available.
+- Passive sampling continues across up to three sites on the same server when a
+  response has only some resources. Complementary actual readings, including CPU
+  counts alone, remain visible in the shared history without synthetic RAM/disk pairs.
+
+### Verified
+- 52 Python tests and 5 translation tests pass. All connector PHP files lint cleanly;
+  native/command collection and both CMS wrappers were exercised on Linux. The 45
+  PHP checks also pass with key PHP functions disabled and cover a timed-out command.
+
+## 2.28.5
+
+### Added
+- A dedicated Server · nightly summary notification with editable email/Telegram
+  templates, full previews, local delivery time, timezone and optional healthy reports.
+  Default delivery is 09:00 Europe/Rome; DST follows the selected IANA timezone.
+- Durable collections group all night diagnostics by server with CPU load per core,
+  RAM, disk, writable space, large log paths/sizes, core files and diagnostic errors.
+  Existing diagnostic channel choices are inherited until the new settings are saved.
+
+### Fixed
+- Night diagnostics no longer deliver individual immediate site alerts. The digest
+  waits for every diagnostic, survives restarts and retries only undelivered channels
+  after the configured daily time. Backlogs coalesce into one digest per channel/day.
+- Long Telegram digests use a single complete HTML document instead of splitting
+  notifications. Muted/disabled/deleted sites are excluded at delivery time.
+- Manual diagnostics retain their existing events, clearly identified in the editor.
+
+### Verified
+- All 48 Python tests and 5 translation tests pass. Browser checks cover both preview
+  formats, settings persistence and mobile/desktop layout without Alpine errors.
+
 ## 2.28.4
 
 ### Fixed

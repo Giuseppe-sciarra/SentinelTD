@@ -65,6 +65,8 @@ async def sample_server_metrics(ctx, server: str, site_ids: list[int]):
     # Segna anche i tentativi falliti: niente raffiche ogni minuto su un server
     # offline. A ogni successivo intervallo si riprova, anche dopo un riavvio.
     await ctx["redis"].set(_attempt_key(server), str(time.time()), ex=86400)
+    found = set()
+    required = {"load", "cores", "ram", "disk"}
     for sid in site_ids[:3]:  # se il primo sito non risponde, prova altri due dello stesso server
         async with SessionLocal() as s:
             site = await s.get(Site, sid, options=[noload(Site.extensions)])
@@ -77,8 +79,23 @@ async def sample_server_metrics(ctx, server: str, site_ids: list[int]):
             metrics = data.get("server")
             if not isinstance(metrics, dict) or not await record(site.id, metrics):
                 continue
-            log.info("RISORSE SERVER OK %s (sito=%s)", server, site.id)
-            return
+            if metrics.get("load"):
+                found.add("load")
+            if metrics.get("cores"):
+                found.add("cores")
+            if metrics.get("mem_total") and metrics.get("mem_available") is not None:
+                found.add("ram")
+            if metrics.get("disk_total") and metrics.get("disk_free") is not None:
+                found.add("disk")
+            # Save each site's actual reading. The history already combines sites
+            # belonging to this machine, so no synthetic RAM/disk pairs are needed.
+            if found >= required:
+                log.info("RISORSE SERVER OK %s (sito=%s)", server, site.id)
+                return
         except Exception as ex:
             log.warning("RISORSE SERVER: sito %s non disponibile: %s", sid, type(ex).__name__)
-    log.warning("RISORSE SERVER %s: nessuna misura disponibile; riprova al prossimo intervallo", server)
+    if found:
+        log.info("RISORSE SERVER PARZIALI %s: disponibili=%s, mancanti=%s", server,
+                 ",".join(sorted(found)), ",".join(sorted(required - found)))
+    else:
+        log.warning("RISORSE SERVER %s: nessuna misura disponibile; riprova al prossimo intervallo", server)

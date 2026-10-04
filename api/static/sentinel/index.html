@@ -1497,6 +1497,17 @@
                     <label class="check"><input type="checkbox" x-model="notif.edit.email"> Email</label>
                     <label class="check"><input type="checkbox" x-model="notif.edit.telegram"> Telegram</label>
                   </div>
+                  <template x-if="notif.cur.event==='nightly_summary'">
+                    <div style="border-top:1px solid var(--bd);padding-top:14px;margin-top:14px">
+                      <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:14px">
+                        <div class="field" style="margin:0;min-width:140px"><label>Orario di invio</label><input class="input" type="time" x-model="notif.edit.send_time" @change="previewNotif()" required aria-label="Orario di invio"></div>
+                        <div class="field" style="margin:0;min-width:210px;flex:1"><label>Fuso orario</label><input class="input" x-model="notif.edit.timezone" @change="previewNotif()" list="nightly-timezones" placeholder="Europe/Rome" required aria-label="Fuso orario"><datalist id="nightly-timezones"><option value="Europe/Rome"></option><option value="Europe/London"></option><option value="Europe/Paris"></option><option value="Europe/Berlin"></option><option value="UTC"></option></datalist></div>
+                        <label class="check" style="padding-bottom:9px"><input type="checkbox" x-model="notif.edit.only_problems"> Invia solo se ci sono problemi</label>
+                      </div>
+                      <p class="small mut" style="margin:10px 0 0">Il controllo resta notturno. Tutti i risultati vengono raccolti in una sola notifica per canale all'orario scelto, dopo la fine dei controlli. L'ora legale segue il fuso impostato.</p>
+                      <p class="small mut" style="margin:6px 0 0">Su Telegram i riepiloghi lunghi arrivano come un unico allegato HTML con tutti i dettagli.</p>
+                    </div>
+                  </template>
                 </div>
 
                 <div class="notif-studio" style="margin-top:14px">

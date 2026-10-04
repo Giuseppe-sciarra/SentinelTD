@@ -97,6 +97,28 @@ async def send_telegram(text: str) -> bool:
         return False
 
 
+async def send_telegram_digest(text: str, html_body: str, title: str) -> bool:
+    """A single notification, including a complete document for long reports."""
+    if not _enabled():
+        return False
+    if len(text) <= _TG_MAX:
+        return await send_telegram(text)
+    import html
+    document = ('<!doctype html><html><head><meta charset="utf-8"><title>'
+                + html.escape(title) + '</title></head><body>' + html_body + '</body></html>').encode("utf-8")
+    # Caption contains only complete text lines; all details stay in the document.
+    caption = html.unescape(_plain(text.split("\n\n", 1)[0]))[:900]
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(f"{_API}/bot{settings.TELEGRAM_BOT_TOKEN}/sendDocument",
+                                         data={"chat_id": settings.TELEGRAM_CHAT_ID, "caption": caption},
+                                         files={"document": ("riepilogo-server.html", document, "text/html")})
+            return response.status_code == 200 and bool(response.json().get("ok"))
+    except Exception as ex:
+        log.warning("Riepilogo Telegram fallito: %s", type(ex).__name__)
+        return False
+
+
 # ---------- helper per i singoli eventi (parte A) ----------
 async def notify_offline(site_name: str, site_url: str, reason: str = "",
                          attempts: int = 0, window_min: int = 0) -> bool:

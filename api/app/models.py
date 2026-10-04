@@ -1,6 +1,6 @@
 import json
 from datetime import date, datetime
-from sqlalchemy import String, Integer, BigInteger, Boolean, Date, DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import String, Integer, BigInteger, Boolean, Date, DateTime, ForeignKey, Text, UniqueConstraint, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -299,12 +299,42 @@ class VulnMatch(Base):
     vulnerability: Mapped["Vulnerability"] = relationship()
 
 
+class ServerResourceSample(Base):
+    __tablename__ = "server_resource_samples"
+    __table_args__ = (Index("ix_server_resources_site_time", "site_id", "captured_at"),)
+
+    sample_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
+    captured_at: Mapped[int] = mapped_column(BigInteger, index=True)
+    payload: Mapped[str] = mapped_column(Text)
+
+
 class AppSetting(Base):
     """Impostazioni chiave/valore dell'applicazione (es. chiave di registrazione agent)."""
     __tablename__ = "app_settings"
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class NightlyBatch(Base):
+    """Durable nightly collection and independent delivery receipts per channel."""
+    __tablename__ = "nightly_batches"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    context_json: Mapped[str] = mapped_column(Text, default="")
+    email_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    telegram_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
+class NightlyItem(Base):
+    __tablename__ = "nightly_items"
+    batch_id: Mapped[str] = mapped_column(ForeignKey("nightly_batches.id", ondelete="CASCADE"), primary_key=True)
+    site_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    payload_json: Mapped[str] = mapped_column(Text, default="")
 
 
 class UpdateHistory(Base):

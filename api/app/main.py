@@ -18,6 +18,8 @@ async def lifespan(app: FastAPI):
     # serializzano: il primo crea/migra, gli altri rieseguono gli ALTER idempotenti.
     async with engine.begin() as conn:
         await run_migrations(conn)
+    from .load_history import migrate_legacy
+    await migrate_legacy()
     yield
 
 

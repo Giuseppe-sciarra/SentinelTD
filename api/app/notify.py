@@ -20,7 +20,7 @@ from jinja2 import Environment, BaseLoader, TemplateError
 from .db import SessionLocal
 from .models import AppSetting
 from .email import send_report
-from .telegram import send_telegram
+from .telegram import send_telegram, send_telegram_digest
 from .config import settings
 
 from .i18n import DEFAULT_LANGUAGE, normalize_language, t, template as localize_template
@@ -29,6 +29,18 @@ log = logging.getLogger("notify")
 
 # ------------------------------------------------------------------ eventi
 EVENTS: dict[str, dict[str, Any]] = {
+    "nightly_summary": {
+        "label": "Server · riepilogo notturno",
+        "desc": "Un unico riepilogo dei controlli notturni: risorse server, spazio, log grandi e file del core. Il rilevamento resta notturno; l'invio segue l'orario e il fuso scelti qui.",
+        "channels": {"email": False, "telegram": True},
+        "vars": {"servers_count": "Numero di server", "sites_count": "Siti controllati",
+                 "issues_count": "Siti o server con problemi", "scan_date": "Data del rilevamento",
+                 "summary_html": "Report completo per email (HTML)", "summary_lines": "Report completo per Telegram",
+                 "date": "Data e ora", "timezone": "Fuso orario"},
+        "subject": "[Sentinel] Riepilogo server — {{ scan_date }} · {{ issues_count }} segnalazioni",
+        "email": "<h2>Riepilogo server e diagnostica notturna</h2><p>{{ servers_count }} server · {{ sites_count }} siti controllati · {{ issues_count }} segnalazioni</p>{{ summary_html }}<p>Sentinel TD · {{ date }} · {{ timezone }}</p>",
+        "telegram": "🌙 <b>Riepilogo server e diagnostica notturna</b>\n{{ servers_count }} server · {{ sites_count }} siti controllati · {{ issues_count }} segnalazioni\nRilevamento: {{ scan_date }}\n\n{{ summary_lines }}\n\n{{ date }} · {{ timezone }}",
+    },
     "site_report": {
         "label": "Report update per sito",
         "desc": "Inviato al termine degli update di un sito (riusciti e falliti).",
@@ -107,8 +119,8 @@ EVENTS: dict[str, dict[str, Any]] = {
 🔒 Componenti bloccati alla versione precedente finché non li sblocchi.""",
     },
     "site_space": {
-        "label": "Spazio e log del sito",
-        "desc": "Dalla diagnostica notturna: spazio scrivibile quasi esaurito (meno di 50 MB) o log oltre i 10 MB, dentro il sito o nella cartella dell'account. Una volta per sito, poi solo se cambia qualcosa.",
+        "label": "Spazio e log · controlli manuali",
+        "desc": "Avvisi della diagnostica manuale su spazio e log grandi. I controlli notturni usano la voce Server · riepilogo notturno, con un unico invio programmato.",
         "channels": {"email": False, "telegram": True},
         "vars": {
             "site_name": "Nome del sito", "site_url": "URL del sito", "folder": "Cartella del sito",
@@ -133,7 +145,7 @@ EVENTS: dict[str, dict[str, Any]] = {
     },
     "core_integrity": {
         "label": "File del core da controllare",
-        "desc": "La verifica notturna dei file di WordPress ha trovato file modificati, mancanti o in più (solo quando cambia qualcosa). Spento di base: il risultato resta nella pagina del sito e nei report.",
+        "desc": "Avvisi della diagnostica manuale sui file modificati, mancanti o in più. I risultati notturni sono inclusi nel riepilogo server programmato. Spento di base.",
         "enabled": False,
         "channels": {"email": False, "telegram": False},
         "vars": {"site_name": "Nome del sito", "site_url": "URL", "folder": "Cartella del sito",
@@ -284,7 +296,7 @@ def event_meta(event: str, language: str | None = None) -> dict:
     }
 
 
-def sample_context(event: str, language: str | None = None) -> dict:
+def sample_context(event: str, language: str | None = None, config: dict | None = None) -> dict:
     """Localized application-owned sample values used only by preview/test."""
     lang = normalize_language(language, DEFAULT_LANGUAGE)
 
@@ -297,10 +309,30 @@ def sample_context(event: str, language: str | None = None) -> dict:
             return {k: walk(v) for k, v in value.items()}
         return value
 
-    return walk(SAMPLE[event])
+    sample = walk(SAMPLE[event])
+    if event == "nightly_summary":
+        cfg = config or default_config(event, lang)
+        sample["timezone"] = cfg.get("timezone", "Europe/Rome")
+        sample["date"] = "04/10/2026 " + cfg.get("send_time", "09:00")
+    return sample
 
 # ------------------------------------------------------------------ dati di esempio (anteprima/test)
 SAMPLE: dict[str, dict[str, Any]] = {
+    "nightly_summary": {"scan_date": "2026-10-04", "timezone": "Europe/Rome", "entries": [
+        {"site_id": 1, "site_name": "Sito di prova", "site_url": "https://esempio.it", "folder": "Clienti",
+         "server_key": "192.0.2.10", "checked_at": "2026-10-04T03:40:00+00:00",
+         "server": {"hostname": "web-01", "cores": 4, "load": [6.8, 5.2, 3.1],
+                    "mem_total": 8589934592, "mem_available": 536870912,
+                    "disk_total": 107374182400, "disk_free": 6442450944},
+         "space": {"ok": False, "written_mb": 12.4, "tested_mb": 50},
+         "logs": [{"path": "/home/esempio/logs/error.log", "bytes": 447741952, "outside": True}],
+         "core": {"status": "issues", "modified": ["wp-includes/load.php"], "missing": [], "extra": []}},
+        {"site_id": 2, "site_name": "Portale clienti", "site_url": "https://clienti.esempio.it", "folder": "Clienti",
+         "server_key": "192.0.2.10", "server": {}, "space": {"ok": True},
+         "logs": [{"path": "/home/clienti/public_html/error_log", "bytes": 39845888}], "core": {"status": "ok"}},
+        {"site_id": 3, "site_name": "Archivio", "site_url": "https://archivio.esempio.it", "folder": "",
+         "server_key": "192.0.2.20", "server": {}, "error": "Controllo non completato"},
+    ]},
     "site_report": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "cms": "WordPress",
                     "results": [{"name": "WooCommerce", "from": "11.0.0", "to": "11.0.1", "ok": True, "error": ""},
                                 {"name": "Yoast SEO", "from": "28.3", "to": "28.4", "ok": True, "error": ""},
@@ -354,7 +386,7 @@ _LEGACY_DEFAULTS = {('cycle_summary', 'subject'): ('[Sentinel] Ciclo completato:
 def default_config(event: str, language: str | None = None) -> dict:
     lang = normalize_language(language, DEFAULT_LANGUAGE)
     e = EVENTS[event]
-    return {
+    cfg = {
         "enabled": bool(e.get("enabled", True)),
         "email": e["channels"]["email"],
         "telegram": e["channels"]["telegram"],
@@ -362,6 +394,9 @@ def default_config(event: str, language: str | None = None) -> dict:
         "body_email": localize_template(e["email"], lang),
         "body_telegram": localize_template(e["telegram"], lang),
     }
+    if event == "nightly_summary":
+        cfg.update(send_time="09:00", timezone="Europe/Rome", only_problems=True)
+    return cfg
 
 
 async def get_config(event: str, language: str | None = None) -> dict:
@@ -378,6 +413,11 @@ async def get_config(event: str, language: str | None = None) -> dict:
                         if saved[k] in olds or saved[k] in tuple(localize_template(o, language) for o in olds):
                             continue        # vecchio predefinito, non una personalizzazione
                         cfg[k] = saved[k]
+            elif event == "nightly_summary":
+                # Carry forward the administrator's existing diagnostic channels.
+                previous = [await get_config(k, language) for k in ("site_space", "core_integrity")]
+                for channel in ("email", "telegram"):
+                    cfg[channel] = any(c.get("enabled") and c.get(channel) for c in previous)
     except Exception as ex:  # noqa: BLE001
         log.warning("notify: config %s non leggibile: %s", event, ex)
     return cfg
@@ -718,6 +758,71 @@ def _core_vars(out: dict, lang: str) -> None:
     out["panel_link"] = f'<a href="{_esc(panel)}/#/site/{int(sid)}">{t("Apri in Sentinel", lang)}</a>' if panel and sid else ""
 
 
+def _nightly_vars(out: dict, lang: str) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from .nightly import has_issues
+    groups = {}
+    entries = out.get("entries") or []
+    for p in entries:
+        groups.setdefault(p.get("server_key") or p.get("site_url"), []).append(p)
+    out.update(servers_count=len(groups), sites_count=len(entries), issues_count=sum(has_issues(p) for p in entries))
+    telegram, email = [], []
+    for key, sites in sorted(groups.items()):
+        metric_site = max((p for p in sites if p.get("server")), key=lambda p: p.get("checked_at") or "", default={})
+        m = metric_site.get("server") or {}
+        label = next((p["server_label"] for p in sites if p.get("server_label")), "")
+        title = f"🖥 {_esc(label)} · {_esc(key)}" if label else f"🖥 {_esc(key)}"
+        title += (f" · {_esc(m['hostname'])}" if m.get("hostname") else "")
+        lines = [f"<b>{title}</b>"]
+        loads, cores = m.get("load") or [], m.get("cores")
+        if loads and cores:
+            pct = float(loads[0]) * 100 / cores
+            state = "sovraccarico" if pct > 150 else "impegnato" if pct >= 70 else "tranquillo"
+            lines.append(f"CPU: {pct:.0f}% ({_esc(t(state, lang))}) · {_esc(t('Carico per core', lang))} · {_esc(cores)} core")
+        else:
+            lines.append("CPU: " + t("Dati non disponibili", lang))
+        for label, total, free in (("RAM", m.get("mem_total"), m.get("mem_available")),
+                                   (t("Disco", lang), m.get("disk_total"), m.get("disk_free"))):
+            if total and free is not None:
+                used = max(0, total - free)
+                lines.append(f"{label}: {used * 100 / total:.1f}% · {used / 1073741824:.1f} / {total / 1073741824:.1f} GB")
+            else:
+                lines.append(label + ": " + t("Dati non disponibili", lang))
+        stamp = metric_site.get("checked_at")
+        if stamp:
+            try:
+                when = datetime.fromisoformat(stamp).astimezone(ZoneInfo(out.get("timezone") or "Europe/Rome"))
+                lines.append(t("Rilevamento", lang) + ": " + when.strftime("%d/%m/%Y %H:%M"))
+            except (ValueError, TypeError):
+                pass
+        for p in sites:
+            lines.append(f"\n<b>{_esc(p.get('site_name'))}</b> · {_esc(p.get('site_url'))}")
+            if p.get("folder"):
+                lines.append("📁 " + _esc(p["folder"]))
+            if p.get("error"):
+                lines.append("⚠️ " + _esc(t(p["error"], lang)))
+            sp = p.get("space") or {}
+            if sp and not sp.get("ok"):
+                lines.append("💾 " + t("Spazio scrivibile quasi esaurito", lang) + f": {_esc(sp.get('written_mb'))} / {_esc(sp.get('tested_mb'))} MB")
+            for l in p.get("logs") or []:
+                suffix = " (" + t("fuori dal sito", lang) + ")" if l.get("outside") else ""
+                lines.append(f"• <code>{_esc(l.get('path'))}</code> — {int(l.get('bytes') or 0) / 1048576:.1f} MB{suffix}")
+            c = p.get("core") or {}
+            if c.get("status") == "issues":
+                lines.append("🛡 " + t("File del core da controllare", lang))
+                for category, label in (("modified", "modificato"), ("missing", "mancante"), ("extra", "in più")):
+                    for file in c.get(category) or []:
+                        path = file.get("file", "") if isinstance(file, dict) else file
+                        lines.append(f"• <code>{_esc(path)}</code> — {_esc(t(label, lang))}")
+            if not has_issues(p):
+                lines.append("✅ " + t("Nessun problema rilevato", lang))
+        telegram.append("\n".join(lines))
+        email.append('<section style="margin:16px 0;padding:14px;border:1px solid #ddd;border-radius:10px">' + "<br>".join(lines) + "</section>")
+    out["summary_lines"] = "\n\n".join(telegram)
+    out["summary_html"] = "".join(email)
+
+
 def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = None) -> dict:
     """Add rich variables and localize app-owned values, never free-form user content."""
     from datetime import datetime
@@ -797,6 +902,8 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
         _rollback_vars(out, lang)
     if event == "core_integrity":
         _core_vars(out, lang)
+    if event == "nightly_summary":
+        _nightly_vars(out, lang)
 
     if event == "cycle_summary" and isinstance(out.get("report"), list):
         when = str(out.get("when") or out.get("date") or "")
@@ -810,7 +917,7 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
     for k in (
         "site_name", "site_url", "item", "reason", "ext_name", "ext_version", "cve_id", "title", "url",
         "ok_lines", "failed_lines", "version_fixed", "kind", "platform", "provider", "expires_on", "notes",
-        "period_label", "scope_label", "top_lines", "folder", "client_name", "sites_names",
+        "period_label", "scope_label", "top_lines", "folder", "client_name", "sites_names", "scan_date", "timezone",
     ):
         if k in out and isinstance(out[k], str):
             out[k] = _esc(out[k])
@@ -854,12 +961,15 @@ async def dispatch(event: str, ctx: dict, channels: dict | None = None) -> dict:
     if cfg.get("email"):
         try:
             await send_report(r["subject"], r["body_email"], attachments=attachments or None)
-            sent["email"] = True
+            sent["email"] = bool(settings.SMTP_HOST and settings.REPORT_TO) if event == "nightly_summary" else True
         except Exception as ex:  # noqa: BLE001
             log.warning("notify %s: email fallita: %s", event, ex)
     if cfg.get("telegram"):
         try:
-            sent["telegram"] = bool(await send_telegram(r["body_telegram"]))
+            if event == "nightly_summary":
+                sent["telegram"] = bool(await send_telegram_digest(r["body_telegram"], r["body_email"], r["subject"]))
+            else:
+                sent["telegram"] = bool(await send_telegram(r["body_telegram"]))
         except Exception as ex:  # noqa: BLE001
             log.warning("notify %s: telegram fallito: %s", event, ex)
     return sent
