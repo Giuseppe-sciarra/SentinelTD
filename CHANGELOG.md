@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.28.17 — Registro offline persistente
+
+- Statistiche → Registro offline: una riga per episodio confermato, primo errore,
+  primo check riuscito, durata rilevata, motivo e numero di check offline.
+- Conteggi per sito e IP/server, filtri 7/30/90/365 giorni e paginazione.
+- Orari Europe/Rome con ora legale automatica; corrispondente UTC nel tooltip.
+- Usa i controlli esistenti: nessun nuovo cron, rilevamento risorse o notifica.
+  DNS temporanei, controlli rinviati e errori recuperati prima della conferma
+  non aggiungono episodi. Connettori invariati.
+- Storico in PostgreSQL, persistente dopo recreate; una sola riga aperta per sito,
+  snapshot mantenuti dopo rinomina/eliminazione. Registrazione dal nuovo aggiornamento.
+
 ## 2.28.16
 
 - Configure total site-check attempts (1–5) and retry delay (1–60 seconds) in Settings.
