@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.28.16
+
+- Configure total site-check attempts (1–5) and retry delay (1–60 seconds) in Settings.
+  Defaults remain 3 attempts and 15 seconds, honoring prior environment defaults.
+- Persist these values in the shared database and read them for each logical check,
+  so API/manual checks and worker checks pick up saved changes without a restart.
+- Retry only connection errors and temporary DNS failures. Read timeouts and update
+  POST requests keep their existing behavior. No connector change is required.
+
 ## 2.28.15
 
 - Completely retire site diagnostics: remove the action, endpoint, worker requests,
