@@ -13,7 +13,6 @@ from ..models import AppSetting
 from ..auth import require_auth
 from .. import notify
 from ..i18n import DEFAULT_LANGUAGE, normalize_language
-from ..nightly import validate_schedule
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"], dependencies=[Depends(require_auth)])
 
@@ -47,16 +46,7 @@ async def save_event(event: str, request: Request, payload: dict = Body(...), s:
         raise HTTPException(404, "Evento sconosciuto")
     lang = _lang(request)
     allowed = {"enabled", "email", "telegram", "subject", "body_email", "body_telegram"}
-    if event == "nightly_summary":
-        allowed |= {"send_time", "timezone", "only_problems"}
     cfg = {k: payload[k] for k in allowed if k in payload}
-    if event == "nightly_summary":
-        try:
-            validate_schedule({**notify.default_config(event, lang), **cfg})
-        except ValueError as ex:
-            raise HTTPException(422, str(ex)) from None
-        if "only_problems" in cfg and not isinstance(cfg["only_problems"], bool):
-            raise HTTPException(422, "only_problems deve essere booleano")
     test = notify.render(event, {**notify.default_config(event, lang), **cfg}, notify.sample_context(event, lang), lang)
     if test["error"]:
         raise HTTPException(422, f"Template non valido — {test['error']}")
@@ -75,13 +65,7 @@ async def reset_event(event: str, request: Request, s: AsyncSession = Depends(ge
         raise HTTPException(404, "Evento sconosciuto")
     lang = _lang(request)
     row = await s.get(AppSetting, f"notif:{event}")
-    if event == "nightly_summary":
-        if row:
-            row.value = json.dumps(notify.default_config(event, lang))
-        else:
-            s.add(AppSetting(key=f"notif:{event}", value=json.dumps(notify.default_config(event, lang))))
-        await s.commit()
-    elif row:
+    if row:
         await s.delete(row)
         await s.commit()
     return {"ok": True, "config": notify.default_config(event, lang)}
@@ -94,17 +78,10 @@ async def preview_event(event: str, request: Request, payload: dict = Body(defau
         raise HTTPException(404, "Evento sconosciuto")
     lang = _lang(request)
     fields = {"subject", "body_email", "body_telegram"}
-    if event == "nightly_summary":
-        fields |= {"send_time", "timezone"}
     cfg = {
         **notify.default_config(event, lang),
         **{k: v for k, v in payload.items() if k in fields},
     }
-    if event == "nightly_summary":
-        try:
-            validate_schedule(cfg)
-        except ValueError as ex:
-            raise HTTPException(422, str(ex)) from None
     return notify.render(event, cfg, notify.sample_context(event, lang, cfg), lang)
 
 
@@ -135,10 +112,7 @@ async def test_event(event: str, request: Request, payload: dict = Body(default=
             sent["error"] = f"email: {ex}"
     if cfg["telegram"]:
         try:
-            if event == "nightly_summary":
-                sent["telegram"] = bool(await notify.send_telegram_digest(r["body_telegram"], r["body_email"], r["subject"]))
-            else:
-                sent["telegram"] = bool(await notify.send_telegram(r["body_telegram"]))
+            sent["telegram"] = bool(await notify.send_telegram(r["body_telegram"]))
         except Exception as ex:  # noqa: BLE001
             sent["error"] += f" telegram: {ex}"
     return sent

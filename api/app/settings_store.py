@@ -10,11 +10,12 @@ DEFAULTS = {
     "domain_alert_days": [30, 14, 7],
     "component_alert_days": [30, 14, 7],
     "domain_scan_days": 7,
-    "domain_parallel_lookups": 4,
+    "domain_parallel_lookups": 1,  # compatibility: now strictly one domain at a time
+    "domain_pause_seconds": 30,
+    "domain_source_attempts": 3,
     "expiry_warning_days": 30,
     "expiry_critical_days": 7,
     "screenshot_every_hours": 12,   # ogni quante ore rigenerare l'anteprima dei siti
-    "server_metrics_minutes": 5,   # CPU/RAM/disco: timer autonomo per server
     "history_retention_days": 400,  # cronologia dettagliata degli update (report dettagliato)
     "domain_decision_days": 60,     # quanti giorni prima chiedere "si rinnova o no?"
     "domain_alert_norenew": 1,      # 1 = avvisa anche per i domini da NON rinnovare
@@ -27,7 +28,6 @@ DEFAULTS = {
     "auto_rollback": True,          # se la home si rompe dopo un aggiornamento, rimette le copie e blocca
     "server_labels": {},            # nome dato a ogni server (IP -> nome), mostrato ovunque accanto all'IP
     "server_limited": [],           # server (IP) con il freno; di base nessuno, si lavora come sempre
-    "server_split": [],             # IP da dividere per macchina (nome della macchina del connettore)
 }
 
 
@@ -46,11 +46,12 @@ def normalize(data: dict | None) -> dict:
     out["component_alert_days"] = _days_list(src.get("component_alert_days", out["component_alert_days"]), DEFAULTS["component_alert_days"])
     for key, lo, hi in (
         ("domain_scan_days", 1, 90),
-        ("domain_parallel_lookups", 1, 8),
+        ("domain_parallel_lookups", 1, 1),
+        ("domain_pause_seconds", 5, 600),
+        ("domain_source_attempts", 1, 3),
         ("expiry_warning_days", 1, 3650),
         ("expiry_critical_days", 1, 3650),
         ("screenshot_every_hours", 1, 720),
-        ("server_metrics_minutes", 1, 180),
         ("history_retention_days", 7, 3650),
         ("domain_decision_days", 0, 3650),
         ("domain_alert_norenew", 0, 1),
@@ -66,8 +67,6 @@ def normalize(data: dict | None) -> dict:
     # (2.9.4 aveva l'elenco opposto, "server_unlimited": non si converte, il default e' cambiato)
     raw = src.get("server_limited", out["server_limited"])
     out["server_limited"] = sorted({str(x).strip() for x in (raw if isinstance(raw, list) else []) if str(x).strip()})[:200]
-    rawsplit = src.get("server_split", out["server_split"])
-    out["server_split"] = sorted({str(x).strip() for x in (rawsplit if isinstance(rawsplit, list) else []) if str(x).strip()})[:200]
     mode = str(src.get("email_report_mode", out["email_report_mode"]) or "").strip().lower()
     out["email_report_mode"] = mode if mode in ("site", "cycle") else "site"
     out["connector_auto_update"] = bool(src.get("connector_auto_update", out["connector_auto_update"]))

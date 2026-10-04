@@ -345,6 +345,7 @@ async def update_site(site_id: int, payload: SiteUpdate, s: AsyncSession = Depen
         if data["url"].rstrip("/") != old_url:
             site.domain_name = ""
             site.domain_expires_at = None
+            site.domain_check_details = ""
             site.domain_checked_at = None
             site.domain_check_error = ""
             site.domain_alert_state = ""
@@ -380,12 +381,13 @@ async def refresh_now(site_id: int, s: AsyncSession = Depends(get_session)):
     await apply_status(s, site, force=(site.status == "ok"))
     await s.commit()
     await s.refresh(site)
-    if site.status == "dns_error":
-        from ..connectors import schedule_dns_recheck
+    if site.status in ("dns_error", "check_pending"):
+        from ..connectors import schedule_dns_recheck, schedule_pending_recheck
         try:
             pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
             try:
-                await schedule_dns_recheck(pool, site.id)
+                recheck = schedule_dns_recheck if site.status == "dns_error" else schedule_pending_recheck
+                await recheck(pool, site.id)
             finally:
                 await pool.aclose()
         except Exception:
@@ -393,26 +395,8 @@ async def refresh_now(site_id: int, s: AsyncSession = Depends(get_session)):
     return site
 
 
-@router.post("/{site_id}/diagnostics")
-async def run_diagnostics(site_id: int, space: int = Query(150, ge=0, le=400),
-                          s: AsyncSession = Depends(get_session)):
-    """Diagnostica completa (con prova di scrittura da `space` MB). Gira nel worker: tra
-    prova di scrittura, peso e verifica del core puo' superare il minuto, e il proxy davanti
-    al pannello taglierebbe la richiesta. La pagina controlla diag_at finche' cambia."""
-    site = await s.get(Site, site_id)
-    if not site:
-        raise HTTPException(404)
-    await _enqueue("diag_site", site.id, int(space))
-    return {"queued": True, "since": site.diag_at}
 
 
-@router.get("/{site_id}/sizes")
-async def site_sizes(site_id: int, days: int = Query(365, ge=1, le=730), s: AsyncSession = Depends(get_session)):
-    """Storico del peso del sito: una riga al giorno."""
-    from ..diagnostics import sizes_history
-    if not await s.get(Site, site_id):
-        raise HTTPException(404)
-    return await sizes_history(s, site_id, days)
 
 
 @router.post("/{site_id}/screenshot", response_model=SiteOut)

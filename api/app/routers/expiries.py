@@ -12,6 +12,7 @@ from ..auth import require_auth
 from ..config import settings
 from ..db import get_session
 from ..models import Site, SiteExpiry
+from ..domain_sources import load_summary, site_renewal_pending
 from ..schemas import SiteExpiryIn, SiteExpiryOut, SiteExpiryUpdate
 
 router = APIRouter(prefix="/api", tags=["expiries"], dependencies=[Depends(require_auth)])
@@ -35,10 +36,10 @@ def _days(dt: datetime | None) -> int | None:
     return (_utc(dt).date() - datetime.now(timezone.utc).date()).days
 
 
-async def _enqueue(job: str, *args):
+async def _enqueue(job: str, *args, **kwargs):
     pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
     try:
-        await pool.enqueue_job(job, *args)
+        return await pool.enqueue_job(job, *args, **kwargs)
     finally:
         await pool.aclose()
 
@@ -116,10 +117,14 @@ async def list_domain_expiries(s: AsyncSession = Depends(get_session)):
 
     domains: list[dict] = []
     for domain, members in grouped.items():
-        with_expiry = next((x for x in members if x.domain_expires_at), None)
+        with_expiry = max((x for x in members if x.domain_expires_at),
+                          key=lambda x: (_utc(x.domain_checked_at) if x.domain_checked_at else datetime.min.replace(tzinfo=timezone.utc),
+                                         _utc(x.domain_expires_at)), default=None)
         expiry = with_expiry.domain_expires_at if with_expiry else None
-        checked = max((x.domain_checked_at for x in members if x.domain_checked_at), default=None)
-        errors = [x.domain_check_error for x in members if x.domain_check_error]
+        newest = max(members, key=lambda x: _utc(x.domain_checked_at) if x.domain_checked_at else datetime.min.replace(tzinfo=timezone.utc))
+        checked = max((_utc(x.domain_checked_at) for x in members if x.domain_checked_at), default=None)
+        errors = [x.domain_check_error for x in members if x.domain_check_error
+                  and (_utc(x.domain_checked_at) if x.domain_checked_at else None) == checked]
         tags: list[str] = []
         for x in members:
             for t in (x.tags or "").split(","):
@@ -139,6 +144,8 @@ async def list_domain_expiries(s: AsyncSession = Depends(get_session)):
             "days": _days(expiry),
             "checked_at": checked.isoformat() if checked else None,
             "error": errors[0] if errors else "",
+            "source_summary": load_summary(newest.domain_check_details),
+            "renewal_pending": bool(not errors and site_renewal_pending(newest)),
             "registrar": next((x.domain_registrar for x in members if x.domain_registrar), ""),
             "nameservers": next((x.domain_nameservers for x in members if x.domain_nameservers), ""),
             "renew": renew,
@@ -158,21 +165,24 @@ async def scan_domains_now(payload: dict = Body(default={}), s: AsyncSession = D
     """
     names = [str(x).strip().lower().strip(".") for x in (payload.get("domains") or []) if str(x).strip()]
     if not names:
-        await _enqueue("domain_expiry_scan", True, None)
-        return {"queued": "all"}
+        sequential = payload.get("sequential") is True
+        if sequential:
+            queued = await _enqueue("domain_expiry_scan", True, None, True, _job_id="domain-whois-sequential")
+            if queued is None:
+                raise HTTPException(409, "Un aggiornamento WHOIS in sequenza è già in corso.")
+        else:
+            await _enqueue("domain_expiry_scan", True, None, False)
+        return {"queued": "all", "sequential": sequential}
 
     sites = (await s.execute(select(Site))).scalars().all()
-    seen: set[str] = set()
-    queued = 0
-    for site in sites:
-        d = (_registrable_from_url(site.domain_name or site.url) or "").lower().strip(".")
-        if d in names and d not in seen:
-            seen.add(d)
-            await _enqueue("domain_expiry_scan", True, site.id)
-            queued += 1
-    if not queued:
+    selected = sorted({(_registrable_from_url(site.domain_name or site.url) or "").lower().strip(".")
+                       for site in sites if (_registrable_from_url(site.domain_name or site.url) or "").lower().strip(".") in names})
+    if not selected:
         raise HTTPException(404, "Nessun dominio corrispondente")
-    return {"queued": queued}
+    queued = await _enqueue("domain_expiry_scan", True, None, True, selected, _job_id="domain-whois-sequential")
+    if queued is None:
+        raise HTTPException(409, "Un aggiornamento WHOIS in sequenza è già in corso.")
+    return {"queued": len(selected), "sequential": True}
 
 
 @router.patch("/domain-expiries/renew")

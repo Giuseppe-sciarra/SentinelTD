@@ -6,7 +6,7 @@ from slowapi.errors import RateLimitExceeded
 from .db import engine, run_migrations
 from . import models  # noqa: F401  (registra i modelli)
 from .rate_limit import limiter
-from .routers import sites, auth, media, install, security, connectors, agent, history, notifications, expiries, branding, preferences, reports, stats, packages, clients, changes, plugins, server_status
+from .routers import sites, auth, media, install, security, connectors, agent, history, notifications, expiries, branding, preferences, reports, stats, packages, clients, changes, plugins, dashboard
 from .auth import require_auth
 from .version import __version__, APP_NAME, VENDOR, VENDOR_URL, AUTHOR
 
@@ -18,8 +18,6 @@ async def lifespan(app: FastAPI):
     # serializzano: il primo crea/migra, gli altri rieseguono gli ALTER idempotenti.
     async with engine.begin() as conn:
         await run_migrations(conn)
-    from .load_history import migrate_legacy
-    await migrate_legacy()
     try:
         yield
     finally:
@@ -61,7 +59,7 @@ app.include_router(packages.router)         # zip di plugin/temi a licenza
 app.include_router(clients.router)          # clienti e report per cliente
 app.include_router(changes.router)          # impronta dello stato per il pannello che si aggiorna da solo
 app.include_router(plugins.router)          # catalogo dei plugin e plugin abbandonati
-app.include_router(server_status.router)    # stato server: il quadro di ogni server / cartella
+app.include_router(dashboard.router)  # avvisi basati sui dati dei siti
 
 
 @app.get("/api/version", dependencies=[Depends(require_auth)])

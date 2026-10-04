@@ -29,18 +29,6 @@ log = logging.getLogger("notify")
 
 # ------------------------------------------------------------------ eventi
 EVENTS: dict[str, dict[str, Any]] = {
-    "nightly_summary": {
-        "label": "Server · riepilogo notturno",
-        "desc": "Un unico riepilogo dei controlli notturni: risorse server, spazio, log grandi e file del core. Il rilevamento resta notturno; l'invio segue l'orario e il fuso scelti qui.",
-        "channels": {"email": False, "telegram": True},
-        "vars": {"servers_count": "Numero di server", "sites_count": "Siti controllati",
-                 "issues_count": "Siti o server con problemi", "scan_date": "Data del rilevamento",
-                 "summary_html": "Report completo per email (HTML)", "summary_lines": "Report completo per Telegram",
-                 "date": "Data e ora", "timezone": "Fuso orario"},
-        "subject": "[Sentinel] Riepilogo server — {{ scan_date }} · {{ issues_count }} segnalazioni",
-        "email": "<h2>Riepilogo server e diagnostica notturna</h2><p>{{ servers_count }} server · {{ sites_count }} siti controllati · {{ issues_count }} segnalazioni</p>{{ summary_html }}<p>Sentinel TD · {{ date }} · {{ timezone }}</p>",
-        "telegram": "🌙 <b>Riepilogo server e diagnostica notturna</b>\n{{ servers_count }} server · {{ sites_count }} siti controllati · {{ issues_count }} segnalazioni\nRilevamento: {{ scan_date }}\n\n{{ summary_lines }}\n\n{{ date }} · {{ timezone }}",
-    },
     "site_report": {
         "label": "Report update per sito",
         "desc": "Inviato al termine degli update di un sito (riusciti e falliti).",
@@ -117,51 +105,6 @@ EVENTS: dict[str, dict[str, Any]] = {
 {{ items_lines }}
 {% if fixed %}✅ La home è tornata a rispondere.{% else %}🛑 La home è ancora in errore: va guardata a mano.{% endif %}
 🔒 Componenti bloccati alla versione precedente finché non li sblocchi.""",
-    },
-    "site_space": {
-        "label": "Spazio e log · controlli manuali",
-        "desc": "Avvisi della diagnostica manuale su spazio e log grandi. I controlli notturni usano la voce Server · riepilogo notturno, con un unico invio programmato.",
-        "channels": {"email": False, "telegram": True},
-        "vars": {
-            "site_name": "Nome del sito", "site_url": "URL del sito", "folder": "Cartella del sito",
-            "space_low": "Spazio quasi esaurito (vero/falso)", "space_written_mb": "MB che si sono riusciti a scrivere",
-            "space_tested_mb": "MB della prova", "logs_lines": "Elenco dei log grandi (testo)", "logs_html": "Elenco dei log grandi (HTML)",
-            "logs_count": "Quanti log grandi", "panel_url": "Indirizzo del pannello", "date": "Data e ora",
-        },
-        "subject": "[Sentinel] 💾 {{ site_name }} — {% if space_low %}spazio quasi esaurito{% else %}log grandi{% endif %}",
-        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
-  <h2 style="margin:0 0 6px"><a href="{{ site_url }}">{{ site_name }}</a></h2>
-  {% if folder %}<p style="margin:0 0 10px;color:#666">📁 {{ folder }}</p>{% endif %}
-  {% if space_low %}<p><b>Spazio quasi esaurito:</b> sul sito si riescono a scrivere solo <b>{{ space_written_mb }} MB</b> (prova da {{ space_tested_mb }} MB). Gli aggiornamenti più grandi falliranno finché non si libera spazio.</p>{% endif %}
-  {% if logs_count %}<p><b>Log grandi ({{ logs_count }}):</b> occupano spazio e crescono da soli, di solito per un plugin che scrive avvisi a raffica o una tabella del database rotta.</p>{{ logs_html }}{% endif %}
-  <p style="color:#666">Dettagli nella diagnostica del sito{% if panel_url %}: <a href="{{ panel_url }}">{{ panel_url }}</a>{% endif %}</p>
-</div>""",
-        "telegram": """💾 <b>{{ site_name }}</b> — {% if space_low %}spazio quasi esaurito{% else %}log grandi{% endif %}
-{% if folder %}📁 {{ folder }}
-{% endif %}{% if space_low %}Si riescono a scrivere solo <b>{{ space_written_mb }} MB</b> (prova da {{ space_tested_mb }} MB): gli aggiornamenti grandi falliranno.
-{% endif %}{% if logs_count %}Log grandi ({{ logs_count }}):
-{{ logs_lines }}
-{% endif %}""",
-    },
-    "core_integrity": {
-        "label": "File del core da controllare",
-        "desc": "Avvisi della diagnostica manuale sui file modificati, mancanti o in più. I risultati notturni sono inclusi nel riepilogo server programmato. Spento di base.",
-        "enabled": False,
-        "channels": {"email": False, "telegram": False},
-        "vars": {"site_name": "Nome del sito", "site_url": "URL", "folder": "Cartella del sito",
-                 "core_summary": "Sintesi (es. 2 modificati · 1 mancante · 3 in più)",
-                 "core_lines": "Elenco dei file per Telegram", "core_html": "Elenco dei file per email (HTML)",
-                 "panel_link": "Link al sito in Sentinel (HTML)", "date": "Data e ora"},
-        "subject": "[Sentinel] 🛡 {{ site_name }} — file del core da controllare{% if folder %} · {{ folder }}{% endif %}",
-        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
-  <h2 style="margin:0 0 4px">🛡 {{ site_name }}</h2>
-  <div style="color:#666;margin-bottom:14px"><a href="{{ site_url }}">{{ site_url }}</a>{% if folder %} &middot; 📁 {{ folder }}{% endif %}</div>
-  <p style="margin:0 0 8px"><b>File del core da controllare:</b> {{ core_summary }}</p>
-  {{ core_html }}
-  {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}
-  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>
-</div>""",
-        "telegram": "🛡 <b>{{ site_name }}</b> — file del core da controllare{% if folder %}\n📁 {{ folder }}{% endif %}\n{{ core_summary }}\n{{ core_lines }}",
     },
     "cycle_summary": {
         "label": "Riepilogo ciclo",
@@ -310,29 +253,10 @@ def sample_context(event: str, language: str | None = None, config: dict | None 
         return value
 
     sample = walk(SAMPLE[event])
-    if event == "nightly_summary":
-        cfg = config or default_config(event, lang)
-        sample["timezone"] = cfg.get("timezone", "Europe/Rome")
-        sample["date"] = "04/10/2026 " + cfg.get("send_time", "09:00")
     return sample
 
 # ------------------------------------------------------------------ dati di esempio (anteprima/test)
 SAMPLE: dict[str, dict[str, Any]] = {
-    "nightly_summary": {"scan_date": "2026-10-04", "timezone": "Europe/Rome", "entries": [
-        {"site_id": 1, "site_name": "Sito di prova", "site_url": "https://esempio.it", "folder": "Clienti",
-         "server_key": "192.0.2.10", "checked_at": "2026-10-04T03:40:00+00:00",
-         "server": {"hostname": "web-01", "cores": 4, "load": [6.8, 5.2, 3.1],
-                    "mem_total": 8589934592, "mem_available": 536870912,
-                    "disk_total": 107374182400, "disk_free": 6442450944},
-         "space": {"ok": False, "written_mb": 12.4, "tested_mb": 50},
-         "logs": [{"path": "/home/esempio/logs/error.log", "bytes": 447741952, "outside": True}],
-         "core": {"status": "issues", "modified": ["wp-includes/load.php"], "missing": [], "extra": []}},
-        {"site_id": 2, "site_name": "Portale clienti", "site_url": "https://clienti.esempio.it", "folder": "Clienti",
-         "server_key": "192.0.2.10", "server": {}, "space": {"ok": True},
-         "logs": [{"path": "/home/clienti/public_html/error_log", "bytes": 39845888}], "core": {"status": "ok"}},
-        {"site_id": 3, "site_name": "Archivio", "site_url": "https://archivio.esempio.it", "folder": "",
-         "server_key": "192.0.2.20", "server": {}, "error": "Controllo non completato"},
-    ]},
     "site_report": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "cms": "WordPress",
                     "results": [{"name": "WooCommerce", "from": "11.0.0", "to": "11.0.1", "ok": True, "error": ""},
                                 {"name": "Yoast SEO", "from": "28.3", "to": "28.4", "ok": True, "error": ""},
@@ -341,10 +265,6 @@ SAMPLE: dict[str, dict[str, Any]] = {
                       "failures": [{"name": "Elementor Pro", "from": "4.2.3", "to": "4.3.1", "error": "Il pacchetto non può essere installato. PCLZIP_ERR_BAD_FORMAT"},
                                    {"name": "WordPress core", "from": "6.9.9", "to": "7.1.2", "error": "Il download non è andato a buon fine"}],
                       "item": "Elementor Pro 4.2.3 -> 4.3.1", "reason": "Il pacchetto non può essere installato. PCLZIP_ERR_BAD_FORMAT"},
-    "core_integrity": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "folder": "Clienti",
-                       "core": {"status": "issues", "version": "7.1.2", "checked": 1987, "modified_count": 1, "missing_count": 0,
-                                "extra_count": 2, "modified": ["wp-includes/load.php"], "missing": [],
-                                "extra": ["wp-includes/class-wp-old.php", "wp-admin/x.php"]}},
     "cycle_summary": {"applied": 9, "sites_touched": 7, "failed": 1,
                       "ok_lines": "• Sito A: WooCommerce 11.0.0→11.0.1\n• Sito B: Traduzioni (1)\n• Sito C: Yoast 28.3→28.4",
                       "failed_lines": "• Sito D: ACF 6.8.7→6.8.8"},
@@ -352,10 +272,6 @@ SAMPLE: dict[str, dict[str, Any]] = {
     "site_online": {"site_name": "Sito di prova", "site_url": "https://esempio.it"},
     "auto_rollback": {"site_name": "Confartigianato Belluno", "site_url": "https://www.confartigianatobelluno.eu", "folder": "3.Clienti Flash Factory",
                       "fixed": True, "home_message": "home ok", "items": [{"name": "Hello Elementor", "from": "3.5.1", "to": "2.9.0", "ok": True, "error": ""}]},
-    "site_space": {"site_name": "Pubblicità Belluno", "site_url": "https://www.pubblicitabelluno.it", "folder": "3.Clienti Flash Factory",
-                   "space_low": True, "space_written_mb": 12.4, "space_tested_mb": 50,
-                   "logs": [{"path": "/home/pubblicitabellun/logs/pubblicitabelluno_it.php.error.log", "mb": 427, "outside": True},
-                            {"path": "/home/pubblicitabellun/public_html/wp-admin/error_log", "mb": 38, "outside": False}]},
     "client_report": {"client_name": "Hotel Esempio", "period_label": "settembre 2026", "company": "Tastiere Digitali",
                       "sites_total": 1, "sites_names": "hotelesempio.it", "total_updates": 14, "sites_touched": 1,
                       "attachment": "report-2026-09-cliente-hotel-esempio.pdf"},
@@ -394,8 +310,6 @@ def default_config(event: str, language: str | None = None) -> dict:
         "body_email": localize_template(e["email"], lang),
         "body_telegram": localize_template(e["telegram"], lang),
     }
-    if event == "nightly_summary":
-        cfg.update(send_time="09:00", timezone="Europe/Rome", only_problems=True)
     return cfg
 
 
@@ -413,11 +327,6 @@ async def get_config(event: str, language: str | None = None) -> dict:
                         if saved[k] in olds or saved[k] in tuple(localize_template(o, language) for o in olds):
                             continue        # vecchio predefinito, non una personalizzazione
                         cfg[k] = saved[k]
-            elif event == "nightly_summary":
-                # Carry forward the administrator's existing diagnostic channels.
-                previous = [await get_config(k, language) for k in ("site_space", "core_integrity")]
-                for channel in ("email", "telegram"):
-                    cfg[channel] = any(c.get("enabled") and c.get(channel) for c in previous)
     except Exception as ex:  # noqa: BLE001
         log.warning("notify: config %s non leggibile: %s", event, ex)
     return cfg
@@ -722,105 +631,10 @@ def _rollback_vars(out: dict, lang: str) -> None:
     out["items_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
 
 
-def _space_vars(out: dict, lang: str) -> None:
-    """Spazio e log del sito: elenco dei log grandi in testo e in HTML."""
-    logs = out.get("logs") or []
-    out["logs_count"] = len(logs)
-    tg, em = [], []
-    for l in logs:
-        where = f" ({t('fuori dal sito', lang)})" if l.get("outside") else ""
-        tg.append(f"• <code>{_esc(str(l.get('path', '')))}</code> — <b>{l.get('mb', 0)} MB</b>{_esc(where)}")
-        em.append(f"<li><code>{_esc(str(l.get('path', '')))}</code> — <b>{l.get('mb', 0)} MB</b>{_esc(where)}</li>")
-    out["logs_lines"] = "\n".join(tg)
-    out["logs_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
 
 
-def _core_vars(out: dict, lang: str) -> None:
-    """Avviso sui file del core: sintesi ed elenco dei file (i modificati e i mancanti per primi)."""
-    c = out.get("core") or {}
-    parts = []
-    if c.get("modified_count"):
-        parts.append(f"{c['modified_count']} {t('modificati', lang) if c['modified_count'] != 1 else t('modificato', lang)}")
-    if c.get("missing_count"):
-        parts.append(f"{c['missing_count']} {t('mancanti', lang) if c['missing_count'] != 1 else t('mancante', lang)}")
-    if c.get("extra_count"):
-        parts.append(f"{c['extra_count']} {t('in più', lang)}")
-    out["core_summary"] = " · ".join(parts)
-    rows = ([(t("modificato", lang), f) for f in (c.get("modified") or [])]
-            + [(t("mancante", lang), f) for f in (c.get("missing") or [])]
-            + [(t("in più", lang), f) for f in (c.get("extra") or [])])
-    shown = rows[:12]
-    out["core_lines"] = "\n".join(f"• <code>{_esc(f)}</code> — {_esc(k)}" for k, f in shown) + (
-        f"\n<i>…{t('e altri', lang)} {len(rows) - len(shown)}</i>" if len(rows) > len(shown) else "")
-    out["core_html"] = ('<ul style="margin:0;padding-left:18px;font-size:13px">'
-                        + "".join(f'<li><code>{_esc(f)}</code> — {_esc(k)}</li>' for k, f in rows[:60]) + "</ul>")
-    panel, sid = str(out.get("panel_url") or "").rstrip("/"), out.get("site_id")
-    out["panel_link"] = f'<a href="{_esc(panel)}/#/site/{int(sid)}">{t("Apri in Sentinel", lang)}</a>' if panel and sid else ""
 
 
-def _nightly_vars(out: dict, lang: str) -> None:
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    from .nightly import has_issues
-    groups = {}
-    entries = out.get("entries") or []
-    for p in entries:
-        groups.setdefault(p.get("server_key") or p.get("site_url"), []).append(p)
-    out.update(servers_count=len(groups), sites_count=len(entries), issues_count=sum(has_issues(p) for p in entries))
-    telegram, email = [], []
-    for key, sites in sorted(groups.items()):
-        metric_site = max((p for p in sites if p.get("server")), key=lambda p: p.get("checked_at") or "", default={})
-        m = metric_site.get("server") or {}
-        label = next((p["server_label"] for p in sites if p.get("server_label")), "")
-        title = f"🖥 {_esc(label)} · {_esc(key)}" if label else f"🖥 {_esc(key)}"
-        title += (f" · {_esc(m['hostname'])}" if m.get("hostname") else "")
-        lines = [f"<b>{title}</b>"]
-        loads, cores = m.get("load") or [], m.get("cores")
-        if loads and cores:
-            pct = float(loads[0]) * 100 / cores
-            state = "sovraccarico" if pct > 150 else "impegnato" if pct >= 70 else "tranquillo"
-            lines.append(f"CPU: {pct:.0f}% ({_esc(t(state, lang))}) · {_esc(t('Carico per core', lang))} · {_esc(cores)} core")
-        else:
-            lines.append("CPU: " + t("Dati non disponibili", lang))
-        for label, total, free in (("RAM", m.get("mem_total"), m.get("mem_available")),
-                                   (t("Disco", lang), m.get("disk_total"), m.get("disk_free"))):
-            if total and free is not None:
-                used = max(0, total - free)
-                lines.append(f"{label}: {used * 100 / total:.1f}% · {used / 1073741824:.1f} / {total / 1073741824:.1f} GB")
-            else:
-                lines.append(label + ": " + t("Dati non disponibili", lang))
-        stamp = metric_site.get("checked_at")
-        if stamp:
-            try:
-                when = datetime.fromisoformat(stamp).astimezone(ZoneInfo(out.get("timezone") or "Europe/Rome"))
-                lines.append(t("Rilevamento", lang) + ": " + when.strftime("%d/%m/%Y %H:%M"))
-            except (ValueError, TypeError):
-                pass
-        for p in sites:
-            lines.append(f"\n<b>{_esc(p.get('site_name'))}</b> · {_esc(p.get('site_url'))}")
-            if p.get("folder"):
-                lines.append("📁 " + _esc(p["folder"]))
-            if p.get("error"):
-                lines.append("⚠️ " + _esc(t(p["error"], lang)))
-            sp = p.get("space") or {}
-            if sp and not sp.get("ok"):
-                lines.append("💾 " + t("Spazio scrivibile quasi esaurito", lang) + f": {_esc(sp.get('written_mb'))} / {_esc(sp.get('tested_mb'))} MB")
-            for l in p.get("logs") or []:
-                suffix = " (" + t("fuori dal sito", lang) + ")" if l.get("outside") else ""
-                lines.append(f"• <code>{_esc(l.get('path'))}</code> — {int(l.get('bytes') or 0) / 1048576:.1f} MB{suffix}")
-            c = p.get("core") or {}
-            if c.get("status") == "issues":
-                lines.append("🛡 " + t("File del core da controllare", lang))
-                for category, label in (("modified", "modificato"), ("missing", "mancante"), ("extra", "in più")):
-                    for file in c.get(category) or []:
-                        path = file.get("file", "") if isinstance(file, dict) else file
-                        lines.append(f"• <code>{_esc(path)}</code> — {_esc(t(label, lang))}")
-            if not has_issues(p):
-                lines.append("✅ " + t("Nessun problema rilevato", lang))
-        telegram.append("\n".join(lines))
-        email.append('<section style="margin:16px 0;padding:14px;border:1px solid #ddd;border-radius:10px">' + "<br>".join(lines) + "</section>")
-    out["summary_lines"] = "\n\n".join(telegram)
-    out["summary_html"] = "".join(email)
 
 
 def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = None) -> dict:
@@ -896,14 +710,8 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
 
     if event == "update_failed":
         _failures_vars(out, lang)
-    if event == "site_space":
-        _space_vars(out, lang)
     if event == "auto_rollback":
         _rollback_vars(out, lang)
-    if event == "core_integrity":
-        _core_vars(out, lang)
-    if event == "nightly_summary":
-        _nightly_vars(out, lang)
 
     if event == "cycle_summary" and isinstance(out.get("report"), list):
         when = str(out.get("when") or out.get("date") or "")
@@ -961,15 +769,12 @@ async def dispatch(event: str, ctx: dict, channels: dict | None = None) -> dict:
     if cfg.get("email"):
         try:
             await send_report(r["subject"], r["body_email"], attachments=attachments or None)
-            sent["email"] = bool(settings.SMTP_HOST and settings.REPORT_TO) if event == "nightly_summary" else True
+            sent["email"] = True
         except Exception as ex:  # noqa: BLE001
             log.warning("notify %s: email fallita: %s", event, ex)
     if cfg.get("telegram"):
         try:
-            if event == "nightly_summary":
-                sent["telegram"] = bool(await send_telegram_digest(r["body_telegram"], r["body_email"], r["subject"]))
-            else:
-                sent["telegram"] = bool(await send_telegram(r["body_telegram"]))
+            sent["telegram"] = bool(await send_telegram(r["body_telegram"]))
         except Exception as ex:  # noqa: BLE001
             log.warning("notify %s: telegram fallito: %s", event, ex)
     return sent

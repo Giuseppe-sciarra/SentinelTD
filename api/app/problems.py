@@ -1,11 +1,12 @@
-"""Cosa non va in un sito: UNA definizione per tutto il pannello (dashboard, Stato server,
+"""Cosa non va in un sito: UNA definizione per tutto il pannello (dashboard,
 report). Un aggiornamento fallito conta solo finche' e' ANCORA fallito (Extension.update_failed_at,
 tolto quando poi riesce): niente avvisi rimasti indietro dallo storico."""
+from .domain_sources import site_renewal_pending
 from datetime import datetime, timezone
 
-KINDS = ("offline", "space", "failed", "logs", "php", "domain", "dns")
-LABELS = {"offline": "offline", "space": "spazio quasi esaurito", "failed": "aggiornamenti falliti",
-          "logs": "log grandi", "php": "PHP fuori supporto", "domain": "dominio scaduto", "dns": "verifica DNS non riuscita"}
+KINDS = ("offline", "failed", "php", "domain", "dns", "check")
+LABELS = {"offline": "offline", "failed": "aggiornamenti falliti",
+          "php": "PHP fuori supporto", "domain": "dominio scaduto", "dns": "verifica DNS non riuscita", "check": "verifica da confermare"}
 
 
 def site_problems(site, failed_names: list[str] | None = None, now: datetime | None = None) -> list[dict]:
@@ -16,14 +17,10 @@ def site_problems(site, failed_names: list[str] | None = None, now: datetime | N
         return out
     if site.status == "dns_error":
         out.append({"kind": "dns", "text": (site.error or "verifica DNS non riuscita da Sentinel")[:160]})
+    elif site.status == "check_pending":
+        out.append({"kind": "check", "text": (site.error or "verifica non conclusa: ricontrollo programmato")[:160]})
     elif site.status != "ok":
         out.append({"kind": "offline", "text": (site.error or "non risponde")[:160]})
-    diag = site.diag or {}
-    sp = diag.get("space") or {}
-    if sp and not sp.get("ok"):
-        out.append({"kind": "space", "text": f"solo {sp.get('written_mb')} MB liberi".replace(".", ",")})
-    # i log grandi NON sono un problema da elencare (troppo rumore): restano la notifica
-    # "Spazio e log del sito" e la diagnostica del sito
     names = failed_names or []
     if names:
         shown = ", ".join(names[:3]) + (f" e altri {len(names) - 3}" if len(names) > 3 else "")
@@ -32,7 +29,7 @@ def site_problems(site, failed_names: list[str] | None = None, now: datetime | N
     if php and _php_state(php) == "fuori supporto":
         out.append({"kind": "php", "text": f"PHP {php} fuori supporto"})
     dexp = getattr(site, "domain_expires_at", None)
-    if dexp is not None and (dexp - now).days < 0:
+    if dexp is not None and not getattr(site, "domain_check_error", "") and not site_renewal_pending(site, now) and (dexp - now).days < 0:
         out.append({"kind": "domain", "text": f"dominio scaduto da {-(dexp - now).days} giorni"})
     return out
 

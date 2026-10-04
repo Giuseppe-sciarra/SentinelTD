@@ -3,7 +3,7 @@
     <name>PLG_SYSTEM_TDPANOPTICON</name>
     <author>Tastiere Digitali</author>
     <creationDate>2026-05</creationDate>
-    <version>1.38.0</version>
+    <version>1.40.0</version>
     <description>PLG_SYSTEM_TDPANOPTICON_XML_DESCRIPTION</description>
     <namespace path="src">TastiereDigitali\Plugin\System\Tdpanopticon</namespace>
     <files>

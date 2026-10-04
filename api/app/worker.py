@@ -10,7 +10,6 @@ Niente loop busy: i cron fanno da dispatcher.
 from datetime import datetime, timezone, timedelta
 import asyncio
 import os
-import html
 import json
 import logging
 import re
@@ -23,22 +22,21 @@ from arq.connections import RedisSettings
 from sqlalchemy import select, delete, func
 
 from .config import settings
+from .check_gate import updating_server
 from .db import SessionLocal, engine, run_migrations
 from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
-from .connectors import apply_status, fetch_status, _category, wp_rest_url, fetch_diagnostics, ConnectorTooOld, schedule_dns_recheck
+from .connectors import apply_status, fetch_status, _category, wp_rest_url, ConnectorTooOld, schedule_dns_recheck, schedule_pending_recheck
 from .errtext import clean_error
 from .servers import server_of, acquire as srv_acquire, release as srv_release
-from .diagnostics import store_diagnostics, store_diag_error, prune_sizes
 from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
 from .screenshot_schedule import screenshot_due, enqueue_screenshot
-from .server_metrics import server_metrics_tick, sample_server_metrics
-from .nightly import create_batch, complete_item, site_payload, nightly_summary_tick
-from .models import NightlyBatch
-from .servers import machine_key, site_hostname
 from .telegram import send_telegram
 from .i18n import DEFAULT_LANGUAGE, t
 from . import security
+from .domain_requests import SourceGate, SourceError, page_block_reason, retry_delay
+from .domain_sources import (parse_date, domain_key, validate_whois_domain,
+    whois_record_info, WhoisHTML, parse_who_is, reconcile, renewal_pending)
 
 log = logging.getLogger("panopticon.worker")
 # Il logger non aveva ne' livello ne' handler: ereditava il default di Python, che mostra
@@ -51,7 +49,7 @@ if not log.handlers:
 log.setLevel(logging.INFO)
 log.propagate = False
 
-_WHOIS_SERVERS: dict[str, str] = {}
+_WHOIS_SERVERS: dict[str, str] = {"it": "whois.nic.it"}
 _RDAP_UNSUPPORTED_TLDS: set[str] = set()
 _MULTI_LEVEL_SUFFIXES = {
     "co.uk", "org.uk", "me.uk", "ac.uk", "gov.uk",
@@ -191,43 +189,27 @@ async def _rdap_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datet
                 errors.append(f"{base}: data di scadenza non esposta")
                 continue
             now = datetime.now(timezone.utc)
-            future = [d for d in candidates if d >= now - timedelta(days=2)]
+            future = [d for d in candidates if d.date() >= now.date()]
             canonical = str(payload.get("ldhName") or domain).lower().rstrip(".")
-            _LAST_INFO[canonical] = _rdap_info(payload)
+            if domain_key(canonical) != domain_key(domain):
+                raise RuntimeError("RDAP restituisce un dominio diverso da quello richiesto")
+            info = _rdap_info(payload)
+            updates = [parse_date(ev.get("eventDate")) for ev in payload.get("events") or []
+                       if str(ev.get("eventAction") or "").lower() in {"last changed", "last update", "last modified"}]
+            updates = [dt for dt in updates if dt]
+            info.update(updated_at=max(updates) if updates else None, statuses=payload.get("status") or [])
+            _LAST_INFO[domain] = info
             return canonical, min(future or candidates)
         except Exception as ex:  # noqa: BLE001
+            if retry_delay(ex, 1) is not None:
+                raise  # Preserve HTTP status/Retry-After and transient network errors.
             errors.append(f"{base}: {ex}")
 
     raise RuntimeError("; ".join(errors) or "RDAP non disponibile")
 
 
 def _parse_whois_date(value: str | None) -> datetime | None:
-    """Converte i formati di scadenza WHOIS piu' comuni in UTC."""
-    if not value:
-        return None
-    raw = str(value).strip()
-    # Prima prova a isolare una data ISO, che copre .it e molti registry moderni.
-    m = re.search(r"(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?)", raw)
-    if m:
-        v = m.group(1).replace(" ", "T")
-        if v.endswith("Z"):
-            v = v[:-1] + "+00:00"
-        try:
-            dt = datetime.fromisoformat(v)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
-        except ValueError:
-            pass
-
-    # Formati legacy frequenti: 15-Jan-2027, 15/01/2027, 2027.01.15.
-    clean = re.sub(r"\s+\([^)]*\)\s*$", "", raw).strip()
-    for fmt in ("%d-%b-%Y", "%d-%b-%Y %H:%M:%S %Z", "%d/%m/%Y", "%Y.%m.%d", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(clean, fmt).replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
+    return parse_date(value)
 
 
 async def _whois_query(server: str, query: str, timeout: float = 8.0) -> str:
@@ -268,7 +250,7 @@ async def _whois_server_for_tld(tld: str) -> str:
     tld = tld.lower().lstrip(".")
     if tld in _WHOIS_SERVERS:
         return _WHOIS_SERVERS[tld]
-    text = await _whois_query("whois.iana.org", tld, timeout=6.0)
+    text = await _whois_query("whois.iana.org", tld, timeout=10.0)
     m = re.search(r"(?im)^whois:\s*(\S+)\s*$", text)
     if not m:
         raise RuntimeError(f"Nessun server WHOIS pubblicato per .{tld}")
@@ -289,8 +271,9 @@ async def _whois_expiry(host: str) -> tuple[str, datetime]:
         r"expiration date|expiry date|expire date|expires(?: on)?|paid-till|renewal date)\s*:\s*(.+?)\s*$"
     )
 
-    text = await _whois_query(server, domain.encode("idna").decode("ascii").lower(), timeout=8.0)
-    _LAST_INFO[domain] = _whois_info(text)
+    text = await _whois_query(server, domain.encode("idna").decode("ascii").lower(), timeout=20.0)
+    validate_whois_domain(text, domain)
+    _LAST_INFO[domain] = _whois_info(text) | whois_record_info(text)
     dates: list[datetime] = []
     for m in expiry_re.finditer(text):
         dt = _parse_whois_date(m.group(1))
@@ -298,7 +281,7 @@ async def _whois_expiry(host: str) -> tuple[str, datetime]:
             dates.append(dt)
     if dates:
         now = datetime.now(timezone.utc)
-        future = [d for d in dates if d >= now - timedelta(days=2)]
+        future = [d for d in dates if d.date() >= now.date()]
         return domain, min(future or dates)
     raise RuntimeError(f"WHOIS {server} non espone la data di scadenza")
 
@@ -306,7 +289,7 @@ async def _whois_expiry(host: str) -> tuple[str, datetime]:
 async def _web_whois_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datetime]:
     """Fallback HTTPS quando la porta TCP/43 e' filtrata dal provider del server.
 
-    Usa la pagina pubblica WHOIS solo come ultima/seconda sorgente; estrae
+    Usa la pagina pubblica whois.com come sorgente di confronto; estrae
     esclusivamente la data di scadenza e non salva dati del registrante.
     """
     domain = _registrable_domain(host)
@@ -319,8 +302,12 @@ async def _web_whois_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, 
     r.raise_for_status()
     # Porta il contenuto HTML a testo semplice; le pagine WHOIS .it espongono
     # normalmente 'Expire Date: YYYY-MM-DD'. Gestiamo anche i nomi gTLD comuni.
-    text = html.unescape(re.sub(r"<[^>]+>", "\n", r.text))
-    text = re.sub(r"[\t\r ]+", " ", text)
+    text = WhoisHTML(r.text).text()
+    blocked = page_block_reason(text)
+    if blocked:
+        raise SourceError(blocked)
+    validate_whois_domain(text, domain)
+    _LAST_INFO[domain] = _whois_info(text) | whois_record_info(text)
     expiry_re = re.compile(
         r"(?im)^(?:registry expiry date|registrar registration expiration date|"
         r"expiration date|expiry date|expire date|expires(?: on)?|paid-till|renewal date)\s*:\s*(.+?)\s*$"
@@ -333,52 +320,103 @@ async def _web_whois_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, 
     if not dates:
         raise RuntimeError("WHOIS HTTPS non espone la data di scadenza")
     now = datetime.now(timezone.utc)
-    future = [d for d in dates if d >= now - timedelta(days=2)]
+    future = [d for d in dates if d.date() >= now.date()]
     return domain, min(future or dates)
 
 
-async def _domain_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datetime]:
-    """RDAP + fallback HTTPS/WHOIS, sempre sul dominio registrabile."""
+async def _who_is_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datetime]:
+    """Public who.is lookup; no account, API key or paid refresh required."""
     domain = _registrable_domain(host)
-    tld = (domain.rsplit(".", 1)[-1] if "." in domain else "").lower()
-    errors: list[str] = []
+    r = await client.get(f"https://who.is/whois/{domain.encode('idna').decode('ascii')}",
+                         headers={"User-Agent": "Mozilla/5.0 Sentinel-TD/2.28.12",
+                                  "Cache-Control": "no-cache"})
+    r.raise_for_status()
+    expiry, info = parse_who_is(r.text, domain)
+    _LAST_INFO[domain] = info
+    return domain, expiry
 
-    # 1. RDAP: standard e veloce quando il TLD lo supporta.
-    if tld not in _RDAP_UNSUPPORTED_TLDS:
-        try:
-            return await _rdap_expiry(client, domain)
-        except Exception as ex:  # noqa: BLE001
-            errors.append(f"RDAP: {ex}")
-            # .it al momento non e' presente nel bootstrap RDAP IANA: evitiamo
-            # di ripetere il tentativo per ogni dominio nello stesso processo.
-            if tld == "it":
-                _RDAP_UNSUPPORTED_TLDS.add(tld)
 
-    # 2. Per .it preferiamo HTTPS prima della porta 43, perche' molti hosting/VPS
-    # filtrano l'uscita TCP/43 (esattamente il caso che produce i timeout visti).
-    if tld == "it":
-        try:
-            return await _web_whois_expiry(client, domain)
-        except Exception as ex:  # noqa: BLE001
-            errors.append(f"WHOIS HTTPS: {ex}")
-        try:
-            return await _whois_expiry(domain)
-        except Exception as ex:  # noqa: BLE001
-            errors.append(f"WHOIS TCP/43: {ex}")
-    else:
-        # Se RDAP non basta, proviamo prima via HTTPS: su molti VPS l'uscita
-        # TCP/43 e' filtrata e attendere il timeout per ogni TLD rallenterebbe
-        # inutilmente una scansione completa. La porta 43 resta l'ultimo fallback.
-        try:
-            return await _web_whois_expiry(client, domain)
-        except Exception as ex:  # noqa: BLE001
-            errors.append(f"WHOIS HTTPS: {ex}")
-        try:
-            return await _whois_expiry(domain)
-        except Exception as ex:  # noqa: BLE001
-            errors.append(f"WHOIS TCP/43: {ex}")
+_DOMAIN_LOOKUP_LOCKS: dict[str, asyncio.Lock] = {}
+_DOMAIN_GATE = SourceGate()
+_DOMAIN_SCAN_GATE = SourceGate(pause_seconds=30)
+_DOMAIN_ATTEMPTS = 3
 
-    raise RuntimeError("; ".join(errors)[:500] or "Scadenza dominio non rilevata")
+
+async def _domain_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datetime]:
+    """Check every available source, sequentially within each domain."""
+    domain = _registrable_domain(host)
+    if not domain or "." not in domain:
+        raise RuntimeError("Hostname non registrabile")
+    async with _DOMAIN_LOOKUP_LOCKS.setdefault(domain, asyncio.Lock()):
+        return await _DOMAIN_SCAN_GATE.call("domains", lambda: _compare_domain_sources(client, domain), timeout=None)
+
+
+async def _compare_domain_sources(client, domain):
+    tld = domain.rsplit(".", 1)[-1].lower()
+    candidates, observations, errors = [], [], []
+    sources = []
+    # .it has no RDAP bootstrap: use the registry published by IANA.
+    if tld != "it" and tld not in _RDAP_UNSUPPORTED_TLDS:
+        sources.append(("RDAP", True, lambda: _rdap_expiry(client, domain)))
+    sources += [("Registro WHOIS", True, lambda: _whois_expiry(domain)),
+                ("who.is", False, lambda: _who_is_expiry(client, domain)),
+                ("whois.com", False, lambda: _web_whois_expiry(client, domain))]
+    _LAST_INFO.pop(domain, None)
+    max_attempts = _DOMAIN_ATTEMPTS
+    for priority, (source, authoritative, fetch) in enumerate(sources):
+        for attempt in range(1, max_attempts + 1):
+            _LAST_INFO.pop(domain, None)
+            try:
+                resolved, expiry = await _DOMAIN_GATE.call(source, fetch)
+                if domain_key(resolved) != domain_key(domain):
+                    raise RuntimeError("La fonte restituisce un dominio diverso")
+                info = _LAST_INFO.pop(domain, {})
+                item = dict(info, source=source, authoritative=authoritative,
+                            priority=priority, expiry=expiry, attempts=attempt)
+                if authoritative:
+                    item["snapshot_at"] = datetime.now(timezone.utc)
+                candidates.append(item)
+                break
+            except Exception as ex:
+                _LAST_INFO.pop(domain, None)
+                delay = retry_delay(ex, attempt)
+                if delay is not None and attempt < max_attempts:
+                    log.info("WHOIS RETRY '%s' via %s: tentativo %d/%d, riprovo tra %.0fs (%s)",
+                             domain, source, attempt, max_attempts, delay, type(ex).__name__)
+                    await asyncio.sleep(delay)
+                    continue
+                message = str(ex) or "Timeout della fonte"
+                # Source labels belong to the aggregator, not repeated errors.
+                prefix = source.lower() + ": "
+                if message.lower().startswith(prefix):
+                    message = message[len(prefix):]
+                errors.append(f"{source}: {message}")
+                observations.append({"source": source, "error": message[:250], "selected": False, "attempts": attempt})
+                break
+    now = datetime.now(timezone.utc)
+    if not candidates:
+        _LAST_INFO[domain] = {"source_summary": {"selected": "", "reason": "unavailable", "sources": observations}}
+        raise RuntimeError("; ".join(errors)[:500] or "Scadenza dominio non rilevata")
+    chosen, reason, warning = reconcile(candidates, now)
+    for item in candidates:
+        observations.append({"source": item["source"], "authoritative": item["authoritative"],
+            "expires_at": item["expiry"].isoformat(),
+            "updated_at": item.get("updated_at").isoformat() if item.get("updated_at") else None,
+            "snapshot_at": item.get("snapshot_at").isoformat() if item.get("snapshot_at") else None,
+            "statuses": item.get("statuses") or [], "selected": item is chosen, "attempts": item["attempts"]})
+    summary = {"selected": chosen["source"], "reason": reason, "sources": observations, "warning": warning}
+    pending = renewal_pending(summary, domain, chosen["expiry"], now)
+    if not warning and chosen["expiry"].date() < now.date() and not chosen["authoritative"] and not pending:
+        warning = ("Registro non raggiungibile: la vecchia scadenza dalla fonte WHOIS secondaria va verificata. "
+                   + "; ".join(errors))[:500]
+    summary.update(warning=warning, renewal_pending=pending)
+    _LAST_INFO[domain] = {"registrar": chosen.get("registrar", ""), "nameservers": chosen.get("nameservers", ""),
+                          "source_summary": summary}
+    if warning:
+        _LAST_INFO[domain]["check_warning"] = warning
+    log.info("Scadenza '%s': %s via %s (%s)%s", domain, chosen["expiry"].date(), chosen["source"], reason,
+             " — da verificare" if warning else " — rinnovo in corso" if pending else "")
+    return domain, chosen["expiry"]
 
 
 def _deadline_threshold(days: int, thresholds: list[int]) -> int | None:
@@ -434,18 +472,52 @@ async def _dispatch_expiry(*, kind: str, item: str, provider: str, notes: str,
     return _save_alert_state(state, sent), False
 
 
-async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = None):
-    """Scansione domini deduplicata e concorrente + reminder giornalieri.
+def _domain_lookup_due(site, domain: str, now: datetime, scan_days: int) -> bool:
+    def utc(value):
+        return value.replace(tzinfo=timezone.utc) if value is not None and value.tzinfo is None else value
+    checked, expires = utc(site.domain_checked_at), utc(site.domain_expires_at)
+    return (checked is None
+            or checked.date() <= (now - timedelta(days=scan_days)).date()
+            or (site.domain_name or "").strip(".").lower() != domain
+            or ((site.domain_check_error or (expires is not None and expires <= now + timedelta(days=30)))
+                and checked < now - timedelta(hours=20)))
+
+
+async def _persist_domain_updates(updates: list[dict]):
+    if not updates:
+        return
+    async with SessionLocal() as s:
+        for upd in updates:
+            row = await s.get(Site, upd["id"])
+            if not row:
+                continue
+            previous = row.domain_checked_at
+            if previous is not None:
+                previous = previous.replace(tzinfo=timezone.utc) if previous.tzinfo is None else previous
+                if previous > upd["domain_checked_at"]:
+                    continue  # Non sovrascrivere il risultato di un controllo piu' recente.
+            row.domain_name = upd["domain_name"]
+            row.domain_checked_at = upd["domain_checked_at"]
+            if not upd["domain_check_error"] or row.domain_expires_at is None:
+                row.domain_expires_at = upd["domain_expires_at"]
+            row.domain_check_error = upd["domain_check_error"]
+            row.domain_check_details = upd.get("domain_check_details", "")
+            row.domain_registrar = upd.get("domain_registrar") or row.domain_registrar
+            row.domain_nameservers = upd.get("domain_nameservers") or row.domain_nameservers
+            if upd["reset_alert_state"]:
+                row.domain_alert_state = ""
+        await s.commit()
+
+
+async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = None, sequential: bool = False, domains: list[str] | None = None):
+    """Scansione domini deduplicata e cadenzata + reminder giornalieri.
 
     Ogni sito viene normalizzato al dominio registrabile, quindi sottodomini dello
-    stesso dominio generano un solo lookup. Concorrenza e frequenza sono configurabili
-    da Impostazioni > Scadenze e avvisi.
+    stesso dominio generano un solo lookup. Frequenza, pausa e tentativi sono
+    configurabili da Impostazioni > Scadenze e avvisi.
     """
     prefs = await get_operational_settings()
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=prefs["domain_scan_days"])
-    soon = now + timedelta(days=30)      # in scadenza: si ricontrolla ogni giorno
-    daily = now - timedelta(hours=20)    # il giro e' quotidiano (07:15): margine per gli orari
 
     async with SessionLocal() as s:
         sites = (await s.execute(select(Site))).scalars().all()
@@ -467,6 +539,11 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
             continue
         groups.setdefault(domain, []).append(site)
 
+    if domains is not None:
+        wanted = {_registrable_domain(_site_host(x)) for x in domains}
+        groups = {name: members for name, members in groups.items() if name in wanted}
+        invalid_sites = []
+
     registry_updates: list[dict] = []
     for site in invalid_sites:
         registry_updates.append({
@@ -475,19 +552,14 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
             "reset_alert_state": False,
         })
 
-    sem = asyncio.Semaphore(prefs["domain_parallel_lookups"])
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=6.0), follow_redirects=True) as client:
+    # One domain at a time across manual and automatic jobs in this worker.
+    global _DOMAIN_ATTEMPTS
+    _DOMAIN_ATTEMPTS = prefs["domain_source_attempts"]
+    _DOMAIN_SCAN_GATE.pause = prefs["domain_pause_seconds"]
+    sem = asyncio.Semaphore(1)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0), follow_redirects=True) as client:
         async def scan_one(domain: str, members: list[Site]) -> list[dict]:
-            due = force or any(
-                x.domain_checked_at is None
-                or x.domain_checked_at < cutoff
-                or (x.domain_name or "").strip(".").lower() != domain
-                # scaduti o in scadenza entro 30 giorni: ogni giorno, non ogni domain_scan_days.
-                # Sono quelli che cambiano (rinnovo), e con la frequenza normale un dominio
-                # rinnovato restava "scaduto" nel pannello fino a una settimana.
-                or (x.domain_expires_at is not None and x.domain_expires_at <= soon and x.domain_checked_at < daily)
-                for x in members
-            )
+            due = force or any(_domain_lookup_due(x, domain, now, prefs["domain_scan_days"]) for x in members)
             if not due:
                 return []
             async with sem:
@@ -501,42 +573,30 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
                     log.info("Scadenza dominio '%s' non rilevata: %s", domain, ex)
 
             info = _LAST_INFO.pop(resolved or domain, None) or _LAST_INFO.pop(domain, None) or {}
+            error = error or info.get("check_warning", "")
+            completed = datetime.now(timezone.utc)
             out: list[dict] = []
             for site in members:
                 old_date = site.domain_expires_at.date() if site.domain_expires_at else None
                 out.append({
                     "id": site.id,
                     "domain_name": resolved or domain,
-                    "domain_checked_at": now,
-                    "domain_expires_at": expiry if expiry is not None else site.domain_expires_at,
+                    "domain_checked_at": completed,
+                    "domain_expires_at": expiry if expiry is not None and (not error or site.domain_expires_at is None) else site.domain_expires_at,
                     "domain_check_error": error,
-                    "reset_alert_state": bool(expiry and old_date != expiry.date()),
+                    "domain_check_details": json.dumps(info.get("source_summary") or {}, ensure_ascii=False),
+                    "reset_alert_state": bool(expiry and not error and old_date != expiry.date()),
                     # dove e' registrato: si aggiorna solo se il lookup l'ha rilevato
                     "domain_registrar": info.get("registrar") or site.domain_registrar,
                     "domain_nameservers": info.get("nameservers") or site.domain_nameservers,
                 })
             return out
 
-        batches = await asyncio.gather(*(scan_one(domain, members) for domain, members in groups.items()))
-        for batch in batches:
-            registry_updates.extend(batch)
-
-    # 2) Persisti i risultati registry in una transazione corta.
-    if registry_updates:
-        async with SessionLocal() as s:
-            for upd in registry_updates:
-                row = await s.get(Site, upd["id"])
-                if not row:
-                    continue
-                row.domain_name = upd["domain_name"]
-                row.domain_checked_at = upd["domain_checked_at"]
-                row.domain_expires_at = upd["domain_expires_at"]
-                row.domain_check_error = upd["domain_check_error"]
-                row.domain_registrar = upd.get("domain_registrar") or ""
-                row.domain_nameservers = upd.get("domain_nameservers") or ""
-                if upd["reset_alert_state"]:
-                    row.domain_alert_state = ""
-            await s.commit()
+        # Automatic scans now persist each result too: long scans, cancellation
+        # or worker restarts must not discard already completed domains.
+        await _persist_domain_updates(registry_updates)
+        for domain, members in sorted(groups.items()):
+            await _persist_domain_updates(await scan_one(domain, members))
 
     # 3) Snapshot per i reminder. Anche qui la sessione viene chiusa PRIMA degli invii
     # email/Telegram, che possono richiedere secondi e non devono trattenere lock DB.
@@ -558,6 +618,8 @@ async def domain_expiry_scan(ctx, force: bool = False, site_id: int | None = Non
         reminder_groups.setdefault(domain, []).append(site)
 
     for domain, members in reminder_groups.items():
+        if any(x.domain_check_error for x in members):
+            continue  # Una data conservata dopo un lookup fallito non conferma la scadenza.
         representative = next((x for x in members if not x.notifications_silenced), members[0])
         source_state = next((x.domain_alert_state for x in members if x.domain_alert_state), representative.domain_alert_state)
         source_expiry = next((x.domain_expires_at for x in members if x.domain_expires_at), None)
@@ -632,6 +694,12 @@ async def poll_site(ctx, site_id: int, force: bool = False):
         prev_status = site.status
         await apply_status(s, site, force=force)
 
+        if site.status == "check_pending":
+            await s.commit()
+            await schedule_pending_recheck(ctx["redis"], site_id)
+            log.info("CHECK DA CONFERMARE '%s' (id=%s): %s", site.name, site.id, site.error)
+            return
+
         if site.status == "dns_error":
             # Resolver del monitor in difficolta': non e' una conferma di sito offline.
             await s.commit()
@@ -653,6 +721,8 @@ async def poll_site(ctx, site_id: int, force: bool = False):
                 window_min = 5
             now_c = datetime.now(timezone.utc)
             since = site.offline_since
+            if since is not None and since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
             if window_min > 0 and (since is None or (now_c - since) < timedelta(minutes=window_min)):
                 # non ancora confermato: nel pannello il sito resta com'era
                 await s.rollback()
@@ -685,7 +755,10 @@ async def poll_site(ctx, site_id: int, force: bool = False):
         #  - una sola notifica per episodio offline (niente spam mentre resta giu')
         #  - quando torna ok -> 🟢 e azzera il flag
         if site.status == "error" and not site.offline_notified and not site.notifications_silenced:
-            _elapsed = (datetime.now(timezone.utc) - site.offline_since).total_seconds() if site.offline_since else 0
+            _since = site.offline_since
+            if _since is not None and _since.tzinfo is None:
+                _since = _since.replace(tzinfo=timezone.utc)
+            _elapsed = (datetime.now(timezone.utc) - _since).total_seconds() if _since else 0
             _window = max(0, round(_elapsed / 60))
             _attempts = _window + 1              # un controllo al minuto
             _r = await notify_dispatch("site_offline", {"site_name": site.name, "site_url": site.url,
@@ -1291,12 +1364,14 @@ async def update_site(ctx, site_id: int, manual: bool = False):
             pass
     if manual:
         await _set_upd_status(redis, site_id, "running", "aggiornamento in corso")
+    owned_context = updating_server.set(server)
     try:
         await _update_site(ctx, site_id, manual, outcome)
     except Exception as ex:  # noqa: BLE001
         outcome["text"] = f"aggiornamento interrotto da un errore: {str(ex)[:200]}"
         raise
     finally:
+        updating_server.reset(owned_context)
         await srv_release(redis, server, slot, bool(outcome.get("worked")))
         if manual:
             await _set_upd_status(redis, site_id, "done", outcome["text"] or "aggiornamento concluso",
@@ -1332,7 +1407,10 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # nessuno se ne accorgesse (caso reale: core WP di shop). Ora lascia traccia.
             log.warning("UPDATE SALTATO '%s' (id=%s): sito in errore dopo il refresh (%s) — riprovo al prossimo ciclo",
                         site.name, site.id, (site.error or "status=" + str(site.status))[:200])
-            if site.status == "dns_error":
+            if site.status == "check_pending":
+                await schedule_pending_recheck(ctx["redis"], site.id)
+                outcome["text"] = "verifica non conclusa: aggiornamento rimandato e ricontrollo programmato"
+            elif site.status == "dns_error":
                 await schedule_dns_recheck(ctx["redis"], site_id)
                 outcome["text"] = f"verifica DNS non riuscita: {(site.error or '')[:200]}"
             else:
@@ -2108,8 +2186,6 @@ async def _startup(ctx):
     dipendere dal boot dell'API. Stessi ALTER idempotenti del lifespan API."""
     async with engine.begin() as conn:
         await run_migrations(conn)
-    from .load_history import migrate_legacy
-    await migrate_legacy(ctx.get("redis"))
 
 
 async def _shutdown(ctx):
@@ -2178,84 +2254,6 @@ async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
 # --------------------------------------------------------------------------
 # DIAGNOSTICA DEI SITI (2.9.0)
 # --------------------------------------------------------------------------
-async def diag_site(ctx, site_id: int, space_mb: int = 0, nightly_batch: str = ""):
-    """Diagnostica di un sito: spazio scrivibile (prova vera, solo se space_mb > 0),
-    cartelle, peso (nello storico, una riga al giorno), verifica dei file del core.
-    Pulsante "Esegui diagnostica": space_mb=150. Giro notturno: space_mb=50;
-    gli esiti vengono raccolti, senza notifiche immediate."""
-    async with SessionLocal() as s:
-        site = await s.get(Site, site_id)
-        if site is None or not site.enabled or not site.token:
-            if nightly_batch:
-                await complete_item(s, nightly_batch, site_id, {})
-                await s.commit()
-            return
-        try:
-            data = await fetch_diagnostics(site, space_mb=space_mb, sizes=True, core=True)
-        except ConnectorTooOld as ex:
-            await store_diag_error(site, str(ex))
-            if nightly_batch:
-                await complete_item(s, nightly_batch, site_id, site_payload(site, {}, error=str(ex)))
-            await s.commit()
-            return
-        except Exception as ex:  # noqa: BLE001
-            await store_diag_error(site, f"diagnostica non riuscita: {str(ex)[:300] or type(ex).__name__}")
-            if nightly_batch:
-                await complete_item(s, nightly_batch, site_id, site_payload(site, {}, error=str(ex)[:300] or type(ex).__name__))
-            await s.commit()
-            return
-        diag, core_changed = await store_diagnostics(s, site, data)
-        if nightly_batch:
-            prefs = await get_operational_settings()
-            ip = await server_of(ctx["redis"], site.url)
-            key = machine_key(ip, site_hostname(site), set(prefs["server_split"]))
-            payload = site_payload(site, site.diag, key)
-            payload["server_label"] = prefs["server_labels"].get(key) or prefs["server_labels"].get(ip) or ""
-            await complete_item(s, nightly_batch, site_id, payload)
-        await s.commit()
-        log.info("Diagnostica '%s' (id=%s): spazio %s, peso %s, core %s", site.name, site.id,
-                 (diag.get("space") or {}).get("written_mb", "-"), (diag.get("sizes") or {}).get("total", "-"),
-                 (diag.get("core") or {}).get("status", "-"))
-        if nightly_batch:
-            return
-        if core_changed and not site.notifications_silenced:
-            await notify_dispatch("core_integrity", {
-                "site_name": site.name, "site_url": site.url, "folder": _folder_label(site),
-                "core": diag.get("core") or {}, "site_id": site.id, "panel_url": await _panel_url(),
-            })
-        await _notify_space(ctx, site, diag)
-
-
-async def _notify_space(ctx, site: Site, diag: dict) -> None:
-    """Spazio quasi esaurito o log grandi: UNA notifica per sito, e di nuovo solo se la
-    situazione cambia (altro log, log cresciuto di molto, spazio finito o tornato). La
-    memoria di cosa e' gia' stato segnalato sta in Redis, per un anno."""
-    sp = diag.get("space") or {}
-    logs = (diag.get("sizes") or {}).get("big_logs") or []
-    low = bool(sp) and not sp.get("ok")
-    # firma: spazio basso si'/no + i log a scaglioni di 50 MB (un log che cresce piano non rinnova l'avviso)
-    sig = ("low" if low else "ok") + "|" + ",".join(sorted(f"{l['path']}:{int(l['bytes']) // (50 * 1048576)}" for l in logs))
-    key = f"diag:space:{site.id}"
-    try:
-        r = ctx.get("redis") if isinstance(ctx, dict) else None
-        prev = await r.get(key) if r is not None else None
-        prev = prev.decode() if isinstance(prev, (bytes, bytearray)) else (prev or "")
-        if prev == sig:
-            return
-        if r is not None:
-            await r.set(key, sig, ex=365 * 86400)
-    except Exception:  # noqa: BLE001
-        return
-    if not (low or logs) or site.notifications_silenced:
-        return
-    await notify_dispatch("site_space", {
-        "site_name": site.name, "site_url": site.url, "folder": _folder_label(site), "site_id": site.id,
-        "space_low": low, "space_written_mb": sp.get("written_mb"), "space_tested_mb": sp.get("tested_mb"),
-        "logs": [{"path": l.get("path", ""), "mb": round(int(l.get("bytes", 0)) / 1048576), "outside": bool(l.get("outside"))} for l in logs],
-        "panel_url": await _panel_url(),
-    })
-
-
 async def connector_rollout(ctx):
     """Ogni notte: il connettore consegnato dal pannello sui siti che ne hanno uno piu' vecchio,
     con i lavori dell'installazione in blocco (un sito per lavoro, posti sui server rispettati).
@@ -2290,49 +2288,23 @@ async def plugin_catalog_scan(ctx, force: bool = False):
         log.warning("Catalogo plugin: scansione non riuscita: %s", ex)
 
 
-async def diag_all(ctx):
-    """Giro notturno: diagnostica leggera di tutti i siti (peso e verifica del core)."""
-    async with SessionLocal() as s:
-        ids = [sid for (sid,) in (await s.execute(select(Site.id).where(Site.enabled == True, Site.token != "").order_by(Site.id))).all()]  # noqa: E712
-        await prune_sizes(s)
-        await s.commit()
-    # prova di spazio leggera (50 MB): quanto serve a un aggiornamento medio. Se non ci stanno
-    # nemmeno quelli, il sito e' di fatto bloccato e vale la pena saperlo prima che fallisca
-    batch, created = await create_batch(ids, datetime.now(timezone.utc))
-    if not created:
-        return
-    for i, sid in enumerate(ids):
-        try:
-            await ctx["redis"].enqueue_job("diag_site", sid, 50, batch,
-                                           _job_id=f"nightly:{batch}:{sid}", _defer_by=i * 20)
-        except Exception as ex:
-            async with SessionLocal() as s:
-                site = await s.get(Site, sid)
-                await complete_item(s, batch, sid, site_payload(site, {}, error=f"Accodamento fallito: {str(ex)[:200]}") if site else {})
-                await s.commit()
-    async with SessionLocal() as s:
-        row = await s.get(NightlyBatch, batch)
-        row.ready = True
-        await s.commit()
-    log.info("diag_all: accodate %d diagnostiche", len(ids))
+async def retired_diagnostics_job(ctx, *args):
+    """Discard diagnostics queued by a previous version without contacting the site."""
+    return
 
 
 class WorkerSettings:
     functions = [poll_site, arq_func(shoot_site, keep_result=0), update_site, cycle_summary, mass_update_now,
-                 mass_update_selected, security_scan, vendor_scan, domain_expiry_scan, monthly_report,
-                 diag_site, diag_all, connector_rollout, plugin_catalog_scan, install_site,
-                 arq_func(sample_server_metrics, keep_result=0)]
+                 mass_update_selected, security_scan, vendor_scan, arq_func(domain_expiry_scan, timeout=21600, keep_result=0), monthly_report,
+                 arq_func(retired_diagnostics_job, name="diag_site", keep_result=0), connector_rollout, plugin_catalog_scan, install_site]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),
-        cron(server_metrics_tick, minute=set(range(60)), run_at_startup=True),
-        cron(nightly_summary_tick, minute=set(range(60)), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
         cron(auto_update_cycle, minute={0}),   # ogni ora, al minuto 0 (installa i pending)
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30
-        cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True),  # reminder giornalieri; registry max 1 volta/7gg
+        cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True, timeout=21600),  # reminder giornalieri; registro secondo i giorni impostati; errori ritentati ogni giorno
         cron(monthly_report, minute=set(range(0, 60, 5))),   # ogni 5 minuti: invia quando giorno e orario sono arrivati
-        cron(diag_all, hour={3}, minute={40}),   # diagnostica notturna: peso dei siti e verifica del core
         cron(connector_rollout, hour={4}, minute={30}),   # connettore nuovo sui siti che ne hanno uno vecchio
         cron(plugin_catalog_scan, weekday={6}, hour={5}, minute={0}, run_at_startup=True),   # catalogo plugin da wordpress.org: la domenica, e al primo avvio
     ]

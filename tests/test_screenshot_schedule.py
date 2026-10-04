@@ -83,7 +83,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
     async def add_site(self, **kwargs):
         async with self.sessions() as s:
-            site = Site(name="Test site", url="https://example.test", cms="wp", token="test", **kwargs)
+            site = Site(**({"name": "Test site", "url": "https://example.test", "cms": "wp", "token": "test"} | kwargs))
             s.add(site)
             await s.commit()
             return site.id

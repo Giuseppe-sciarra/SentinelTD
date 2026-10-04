@@ -71,6 +71,7 @@ class SiteOut(BaseModel):
     domain_expires_at: datetime | None
     domain_checked_at: datetime | None
     domain_check_error: str
+    domain_check_details: str = ""
     shot_path: str
     shot_at: datetime | None
     shot_attempted_at: datetime | None = None
@@ -83,9 +84,6 @@ class SiteDetailOut(SiteOut):
     # di leak (un solo sito alla volta, e solo quando apri il pannello dettaglio).
     token: str
     extensions: list[ExtensionOut] = []
-    # diagnostica dal connettore (spazio, cartelle, peso, verifica del core)
-    diag: dict | None = None
-    diag_at: datetime | None = None
     updates_unverified_at: datetime | None = None
     locked: list[str] = []   # componenti bloccati alla versione installata
     connector_version: str = ""

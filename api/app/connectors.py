@@ -29,6 +29,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Site, Extension
 from .config import settings
+from .check_gate import CheckDeferred, status_slot, close as close_check_gate
 
 log = logging.getLogger("sentinel.connectors")
 
@@ -84,6 +85,7 @@ async def close_status_client():
     global _STATUS_CLIENT, _STATUS_LOOP, _STATUS_LIMIT, _STATUS_LIMIT_LOOP
     client, _STATUS_CLIENT, _STATUS_LOOP = _STATUS_CLIENT, None, None
     _STATUS_LIMIT = _STATUS_LIMIT_LOOP = None
+    await close_check_gate()
     if client is not None and not client.is_closed:
         try:
             await client.aclose()
@@ -98,8 +100,16 @@ async def _status_get(client, endpoint, headers, timeout):
         _STATUS_LIMIT, _STATUS_LIMIT_LOOP = asyncio.Semaphore(4), loop
     # Il pool conserva connessioni a piu' domini; solo quattro GET contemporanee
     # per processo. Il posto viene liberato prima di aspettare un retry.
-    async with _STATUS_LIMIT:
-        return await client.get(endpoint, headers=headers, timeout=timeout)
+    # Admission/queue waits are outside HTTP connect/read deadlines.
+    read = timeout.read if isinstance(timeout, httpx.Timeout) else float(timeout)
+    connect = timeout.connect if isinstance(timeout, httpx.Timeout) else float(timeout)
+    budget = read + connect
+    async with status_slot(endpoint, budget):
+        async with _STATUS_LIMIT:
+            try:
+                return await asyncio.wait_for(client.get(endpoint, headers=headers, timeout=timeout), timeout=budget)
+            except asyncio.TimeoutError as exc:
+                raise httpx.ReadTimeout("Tempo totale del controllo superato") from exc
 
 
 def wp_rest_url(site: Site, path: str, qs: str = "", *, style: str | None = None) -> str:
@@ -197,13 +207,14 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
         "Pragma": "no-cache",
     }
     client = await status_client()
-    request_timeout = httpx.Timeout(timeout, connect=min(timeout, 8.0))
+    request_timeout = httpx.Timeout(timeout, connect=min(timeout, settings.STATUS_CHECK_CONNECT_SECONDS))
     try:
         r = await _status_get(client, endpoint, headers, request_timeout)
         r.raise_for_status()
         payload = r.json()
-    except (httpx.HTTPStatusError, ValueError):
-        if site.cms != "wp":
+    except (httpx.HTTPStatusError, ValueError) as exc:
+        if site.cms != "wp" or (isinstance(exc, httpx.HTTPStatusError)
+                                 and exc.response.status_code in (408, 429, 500, 502, 503, 504)):
             raise
         # Solo errori HTTP/formato provano la forma REST alternativa. Un problema
         # di DNS/connessione non dipende dal percorso e non deve raddoppiare le GET.
@@ -234,6 +245,27 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
             return payload          # gia' piatta
         raise RuntimeError("Formato risposta Joomla non valido")
     return payload
+
+
+async def _pending_failure(site: Site, reason: str):
+    from .settings_store import get_operational_settings
+    window = (await get_operational_settings())["offline_alert_minutes"]
+    now = datetime.now(timezone.utc)
+    since = site.offline_since
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    site.offline_since = since or now
+    confirmed = window == 0 or site.offline_notified or (now - site.offline_since).total_seconds() >= window * 60
+    site.status = "error" if confirmed else "check_pending"
+    site.error = reason
+
+
+async def schedule_pending_recheck(redis, site_id: int):
+    try:
+        await redis.enqueue_job("poll_site", site_id, _defer_by=60,
+                                _job_id=f"pending-recheck:{site_id}:{int(time.time()) // 60}")
+    except Exception as exc:
+        log.warning("Ricontrollo non accodato (id=%s): %s", site_id, type(exc).__name__)
 
 
 async def apply_status(session: AsyncSession, site: Site, force: bool = False) -> None:
@@ -267,10 +299,6 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             core_known = True
         unverified = not (core_known and all(known_cat.values()))
 
-        # Risorse a ogni controllo: storico persistente nel database, grafico di 24 ore.
-        if isinstance(data.get("server"), dict):
-            from .load_history import record as _record_load
-            await _record_load(site.id, data["server"])
         # versione del connettore sul sito: dichiarata (WP 2.23+/Joomla 1.32+) o ricavata dal plugin
         declared = str(data.get("connector") or "").strip()
         if declared:
@@ -390,6 +418,8 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
     except httpx.HTTPStatusError as ex:
         site.status = "error"
         site.error = f"HTTP {ex.response.status_code}"
+        if ex.response.status_code in (408, 429, 500, 502, 503, 504):
+            await _pending_failure(site, site.error)
         site.last_checked = datetime.now(timezone.utc)
         log.warning("CHECK FALLITO '%s' (id=%s): %s", site.name, site.id, site.error)
     except Exception as ex:  # noqa: BLE001
@@ -397,6 +427,13 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             site.status = "dns_error"
             site.error = ("DNS temporaneo: verifica non riuscita da Sentinel. " + str(ex))[:480]
             site.offline_since = None
+        elif isinstance(ex, CheckDeferred):
+            if site.status != "error":
+                site.status = "check_pending"
+                site.error = str(ex)[:480]
+            # Waiting in Sentinel is not evidence of a failed connection.
+        elif isinstance(ex, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
+            await _pending_failure(site, str(ex)[:480] or type(ex).__name__)
         else:
             site.status = "error"
             site.error = str(ex)[:480] or type(ex).__name__
@@ -442,36 +479,6 @@ async def _wp_get(client: httpx.AsyncClient, site: Site, path: str, qs: str, hea
     return r
 
 
-async def fetch_diagnostics(site: Site, space_mb: int = 0, sizes: bool = True, core: bool = True,
-                            timeout: float = 240.0) -> dict:
-    """Diagnostica dal connettore: spazio scrivibile (prova vera da space_mb MB), cartelle,
-    peso del sito, verifica dei file del core (solo WordPress)."""
-    cb = int(time.time())
-    qs = f"space={max(0, min(400, int(space_mb)))}&sizes={1 if sizes else 0}&core={1 if core else 0}&_={cb}"
-    too_old = ("il connettore di questo sito non ha ancora la diagnostica: aggiornalo alla "
-               + ("2.19.0" if site.cms == "wp" else "1.30.0"))
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        if site.cms == "wp":
-            r = await _wp_get(client, site, "diagnostics", qs, _auth_headers(site))
-            if _rest_no_route(r):
-                raise ConnectorTooOld(too_old)
-        else:
-            url = (f"{site.url.rstrip('/')}/index.php?option=com_ajax&plugin=tdpanopticon&group=system"
-                   f"&format=json&task=diagnostics&{qs}")
-            r = await client.get(url, headers=_auth_headers(site))
-        r.raise_for_status()
-        payload = r.json()
-    if site.cms != "wp":
-        if isinstance(payload, dict) and "success" in payload:
-            if not payload.get("success"):
-                raise RuntimeError(payload.get("message") or "com_ajax error")
-            payload = (payload.get("data") or [None])[0]
-        elif isinstance(payload, list):
-            payload = payload[0] if payload else None
-    # un connettore Joomla vecchio non conosce il task e risponde con lo stato normale
-    if not isinstance(payload, dict) or not payload.get("diagnostics"):
-        raise ConnectorTooOld(too_old)
-    return payload
 
 
 async def fetch_package(site: Site, kind: str, slug: str, max_size: int, timeout: float = 300.0) -> tuple[bytes, str]:

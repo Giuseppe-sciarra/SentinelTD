@@ -23,7 +23,7 @@ from jinja2 import Environment, BaseLoader, TemplateError
 from sqlalchemy import bindparam, select, func, text
 
 from .db import SessionLocal
-from .models import AppSetting, UpdateMonthly, Site, SiteExpiry, SiteSize, Client, ClientSite, Extension
+from .models import AppSetting, UpdateMonthly, Site, SiteExpiry, Client, ClientSite, Extension
 from .problems import LABELS as PROBLEM_LABELS, failed_by_site, site_problems
 from .config import settings
 
@@ -59,7 +59,7 @@ DEFAULTS = {
     "show_security": True,       # stato vulnerabilita'
     "show_expiries": True,       # scadenze domini/licenze in arrivo
     "show_compare": True,        # confronto col mese precedente + andamento
-    "show_site_stats": True,     # stato dei siti: versioni, PHP, dominio, peso, spazio, file del core
+    "show_site_stats": True,     # stato dei siti: versioni, PHP e dominio
     "expiry_horizon_days": 60,
     # Report da produrre/inviare ogni mese. Ogni voce: {key, enabled}
     # key = "__all__" (tutti i siti) oppure il nome esatto di una cartella/tag.
@@ -95,7 +95,7 @@ def client_id_of(scope: str) -> int:
 # Impronte dei modelli predefiniti delle versioni precedenti: una copia salvata IDENTICA non e'
 # una personalizzazione, e' il vecchio default rimasto nel database -> si usa quello nuovo
 # (che ha in piu' la sezione "Stato dei siti").
-_LEGACY_TEMPLATE_HASHES = {"e6a0d240b2555349529d2f6f3ca8c34be80f1018bd7990e69407850013c87381", "1815888d7299da0ab27e1ffcfcf59aefb419fbbda23a4a76e9f26e3c8b0f38e3", "633d8df19d1ed79cb7063d00f185375e8aea88d3f0df92ffa35b013ecff10030", "d44068bb751e54a79759fe390483e4fd9ca8c178b4e6fd058309b516dee18c90"}
+_LEGACY_TEMPLATE_HASHES = {'85299aba6328717dc68336342a6a9c902086106519d99d4982f45621de73a3df', '9dc7d449f6a9492b4695470d0c9c46bbfa6aac47459d64ce9a30afeb847b6859', 'c32f38aff6c42aea718a5f8c5d9efed3a213bba7267002a23435abb819cafcf0', 'f3313feb91bb1b40579a94aa60a8db86931bf81038a38493c746b93c81aaacad', '9dc7d449f6a9492b4695470d0c9c46bbfa6aac47459d64ce9a30afeb847b6859', '9dc7d449f6a9492b4695470d0c9c46bbfa6aac47459d64ce9a30afeb847b6859', "e6a0d240b2555349529d2f6f3ca8c34be80f1018bd7990e69407850013c87381", "1815888d7299da0ab27e1ffcfcf59aefb419fbbda23a4a76e9f26e3c8b0f38e3", "633d8df19d1ed79cb7063d00f185375e8aea88d3f0df92ffa35b013ecff10030", "d44068bb751e54a79759fe390483e4fd9ca8c178b4e6fd058309b516dee18c90"}
 
 # ---------------------------------------------------------------- template
 DEFAULT_TEMPLATE = """<!doctype html>
@@ -237,23 +237,19 @@ DEFAULT_TEMPLATE = """<!doctype html>
 {% for grp in site_stat_groups %}
 {% if site_stat_groups | length > 1 or grp.server %}<h3 class="srvh">Server {{ grp.server or "non rilevato" }} · {{ grp.sites | length }} {% if grp.sites | length == 1 %}sito{% else %}siti{% endif %}{% if grp.problems %} · <span class="ko">{{ grp.problems }} con problemi</span>{% endif %}</h3>{% endif %}
 <table class="st">
-  <thead><tr><th>Sito</th><th>Versioni</th><th>Dominio</th><th>Peso</th><th>Spazio libero</th><th>File del core</th></tr></thead>
+  <thead><tr><th>Sito</th><th>Versioni</th><th>Dominio</th></tr></thead>
   <tbody>
   {% for x in grp.sites %}
     <tr>
       <td><b>{{ x.name }}</b><div class="sm mut">{{ x.url }}</div></td>
       <td>{{ x.cms_label }} {{ x.core or '' }}<div class="sm{% if x.php_state == 'fuori supporto' %} ko{% else %} mut{% endif %}">PHP {{ x.php or '—' }}{% if x.php_state %} · {{ x.php_state }}{% endif %}</div></td>
       <td>{% if x.domain_date %}{{ x.domain_date }}<div class="sm{% if x.domain_days is not none and x.domain_days < 30 %} ko{% else %} mut{% endif %}">{% if x.domain_days is not none and x.domain_days < 0 %}scaduto da {{ -x.domain_days }} giorni{% else %}tra {{ x.domain_days }} giorni{% endif %}</div>{% else %}<span class="mut">—</span>{% endif %}</td>
-      <td>{% if x.size %}{{ x.size }}<div class="sm mut">{% if x.growth %}{{ x.growth }} in {{ x.growth_days }} giorni{% endif %}{% if x.db %}{% if x.growth %} · {% endif %}database {{ x.db }}{% endif %}</div>{% else %}<span class="mut">—</span>{% endif %}</td>
-      <td>{% if x.space %}<span class="{% if x.space_low %}ko{% endif %}">{{ x.space }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
-      <td>{% if x.core_files %}<span class="{% if x.core_issues %}ko{% endif %}">{{ x.core_files }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
     </tr>
-    {% if x.problems %}<tr class="prob"><td colspan="6"><span class="ko">⚠ {{ x.problems | join(" · ") }}</span></td></tr>{% endif %}
+    {% if x.problems %}<tr class="prob"><td colspan="3"><span class="ko">⚠ {{ x.problems | join(" · ") }}</span></td></tr>{% endif %}
   {% endfor %}
   </tbody>
 </table>
 {% endfor %}
-<div class="mut">Peso: file e database del sito. Spazio libero: quanto si riesce davvero a scrivere sul sito, misurato con l'ultima diagnostica.</div>
 {% endif %}
 
 {% if cfg.show_expiries and (domains or licenses) %}
@@ -571,11 +567,10 @@ def _group_by_server(rows: list[dict]) -> list[dict]:
 
 
 async def _site_stats(s, sites: list) -> list[dict]:
-    """Una riga per sito: versioni, PHP, dominio, peso e crescita, spazio scrivibile, file del core."""
+    """Una riga per sito: versioni, PHP, dominio e problemi attuali."""
     if not sites:
         return []
     ids = [x.id for x in sites]
-    since = (datetime.now() - timedelta(days=45)).date()
     fails = await failed_by_site(s, ids)
     # server di ogni sito (IP del dominio) col nome dato in Impostazioni, per dividere la sezione
     servers: dict[int, str] = {}
@@ -609,37 +604,11 @@ async def _site_stats(s, sites: list) -> list[dict]:
                 servers[sid] = key
     except Exception:  # noqa: BLE001
         pass
-    hist: dict[int, list] = {}
-    for r in (await s.execute(select(SiteSize).where(SiteSize.site_id.in_(ids), SiteSize.day >= since)
-                              .order_by(SiteSize.day))).scalars().all():
-        hist.setdefault(r.site_id, []).append(r)
     now = datetime.now(timezone.utc)
     out = []
     for x in sorted(sites, key=lambda z: (z.name or "").lower()):
-        diag = x.diag or {}
-        rows = hist.get(x.id) or []
-        last = rows[-1] if rows else None
-        size, growth, growth_days, db = "", "", 0, ""
-        if last:
-            size, db = _fmt_bytes(last.total), _fmt_bytes(last.db)
-            # crescita: rispetto al valore di circa un mese fa (il piu' recente con almeno 30 giorni),
-            # oppure al piu' vecchio disponibile; i giorni scritti sono quelli veri
-            older = [r for r in rows if (last.day - r.day).days >= 30]
-            ref = older[-1] if older else rows[0]
-            if ref is not last:
-                d = int(last.total) - int(ref.total)
-                growth = ("+" if d >= 0 else "−") + _fmt_bytes(abs(d)) if abs(d) >= 1048576 else "stabile"
-                growth_days = (last.day - ref.day).days
-        elif (diag.get("sizes") or {}).get("total"):
-            size, db = _fmt_bytes(diag["sizes"]["total"]), _fmt_bytes(diag["sizes"].get("db"))
-        sp = diag.get("space") or {}
-        space = ""
-        if sp:
-            space = (f"almeno {sp.get('tested_mb')} MB" if sp.get("ok") else f"solo {sp.get('written_mb')} MB").replace(".", ",")
-        core = diag.get("core") or {}
-        core_txt = {"ok": "integri", "issues": "da controllare"}.get(core.get("status"), "")
         dexp = getattr(x, "domain_expires_at", None)
-        # problemi: la stessa definizione di dashboard e Stato server
+        # problemi: la stessa definizione di dashboard
         probs = []
         for pr in site_problems(x, fails.get(x.id), now):
             lab = PROBLEM_LABELS.get(pr["kind"], "")
@@ -651,9 +620,6 @@ async def _site_stats(s, sites: list) -> list[dict]:
             "domain": getattr(x, "domain_name", "") or "",
             "domain_date": dexp.strftime("%d/%m/%Y") if dexp else "",
             "domain_days": (dexp - now).days if dexp else None,
-            "size": size, "growth": growth, "growth_days": growth_days, "db": db,
-            "space": space, "space_low": bool(sp) and not sp.get("ok"),
-            "core_files": core_txt, "core_issues": core.get("status") == "issues",
             "problems": probs, "server": servers.get(x.id, ""),
         })
     return out

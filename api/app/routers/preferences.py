@@ -33,7 +33,7 @@ async def detected_servers(s: AsyncSession = Depends(get_session)):
     from sqlalchemy import select
     from ..config import settings
     from ..models import Site
-    from ..servers import server_of, site_hostname
+    from ..servers import server_of
     sites = (await s.execute(select(Site).where(Site.enabled == True))).scalars().all()  # noqa: E712
     r = from_url(settings.REDIS_URL)
     loop = asyncio.get_running_loop()
@@ -67,15 +67,8 @@ async def detected_servers(s: AsyncSession = Depends(get_session)):
         keys = await asyncio.gather(*(server_of(r, x.url) for x in sites))
         groups: dict[str, dict] = {}
         for site, key in zip(sites, keys):
-            g = groups.setdefault(key or "?", {"names": [], "folders": {}, "machines": {}, "unknown": 0})
+            g = groups.setdefault(key or "?", {"names": [], "folders": {}})
             g["names"].append(site.name)
-            hn = site_hostname(site)
-            if hn:
-                m = g["machines"].setdefault(hn, {"hostname": hn, "sites": 0, "names": []})
-                m["sites"] += 1
-                m["names"].append(site.name)
-            else:
-                g["unknown"] += 1
             tags = [" / ".join(p.strip() for p in t.split("/") if p.strip()) for t in (site.tags or "").split(",") if t.strip()]
             for t in (tags or [""]):
                 g["folders"][t] = g["folders"].get(t, 0) + 1
@@ -86,8 +79,6 @@ async def detected_servers(s: AsyncSession = Depends(get_session)):
     for (k, g), host in zip(groups.items(), hosts):
         out.append({
             "server": k, "host": host, "sites": len(g["names"]),
-            "machines": sorted(({**m, "names": sorted(m["names"], key=str.lower)} for m in g["machines"].values()), key=lambda m: (-m["sites"], m["hostname"])),
-            "unknown": g["unknown"],
             "names": sorted(g["names"], key=str.lower),
             "folders": [{"name": n, "count": c} for n, c in sorted(g["folders"].items(), key=lambda x: (-x[1], x[0].lower()))],
         })

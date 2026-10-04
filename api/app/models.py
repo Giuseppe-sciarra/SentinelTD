@@ -5,38 +5,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 
-# File che WordPress non esegue mai e che hosting, traduzioni e strumenti toccano di continuo:
-# nella verifica dei file del core sono solo rumore. Filtrati anche qui, nel pannello, cosi'
-# spariscono subito anche dai risultati salvati con un connettore vecchio.
-_CORE_HARMLESS = {"wp-config-sample.php", "readme.html", "license.txt", "licenza.html", "liesmich.html", "licence.txt"}
-
-
-def _core_noise(path: str) -> bool:
-    import re as _re
-    p = str(path or "")
-    name = p.rsplit("/", 1)[-1].lower()
-    return (p in _CORE_HARMLESS or name in _CORE_HARMLESS
-            or bool(_re.search(r"(^|/)(error_log|php_errorlog|php_error_log|\.user\.ini|php\.ini|\.htaccess|web\.config|\.ds_store|thumbs\.db|desktop\.ini)$", p, _re.I))
-            or name.endswith(".log"))
-
-
-def clean_core_check(core: dict) -> dict:
-    """Toglie i file innocui dalla verifica dei file del core e ricalcola conteggi e stato."""
-    if not isinstance(core, dict) or core.get("status") not in ("ok", "issues"):
-        return core
-    out = dict(core)
-    for key in ("modified", "missing", "extra"):
-        raw = out.get(key) or []
-        items = [x for x in raw if not _core_noise(x if isinstance(x, str) else (x or {}).get("file", ""))]
-        dropped = len(raw) - len(items)
-        out[key] = items
-        cnt = f"{key}_count"
-        if cnt in out:
-            out[cnt] = max(0, int(out.get(cnt) or 0) - dropped)
-    out["status"] = "issues" if any(int(out.get(f"{k}_count", len(out.get(k) or [])) or 0) for k in ("modified", "missing", "extra")) else "ok"
-    return out
-
-
 class Site(Base):
     __tablename__ = "sites"
 
@@ -56,7 +24,7 @@ class Site(Base):
 
     # stato ultimo check (denormalizzato: con 30-100 siti va benissimo)
     last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="unknown")   # ok | error | dns_error | unknown
+    status: Mapped[str] = mapped_column(String(20), default="unknown")   # ok | error | dns_error | check_pending | unknown
     error: Mapped[str] = mapped_column(Text, default="")
     # True se per l'episodio offline corrente la notifica Telegram e' GIA' partita con
     # successo. Evita doppioni e, soprattutto, permette di RITENTARE la notifica ai check
@@ -66,7 +34,7 @@ class Site(Base):
     offline_notified: Mapped[bool] = mapped_column(Boolean, default=False)
     # primo errore dell'episodio in corso: l'avviso parte solo dopo N minuti di errori continui
     offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # diagnostica dal connettore: spazio davvero scrivibile, cartelle, peso, verifica del core
+    # Campi legacy conservati per compatibilità del database; diagnostica rimossa
     diag_json: Mapped[str] = mapped_column(Text, default="")
     diag_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # ultimo controllo in cui il sito NON ha potuto verificare gli aggiornamenti (cache di
@@ -92,14 +60,9 @@ class Site(Base):
         return sorted(self.locked_set)
 
     @property
-    def diag(self) -> dict | None:
-        try:
-            d = json.loads(self.diag_json) if self.diag_json else None
-        except Exception:  # noqa: BLE001
-            return None
-        if isinstance(d, dict) and isinstance(d.get("core"), dict):
-            d["core"] = clean_core_check(d["core"])
-        return d
+    def diag(self) -> None:
+        """Retired diagnostic snapshots are kept in storage but never exposed."""
+        return None
 
     # silenzia gli avvisi del singolo sito senza interrompere monitoraggio/update
     notifications_silenced: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -109,6 +72,7 @@ class Site(Base):
     domain_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     domain_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     domain_check_error: Mapped[str] = mapped_column(Text, default="")
+    domain_check_details: Mapped[str] = mapped_column(Text, default="")
     # JSON {"expires":"YYYY-MM-DD","sent":[30,14,7]} per evitare doppioni
     domain_alert_state: Mapped[str] = mapped_column(Text, default="")
     # dove e' registrato il dominio (dallo scan RDAP/WHOIS)
@@ -299,14 +263,6 @@ class VulnMatch(Base):
     vulnerability: Mapped["Vulnerability"] = relationship()
 
 
-class ServerResourceSample(Base):
-    __tablename__ = "server_resource_samples"
-    __table_args__ = (Index("ix_server_resources_site_time", "site_id", "captured_at"),)
-
-    sample_key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
-    captured_at: Mapped[int] = mapped_column(BigInteger, index=True)
-    payload: Mapped[str] = mapped_column(Text)
 
 
 class AppSetting(Base):
@@ -317,24 +273,8 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
 
 
-class NightlyBatch(Base):
-    """Durable nightly collection and independent delivery receipts per channel."""
-    __tablename__ = "nightly_batches"
-    id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    ready: Mapped[bool] = mapped_column(Boolean, default=False)
-    context_json: Mapped[str] = mapped_column(Text, default="")
-    email_sent: Mapped[bool] = mapped_column(Boolean, default=False)
-    telegram_sent: Mapped[bool] = mapped_column(Boolean, default=False)
-    closed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
-class NightlyItem(Base):
-    __tablename__ = "nightly_items"
-    batch_id: Mapped[str] = mapped_column(ForeignKey("nightly_batches.id", ondelete="CASCADE"), primary_key=True)
-    site_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    completed: Mapped[bool] = mapped_column(Boolean, default=False)
-    payload_json: Mapped[str] = mapped_column(Text, default="")
 
 
 class UpdateHistory(Base):
@@ -403,22 +343,6 @@ class Package(Base):
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class SiteSize(Base):
-    """Peso del sito nel tempo: una riga al giorno (uploads, plugin, temi, database, totale)."""
-    __tablename__ = "site_sizes"
-    __table_args__ = (UniqueConstraint("site_id", "day", name="uq_site_sizes_site_day"),)
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
-    day: Mapped[date] = mapped_column(Date, index=True)
-    total: Mapped[int] = mapped_column(BigInteger, default=0)
-    files_total: Mapped[int] = mapped_column(BigInteger, default=0)
-    uploads: Mapped[int] = mapped_column(BigInteger, default=0)
-    plugins: Mapped[int] = mapped_column(BigInteger, default=0)
-    themes: Mapped[int] = mapped_column(BigInteger, default=0)
-    content_other: Mapped[int] = mapped_column(BigInteger, default=0)
-    core: Mapped[int] = mapped_column(BigInteger, default=0)
-    db: Mapped[int] = mapped_column(BigInteger, default=0)
-    complete: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Client(Base):

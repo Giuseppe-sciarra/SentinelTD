@@ -21,18 +21,11 @@ Your server, your data, your branding.
   attempts retry after the configured interval; the last good image retains its real date.
   Actual execution may be delayed by the queue
 - Folders (clients), tags, quick filters, search and CSV export
-- **Site diagnostics**: writable space measured by really writing to the site — not the free
-  disk figure, which describes the host's disk and ignores the account quota — plus temporary
-  folder, permissions, PHP version and memory, zip support. Before a large update the connector
-  warns when space is short, instead of failing with a cryptic unzip error
+
 - **WordPress core check** against the official wordpress.org checksums: modified, missing and
   extra files in `wp-admin` and `wp-includes`, with a notification when the result changes
-- **Site size history**: files by category (media, plugins, themes, core, the rest) and database,
-  collected every night and kept for two years, with a chart and the 30-day trend
-- **Space and logs watch**: the nightly diagnostics writes a 50 MB test on every site and lists the
-  logs over 10 MB, inside the site and in the account folder next to it (where cPanel keeps
-  `~/logs`). One notification per site when space runs low or a large log appears, then only
-  when something changes
+
+
 
 **Updates**
 - Update one site, a selection or the whole fleet — by hand or with the **hourly automatic
@@ -107,8 +100,7 @@ Your server, your data, your branding.
 - **Monthly PDF report**, global or one per folder, sent automatically on the day and at the
   time you choose (hours and minutes)
 - **Site status** in every report: for each site CMS and version, PHP with its support state,
-  domain expiry, size and its growth over the last month, database, writable space and core
-  files, with the values that need attention in red
+  domain expiry and current warnings
 - **Client reports**: every client receives each month the report of **their own sites only**,
   at their own addresses — never yours, never Telegram — signed "Report by" your company.
   Sites and clients are many-to-many: usually one site per client, but a **group** (for example
@@ -122,10 +114,6 @@ Your server, your data, your branding.
   any range of months, with the full history of every update
 - Statistics with daily, monthly and month-against-month views, rankings of the most updated
   sites and components
-- **Server status**: one row per server (or per client folder) that opens: sites, PHP versions,
-  **load and RAM over the last 24 hours** (usual value, peak with its time, chart) and disk, size with
-  its 30-day trend, updates, domains and the problems of each site, with ⓘ explanations; servers behind the same IP (say a WordPress and a Joomla container) can be
-  **split by machine** in Settings, each with its own load, RAM and disk
 - **The panel updates itself**: dots, badges and the open site page follow the real state within
   a few seconds, without reloading. Every 6 seconds the browser asks for a one-line fingerprint
   of the fleet (an empty `304` when nothing changed) and downloads the list only when it did
@@ -216,9 +204,7 @@ A site can also be added by hand: install the package, copy the token the connec
 paste it when adding the site in the panel. The sources live in `connectors/` and are neutral —
 no address, no key — so anyone can build their own; see `connectors/README.md`.
 
-Diagnostics, site size and *Take from a site* need **connector 2.19 or later on WordPress and
-1.30 or later on Joomla**. Until a site has run diagnostics, the *Diagnostics* box on its page
-says which connector it needs.
+WordPress package export (*Take from a site*) needs connector 2.19 or later. Additional site diagnostics have been removed in 2.28.15.
 
 ---
 
@@ -245,9 +231,7 @@ says which connector it needs.
 
 ---
 
-Resource readings (CPU load, RAM and disk) use an independent timer, every 5 minutes
-by default, configurable in Settings. The server status page refreshes every 30 seconds
-while visible. Each resource shows its measurement age.
+Server resource monitoring and its nightly summary have been removed in 2.28.14.
 
 ## Updates
 
@@ -294,8 +278,7 @@ with them your history and settings.
   panel. `docker compose logs worker | grep "UPDATE FALLITO"` shows the real reason returned by
   each site.
 - **An update fails with `PCLZIP_ERR_BAD_FORMAT` or "not enough space"** — the hosting quota is
-  probably full, even if the server disk is not. On the site page, *Run diagnostics* writes real
-  data to the site and says how much space is actually writable.
+  probably full, even if the server disk is not. Check the account quota in the hosting control panel. Synthetic write probes have been removed.
 - **Updates time out on a cheap shared hosting** — put the brake on that server in
   *Settings → Site servers*: fewer sites at a time, a rest after each site and a longer pause
   between updates on the same site.

@@ -57,4 +57,7 @@ then use *Install* from the sites list on all WordPress or Joomla sites: the sam
 and element names mean the new version installs over the old one, keeping each site's
 token and connection.
 
-Linux resource fallbacks are documented in [the 2.28.6 update](../docs/AGGIORNAMENTO-2.28.6.md).
+
+WordPress 2.31.0 and Joomla 1.39.0 no longer collect CPU, RAM or server disk metrics. The Linux collectors and their command fallbacks have been removed.
+
+WordPress 2.32.0 and Joomla 1.40.0 also remove site diagnostics, large-log discovery, core-file checks, size scans and synthetic space probes. No extra probe is run before or after updates or backups.

@@ -44,6 +44,7 @@ async def run_migrations(conn) -> None:
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_checked_at TIMESTAMPTZ NULL"))
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_check_error TEXT NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_alert_state TEXT NOT NULL DEFAULT ''"))
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_check_details TEXT NOT NULL DEFAULT ''"))
     # registro globale plugin/temi/licenze: sganciato dai singoli siti.
     await conn.execute(text("ALTER TABLE site_expiries ADD COLUMN IF NOT EXISTS category VARCHAR(40) NOT NULL DEFAULT 'Licenza'"))
     await conn.execute(text("ALTER TABLE site_expiries ADD COLUMN IF NOT EXISTS platform VARCHAR(20) NOT NULL DEFAULT 'both'"))

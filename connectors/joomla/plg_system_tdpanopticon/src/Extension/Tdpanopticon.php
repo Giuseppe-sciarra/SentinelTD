@@ -8,9 +8,7 @@ use Joomla\CMS\Factory;
 use Joomla\CMS\Updater\Updater;
 use Joomla\CMS\Installer\Installer;
 use Joomla\CMS\Installer\InstallerHelper;
-use TastiereDigitali\Sentinel\LinuxMetrics;
 
-require_once dirname(__DIR__) . "/Support/LinuxMetrics.php";
 
 final class Tdpanopticon extends CMSPlugin
 {
@@ -94,66 +92,6 @@ final class Tdpanopticon extends CMSPlugin
         return preg_match('/<version>\s*([^<\s]+)\s*<\/version>/', $raw, $m) ? $m[1] : '0';
     }
 
-    public static function parseMeminfo(string $raw): array
-    {
-        return LinuxMetrics::parseMeminfo($raw);
-    }
-
-    public static function parseFree(string $raw): array
-    {
-        return LinuxMetrics::parseFree($raw);
-    }
-
-    private function memInfo(): array
-    {
-        return LinuxMetrics::memoryInfo();
-    }
-
-    private function serverInfo(): array
-    {
-        return LinuxMetrics::collect(JPATH_ROOT) + [
-            'software' => isset($_SERVER['SERVER_SOFTWARE']) ? substr((string) $_SERVER['SERVER_SOFTWARE'], 0, 80) : '',
-            'sapi' => PHP_SAPI, 'os' => PHP_OS_FAMILY,
-            'hostname' => function_exists('gethostname') ? (string) @gethostname() : '',
-        ];
-    }
-
-    private function isBigLog(string $name, int $size): bool
-    {
-        if ($size < 10 * 1048576) {
-            return false;
-        }
-        $n = strtolower($name);
-        return $n === 'error_log' || $n === 'php_errorlog' || $n === 'php_error_log'
-            || substr($n, -4) === '.log' || substr($n, -10) === '.error.log' || substr($n, -8) === '.log.php';
-    }
-
-    /** Log grandi fuori dal sito ma dello stesso account: home dell'utente e sua cartella "logs" (cPanel). */
-    private function outsideLogs(string $root): array
-    {
-        $out = [];
-        $home = dirname(rtrim($root, '/'));
-        foreach ([$home, $home . '/logs'] as $dir) {
-            if ($dir === '' || $dir === '/' || !is_dir($dir) || !is_readable($dir)) {
-                continue;
-            }
-            foreach ((array) @scandir($dir) as $name) {
-                if ($name === '.' || $name === '..') {
-                    continue;
-                }
-                $p = $dir . '/' . $name;
-                if (!is_file($p) || is_link($p)) {
-                    continue;
-                }
-                $sz = (int) @filesize($p);
-                if ($this->isBigLog($name, $sz)) {
-                    $out[] = ['path' => $p, 'bytes' => $sz, 'outside' => true];
-                }
-            }
-        }
-        return $out;
-    }
-
     private function yoothemeFlushFlag(): string
     {
         return rtrim((string) Factory::getApplication()->get('tmp_path', JPATH_ROOT . '/tmp'), '/\\') . '/tdpanop_flush_yootheme.flag';
@@ -221,7 +159,7 @@ final class Tdpanopticon extends CMSPlugin
             return $this->doVendorUpdate();
         }
         if ($task === 'diagnostics') {
-            return $this->doDiagnostics();
+            return ['ok' => false, 'error' => 'Diagnostica rimossa dal connettore'];
         }
         if ($task === 'refresh') {
             // Refresh ESPLICITO degli update: contatta i server di update e ripopola
@@ -411,8 +349,6 @@ final class Tdpanopticon extends CMSPlugin
         return [
             'cms'  => 'joomla',
             'connector' => $this->connectorVersion(),   // il pannello sa quale versione gira su ogni sito
-            // carico e disco a ogni controllo (letture istantanee): il pannello ne tiene 24 ore
-            'server' => $this->serverInfo(),
             'core' => ['current' => $core_current, 'latest' => $core_latest, 'update' => $core_update],
             'php'  => PHP_VERSION,
             'extensions' => $extensions,
@@ -1321,211 +1257,6 @@ final class Tdpanopticon extends CMSPlugin
             ->where($db->quoteName('extension_id') . ' = ' . $eid);
         $db->setQuery($q);
         $db->execute();
-    }
-
-    /* -----------------------------------------------------------------------
-     * DIAGNOSTICA (1.30.0): spazio davvero scrivibile, cartelle, peso del sito.
-     * task=diagnostics&space=MB&sizes=0|1
-     * La verifica dei file del core non c'e': Joomla non pubblica impronte file per file.
-     * --------------------------------------------------------------------- */
-    private function doDiagnostics(): array
-    {
-        $maxExec = (int) ini_get('max_execution_time');   // prima di alzarlo per la diagnostica
-        @set_time_limit(180);
-        $app   = Factory::getApplication();
-        $in    = $app->getInput();
-        $space = $in->getInt('space', 0);
-        $sizes = $in->getInt('sizes', 1);
-        $tmp   = rtrim((string) $app->get('tmp_path', JPATH_ROOT . '/tmp'), '/\\');
-
-        $out = [
-            'diagnostics'        => 1,
-            'cms'                => 'joomla',
-            'php'                => PHP_VERSION,
-            'memory_limit'       => (string) ini_get('memory_limit'),
-            'max_execution_time' => $maxExec,
-            'zip'                => class_exists('ZipArchive'),
-            'temp_dir'           => $tmp,
-            'temp_writable'      => is_dir($tmp) && is_writable($tmp),
-            'content_writable'   => is_writable(JPATH_ROOT),
-            'server'             => $this->serverInfo(),   // carico, disco, software: per la pagina Stato server
-            'disk_free'          => function_exists('disk_free_space') ? (float) @disk_free_space(JPATH_ROOT) : null,
-            'core'               => ['status' => 'unsupported'],
-        ];
-        if ($space > 0) {
-            $out['space'] = $this->spaceCheck($tmp, min(400, $space));
-        }
-        if ($sizes) {
-            $out['sizes'] = $this->siteSizes();
-        }
-        return $out;
-    }
-
-    /** Prova di scrittura vera (stessa logica del connettore WordPress). */
-    private function spaceProbe(string $dir, int $mb): array
-    {
-        $mb  = max(1, min(400, $mb));
-        $out = ['dir' => $dir, 'tested_mb' => $mb, 'written_mb' => 0.0, 'ok' => false, 'error' => '', 'seconds' => 0.0];
-        if ($dir === '' || !is_dir($dir) || !is_writable($dir)) {
-            $out['error'] = 'cartella non scrivibile';
-            return $out;
-        }
-        $t0   = microtime(true);
-        $file = $dir . '/tdpanop-space-' . bin2hex(random_bytes(5)) . '.tmp';
-        $fh   = @fopen($file, 'wb');
-        if (!$fh) {
-            $out['error'] = 'impossibile creare un file di prova';
-            return $out;
-        }
-        $chunk   = random_bytes(1048576);   // casuali: gli zeri su un disco compresso non occupano spazio
-        $len     = strlen($chunk);
-        $written = 0;
-        $failed  = false;
-        for ($i = 0; $i < $mb; $i++) {
-            $w = @fwrite($fh, $chunk);
-            if ($w === false || $w < $len) {
-                $written += max(0, (int) $w);
-                $failed = true;
-                break;
-            }
-            $written += $w;
-            if ($i % 16 === 15 && !@fflush($fh)) {
-                $failed = true;
-                break;
-            }
-        }
-        if (!@fflush($fh)) {
-            $failed = true;
-        }
-        if (!@fclose($fh)) {
-            $failed = true;
-        }
-        clearstatcache(true, $file);
-        $size = (int) @filesize($file);
-        @unlink($file);
-        $real = min($written, $size);
-        $out['written_mb'] = round($real / 1048576, 1);
-        $out['ok']         = !$failed && $real >= $mb * $len;
-        $out['seconds']    = round(microtime(true) - $t0, 2);
-        if (!$out['ok'] && $out['error'] === '') {
-            $out['error'] = 'scrittura interrotta';
-        }
-        return $out;
-    }
-
-    private function spaceCheck(string $tmp, int $mb): array
-    {
-        $dirs = [$tmp];
-        $st1  = @stat($tmp);
-        $st2  = @stat(JPATH_ROOT);
-        if (!$st1 || !$st2 || $st1['dev'] !== $st2['dev']) {
-            $dirs[] = JPATH_ROOT;
-        }
-        $probes = [];
-        $ok     = true;
-        $min    = null;
-        foreach ($dirs as $d) {
-            $p        = $this->spaceProbe($d, $mb);
-            $probes[] = $p;
-            if (!$p['ok']) {
-                $ok = false;
-            }
-            $min = ($min === null) ? $p['written_mb'] : min($min, $p['written_mb']);
-        }
-        return ['ok' => $ok, 'tested_mb' => $mb, 'written_mb' => (float) $min, 'cached' => false, 'probes' => $probes];
-    }
-
-    /**
-     * Peso del sito per parti, con le stesse chiavi di WordPress: uploads = images,
-     * plugins = estensioni (componenti, moduli, plugin, librerie), themes = template,
-     * content_other = media, cache, tmp e log, core = il resto.
-     */
-    private function siteSizes(float $budget = 25.0): array
-    {
-        $t0   = microtime(true);
-        $root = rtrim(str_replace('\\', '/', JPATH_ROOT), '/');
-        $map  = [
-            'images/' => 'uploads',
-            'components/' => 'plugins', 'modules/' => 'plugins', 'plugins/' => 'plugins', 'libraries/' => 'plugins',
-            'administrator/components/' => 'plugins', 'administrator/modules/' => 'plugins',
-            'templates/' => 'themes', 'administrator/templates/' => 'themes',
-            'media/' => 'content_other', 'cache/' => 'content_other', 'tmp/' => 'content_other',
-            'administrator/cache/' => 'content_other', 'administrator/logs/' => 'content_other', 'logs/' => 'content_other',
-        ];
-        // i prefissi piu' lunghi prima ("administrator/components/" prima di "components/")
-        uksort($map, function ($a, $b) {
-            return strlen($b) - strlen($a);
-        });
-        $b        = ['uploads' => 0, 'plugins' => 0, 'themes' => 0, 'content_other' => 0, 'core' => 0];
-        $complete = true;
-        $bigLogs = [];   // log grandi dentro il sito: riempiono lo spazio in silenzio
-        $files    = 0;
-        try {
-            $it = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
-                \RecursiveIteratorIterator::LEAVES_ONLY,
-                \RecursiveIteratorIterator::CATCH_GET_CHILD
-            );
-            foreach ($it as $f) {
-                if (++$files % 500 === 0 && (microtime(true) - $t0) > $budget) {
-                    $complete = false;
-                    break;
-                }
-                try {
-                    if (!$f->isFile()) {
-                        continue;
-                    }
-                    $sz = (int) $f->getSize();
-                } catch (\Throwable $e) {
-                    continue;
-                }
-                $rel = ltrim(substr(str_replace('\\', '/', $f->getPathname()), strlen($root)), '/');
-                $key = 'core';
-                foreach ($map as $prefix => $bucket) {
-                    if (strpos($rel, $prefix) === 0) {
-                        $key = $bucket;
-                        break;
-                    }
-                }
-                $b[$key] += $sz;
-                if (count($bigLogs) < 20 && $this->isBigLog($f->getFilename(), $sz)) {
-                    $bigLogs[] = ['path' => str_replace('\\', '/', $f->getPathname()), 'bytes' => $sz, 'outside' => false];
-                }
-            }
-        } catch (\Throwable $e) {
-            $complete = false;
-        }
-        foreach ($this->outsideLogs($root) as $l) {
-            if (count($bigLogs) < 30) {
-                $bigLogs[] = $l;
-            }
-        }
-        usort($bigLogs, static function ($x, $y) { return $y['bytes'] <=> $x['bytes']; });
-        $b['big_logs'] = $bigLogs;
-        $b['db']          = $this->dbSize();
-        $b['files_total'] = $b['uploads'] + $b['plugins'] + $b['themes'] + $b['content_other'] + $b['core'];
-        $b['total']       = $b['files_total'] + $b['db'];
-        $b['complete']    = $complete;
-        $b['files']       = $files;
-        $b['seconds']     = round(microtime(true) - $t0, 2);
-        return $b;
-    }
-
-    /** Dimensione del database del sito (solo le tabelle col suo prefisso). */
-    private function dbSize(): int
-    {
-        try {
-            $app    = Factory::getApplication();
-            $db     = Factory::getContainer()->get('DatabaseDriver');
-            $prefix = (string) $app->get('dbprefix', '');
-            $name   = (string) $app->get('db', '');
-            $q = 'SELECT SUM(data_length + index_length) FROM information_schema.TABLES WHERE table_schema = '
-               . $db->quote($name) . ' AND table_name LIKE ' . $db->quote(str_replace('_', '\\_', $prefix) . '%');
-            $db->setQuery($q);
-            return (int) $db->loadResult();
-        } catch (\Throwable $e) {
-            return 0;
-        }
     }
 
     private function checkAuth(): bool

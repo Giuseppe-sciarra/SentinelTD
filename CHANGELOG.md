@@ -1,5 +1,136 @@
 # Changelog
 
+## 2.28.15
+
+- Completely retire site diagnostics: remove the action, endpoint, worker requests,
+  recursive size/log scans, core checksum checks and synthetic space-write tests.
+- Remove both notification events (Space and logs / Core files to check), previews,
+  dispatch helpers and diagnostic findings from dashboard and monthly/client reports.
+  Migrate known prior default report templates to the current version.
+- WordPress **2.32.0** also removes write probes before plugin/theme/core updates and
+  backups, probes after failed updates, and package-size HEAD requests for those probes.
+  Normal CMS updates, actual backups and their error handling remain available.
+- Joomla **1.40.0** removes diagnostic scans and write probes; obsolete diagnostic
+  tasks return an explicit retired response without reading site files.
+- Discard previously queued diagnostic jobs without HTTP requests or notifications.
+  Legacy database data remains stored but is no longer exposed or scanned.
+
+## 2.28.14
+
+- Remove the Server status menu/page, overview endpoint, resource history, periodic
+  CPU/RAM/disk sampling, related settings and machine splitting.
+- Remove the nighttime diagnostics batch, its scheduled delivery and the server
+  notification event, examples and rendering. Previously queued batch diagnostics
+  become no-ops. Manual site diagnostics remain available.
+- WordPress connector **2.31.0** and Joomla connector **1.39.0** remove the Linux
+  collectors, command fallbacks and resource collection from status/diagnostics.
+  Rebuild both installable connector packages.
+- Keep dashboard warnings available through a separate read-only endpoint using
+  existing site records, with no server sampling or extra site requests.
+- Coordinate ordinary connector status GETs across API and worker: at most two
+  concurrent requests overall, one per resolved server IP, with a two-second pause.
+  Repeated Check all clicks cannot start overlapping batches; disabled sites are skipped.
+- Apply the configured offline confirmation window to transient manual/pre-update
+  check timeouts as well. Pending checks are shown as warnings and retried in one
+  minute. Connection allowance is 15 seconds; response time is bounded. HTTP overload
+  responses no longer trigger an extra alternative WordPress REST request.
+- Do not delete existing database tables or site data during upgrade. Old resource
+  snapshots are no longer exposed through site diagnostics.
+
+## 2.28.13
+
+- Rename the CPU load column in the server overview to "CPU · Carico", with translations
+  in English, French and German. Sorting and detailed CPU metrics keep their behavior.
+- Refresh dashboard problems and security counters on every dashboard entry, on site
+  changes, when the tab becomes visible and every minute while visible. Security scans
+  no longer require visiting the security page before dashboard alerts appear.
+- Keep critical security alerts in the first dashboard rows, show a link for further
+  alerts, and distinguish loading/failed requests from a successfully empty alert list.
+  Disabled or removed sites are excluded from the dashboard's site warnings.
+- Fix narrow-screen topbar overflow: actions and language selection wrap instead of
+  extending beyond the viewport. Dashboard warning rows stack on small screens.
+- Refresh open security/domain/component-expiry views independently of CMS checks;
+  refresh server data immediately after site changes. DNS problems have a server filter.
+- Do not display unknown free disk space as zero (a false 100% used). Missing CPU,
+  RAM and disk readings are labeled unavailable without promising imminent arrival.
+- When server readings remain partial, the next resource cycle tries other sites on
+  the same server instead of permanently checking only the first three. Each cycle
+  still makes at most three connector requests and prefers a complete connector found.
+  Partial readings log the connector version, missing fields and measurement sources.
+- The Linux collectors already support native PHP, /proc and bounded command fallbacks
+  on both CMS platforms. Missing metrics are not replaced with PHP process memory.
+
+### Verified
+- 147 Python tests, including rotation across partial server readings and unknown/free
+  disk-space handling; 7 dashboard behavior tests and 5 translation tests.
+- Real-template browser checks cover dashboard loading/failure/resolution, critical
+  alerts and overflow, mobile layout, the CPU heading and WHOIS pacing/source UI.
+
+## 2.28.12
+
+### Fixed
+- Domain checks run one domain at a time, with a configurable pause (default 30 seconds)
+  shared by manual/automatic scans in each worker. Each public source also has a request
+  gate so waiting for a slot cannot consume its network timeout.
+- Up to three configurable attempts per source on transient failures, with 15/30-second
+  backoff and bounded Retry-After handling. Registry timeout is 20 seconds; HTTPS read
+  timeout is 20 seconds and connect timeout is 10 seconds. CAPTCHA, invalid domains and
+  missing expiry fields are explicit failures, without blind retries.
+- Configured scan days use calendar days to avoid a daily cron missing its due date
+  just because the previous lookup completed a few minutes after the cron time.
+- Automatic scans persist each completed domain immediately. Cron and manual jobs allow
+  six hours for a paced batch; selected domains use one job rather than filling worker
+  slots with individually waiting jobs. Failed checks preserve known dates and retry daily.
+- Existing multi-source comparison, .it renewal status, DNS retries, resource history,
+  screenshots and WordPress/Joomla connectors are retained.
+
+### Verified
+- 144 Python tests, including cross-job domain pacing, per-source pacing, timeout isolation,
+  retry recovery/exhaustion, configured-day intervals, immediate persistence and preferences.
+- 5 translation tests and real-template browser checks verify default pacing, saved
+  pause/attempt/scan-day values, source comparison, progress, renewal state and mobile.
+
+## 2.28.11
+
+### Added
+- Compare registry WHOIS, RDAP where supported, who.is and whois.com on every domain lookup,
+  with sequential source requests, bounded timeouts and recorded source evidence in PostgreSQL.
+- Select a newer domain record or comparable newer snapshot; prefer current authoritative
+  data over undated web copies. Unresolved conflicts preserve the known expiry and suppress
+  misleading expiry alerts. A longer expiry alone never indicates fresher data.
+- Expandable source comparison shows dates, record updates, snapshot times and source failures.
+- Recognize fresh .it ok/autoRenewPeriod as renewal in progress, for its documented 15-day
+  window, without inventing next year’s expiry. Inactive or stale states remain visible.
+- Existing sequential domain scan, progress, DNS retries, persistent resource history and
+  WordPress 2.30.0 / Joomla 1.38.0 connectors are retained.
+
+### Verified
+- 121 Python regression tests and 5 translation tests. Real-template browser checks
+  cover source comparison, renewal state, sequential progress, visible failures,
+  automatic refresh and mobile layout.
+- The who.is parser also reads the actual vivaiomares.it HTML response received
+  during verification; no future expiry was invented.
+
+## 2.28.10
+
+### Fixed
+- .it lookups query the registry WHOIS at whois.nic.it before secondary web pages.
+  RDAP remains the first source for other extensions. HTTPS fallback remains available;
+  an expired secondary result is marked unverified if the registry cannot be reached.
+- Failed lookups preserve the previous date, display the error even when a date exists,
+  retry at the next daily scan and suppress expiry reminders based on unverified data.
+- WHOIS updates participate in the panel change fingerprint. Manual refresh waits for
+  completed checks rather than reloading once after twelve seconds. Domain groups use
+  their most recently checked date and stale scan results cannot overwrite newer ones.
+- Domain expiry page now has "Aggiorna tutti in sequenza", one domain at a time, with
+  completed/total/error progress and immediate persistence after each domain. Duplicate
+  sequential requests are rejected while a scan is queued or running.
+
+### Verified
+- 94 Python regression tests, 5 translation tests, and real-template browser checks for
+  sequential progress, renewed dates, visible failures and automatic panel refresh.
+- Existing DNS retries, persistent resource history and connector versions are retained.
+
 ## 2.28.9
 
 ### Fixed
