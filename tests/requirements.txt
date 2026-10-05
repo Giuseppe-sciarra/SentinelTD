@@ -14,3 +14,4 @@ python-jose[cryptography]==3.4.0
 bcrypt==4.2.1
 pyotp==2.9.0
 python-multipart==0.0.31
+lupa>=2.0          # fakeredis esegue gli script Lua del semaforo dei controlli (test_check_gate) solo con lupa

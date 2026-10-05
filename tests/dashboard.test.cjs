@@ -72,11 +72,41 @@ test('repeated check-all click starts one batch and excludes disabled sites',asy
 });
 test('saving preferences retains update brakes and omits removed resource settings',async()=>{
  const {a}=app();a.prefsLoaded=true;a.prefs.server_limited=['203.0.113.1'];let sent;
+ assert.equal(a.prefs.status_check_attempts,3);assert.equal(a.prefs.status_check_retry_seconds,15);
+ a.prefs.status_check_attempts=2;a.prefs.status_check_retry_seconds=7;
  a.api=async(url,opts)=>{sent=JSON.parse(opts.body);return {ok:true,json:async()=>sent}};
  await a.savePrefs();assert.deepEqual(sent.server_limited,['203.0.113.1']);
+ assert.equal(sent.status_check_attempts,2);assert.equal(sent.status_check_retry_seconds,7);
  for(const key of ['server_metrics_enabled','server_metrics_minutes','server_split'])assert(!(key in sent));
 });
-test('old server-status bookmark returns to dashboard',()=>{
- const {a,context}=app();context.location={hash:'#/servers'};a._readHash();assert.equal(a.route.page,'dashboard');
+test('#/servers opens the lightweight Servers page (no server status, no sampling)',()=>{
+ const {a,context}=app();context.location={hash:'#/servers'};a._readHash();assert.equal(a.route.page,'servers');
+ // la vecchia pagina Stato server con CPU/RAM resta rimossa: niente funzioni di campionamento
  assert.equal(a.loadServerStatus,undefined);
+ assert.equal(typeof a.loadServersPage,'function');
+ // la pagina vive solo di dati gia' noti: un'unica lettura dell'elenco server, nessun'altra richiesta
+ assert.deepEqual(Object.keys(a.srvpg),['list','q','open','editing','busy']);
+});
+test('offline log reads history without launching checks and preserves data on failure',async()=>{
+ const {a}=app();a.route.page='stats';a.statsTab='offline';
+ const data={items:[],total:0,sites:[],servers:[],limit:50};
+ a.payloads['/api/availability?days=30&offset=0']=data;
+ await a.refreshActiveView();assert.equal(a.outages.data,data);assert.equal(a.outages.error,false);
+ assert.deepEqual(a.calls,['/api/availability?days=30&offset=0']);
+ delete a.payloads['/api/availability?days=30&offset=0'];await a.loadOutages();
+ assert.equal(a.outages.error,true);assert.equal(a.outages.data,data);
+});
+test('offline log ignores old responses when filters change during a refresh',async()=>{
+ const {a}=app();let release;const gate=new Promise(r=>release=r);let calls=0;
+ a.api=async()=>{if(++calls===1){await gate;return {ok:true,json:async()=>({items:[{id:1}]})}}return {ok:true,json:async()=>({items:[{id:2}]})}};
+ const first=a.loadOutages();await a.outageFilter(2,'host:example.test');release();await first;
+ assert.equal(a.outages.data.items[0].id,2);assert.equal(a.outages.site,'2');assert.equal(a.outages.offset,0);
+});
+test('offline times use Rome daylight saving even when browser timezone differs',()=>{
+ const {a}=app();
+ assert.match(a.outageDate('2026-07-01T22:30:00Z'),/02\/07\/2026.*00:30:00.*\+2/);
+ assert.match(a.outageDate('2026-12-01T22:30:00Z'),/01\/12\/2026.*23:30:00.*\+1/);
+ assert.equal(a.outageUtc('2026-07-01T22:30:00Z'),'2026-07-01 22:30:00 UTC');
+ assert.equal(a.outageUtc('2026-07-01T22:30:00.123Z'),'2026-07-01 22:30:00 UTC');
+ assert.equal(a.outageDuration({ended_at:'2026-01-01T01:00:00Z',duration_seconds:3661}),'1 h 1 min 1 s');
 });

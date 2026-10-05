@@ -94,6 +94,9 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 **Sicurezza e scadenze**
 - Vulnerabilità note confrontate con le estensioni realmente installate, con gravità e
   versione che risolve
+- **Gestione server**: dove sta ogni sito, raggruppati per server (l'IP del dominio) con il nome che gli
+  dai, un pulsante al pannello dell'hosting e un appunto; cerchi un sito e sai su che hosting sta.
+  Nessuna statistica: sugli hosting non si misura niente
 - **Plugin abbandonati**: tutti i plugin WordPress del parco con l'ultimo aggiornamento dell'autore,
   la versione "testato fino a" e le chiusure prese da wordpress.org (aggiornate ogni settimana) —
   plugin chiusi e plugin fermi da anni, con i siti che li usano ancora

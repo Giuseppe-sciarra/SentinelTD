@@ -150,6 +150,43 @@ class ConnectorRetryTests(unittest.IsolatedAsyncioTestCase):
         self.sleep.assert_not_awaited()
 
 
+class RetryPreferencesTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        await fixtures.SchedulerTests.asyncSetUp(self)
+        self.site = SimpleNamespace(id=63, name='Test', cms='wp', url='https://example.test', token='test')
+
+    async def asyncTearDown(self):
+        await fixtures.SchedulerTests.asyncTearDown(self)
+
+    async def test_saved_api_preferences_change_the_next_check_without_restart(self):
+        from app.routers.preferences import get_preferences, put_preferences
+        prefs = await get_preferences()
+        self.assertEqual((prefs['status_check_attempts'], prefs['status_check_retry_seconds']), (3, 15))
+        await put_preferences(prefs | {'status_check_attempts': 2, 'status_check_retry_seconds': 7})
+        once = AsyncMock(side_effect=[httpx.ConnectTimeout('connect'), {'cms': 'wp'}])
+        sleep = AsyncMock()
+        with patch.object(connectors, '_fetch_status_once', once), patch.object(connectors.asyncio, 'sleep', sleep):
+            self.assertEqual(await connectors.fetch_status(self.site), {'cms': 'wp'})
+        self.assertEqual(once.await_count, 2)
+        sleep.assert_awaited_once_with(7)
+        saved = await get_preferences()
+        await put_preferences(saved | {'status_check_attempts': 1})
+        once = AsyncMock(side_effect=httpx.ConnectTimeout('connect'))
+        with patch.object(connectors, '_fetch_status_once', once), patch.object(connectors.asyncio, 'sleep', AsyncMock()) as sleep:
+            with self.assertRaises(httpx.ConnectTimeout):
+                await connectors.fetch_status(self.site)
+        self.assertEqual(once.await_count, 1)
+        sleep.assert_not_awaited()
+
+    async def test_api_normalizes_retry_limits_and_preserves_other_preferences(self):
+        from app.routers.preferences import get_preferences, put_preferences
+        prefs = await get_preferences()
+        saved = await put_preferences(prefs | {'status_check_attempts': 99, 'status_check_retry_seconds': 0})
+        self.assertEqual((saved['status_check_attempts'], saved['status_check_retry_seconds']), (5, 1))
+        self.assertEqual(saved['offline_alert_minutes'], prefs['offline_alert_minutes'])
+        self.assertEqual(await get_preferences(), saved)
+
+
 class CheckStateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await fixtures.SchedulerTests.asyncSetUp(self)

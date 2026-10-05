@@ -1,3 +1,1 @@
-Sentinel TD 2.28.17
-WordPress connector 2.32.0
-Joomla connector 1.40.0
+2.29.2

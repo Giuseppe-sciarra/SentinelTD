@@ -1,5 +1,69 @@
 # Changelog
 
+## 2.29.2
+
+### Changed
+- La pagina Server si chiama **Gestione server**, nel menu e nel titolo.
+
+## 2.29.1
+
+### Changed
+- Pagina Server rifatta: **una riga per server** con colonne allineate (nome e IP, siti,
+  pulsante al pannello, appunto) che si **apre a tendina** sui siti, come la vista già scelta per
+  i server; la **matita sulla riga** apre nome, link al pannello e appunto con Salva e Annulla.
+  La ricerca apre da sola il server trovato ed evidenzia il sito. Tolta la casella globale
+  "Modifica nomi, link e appunti" e la griglia di schede.
+
+## 2.29.0 — Pagina Server, controllo della home più robusto
+
+### Added
+- **Pagina Server** nel menu: dove sta ogni sito, una scheda per server (l'IP del dominio) con il
+  nome che gli dai, il **pulsante al pannello dell'hosting** (link che imposti tu) e un appunto
+  (provider, utente: mai password), e sotto i siti con stato, CMS, indirizzo e cartella. La
+  **ricerca** per sito, server, IP o cartella lascia solo i server che corrispondono ed evidenzia
+  il sito trovato. Nessuna statistica: nessuna richiesta in più agli hosting. Nuova impostazione
+  `server_panels` (IP → link e appunto); i nomi restano in `server_labels`. L'endpoint dei server
+  restituisce anche i siti con id, URL, CMS, stato e cartella.
+
+### Changed
+- **Controllo della home dopo gli aggiornamenti**, contro i falsi "cambiata" degli hosting lenti e
+  degli header con video o slider. Tre leve in Impostazioni (di base attive):
+  - **attesa prima della foto "dopo"** (`visual_after_delay`, 30 secondi, 0-180): la pagina si assesta
+  - **seconda foto** se la prima dice "cambiata" (`visual_retry`): dopo la stessa attesa, vale il
+    risultato migliore; una home rotta resta rotta, un caricamento a metà si risolve
+  - **rumore del sito** (`visual_noise`): due foto "prima" a pochi secondi; quanto differiscono
+    tra loro (video, slider, lentezza) viene **sottratto** dal confronto vero. Il messaggio lo dice:
+    "al netto del N% che la home cambia da sola". Errori e 5xx restano "rotta" a prescindere.
+  Lo shooter accetta la variante `before2` e il confronto tra due varianti qualsiasi (`a`, `b`),
+  con le zone mobili di entrambe. Costo: una foto in più per i soli siti che si aggiornano.
+
+## 2.28.18 — Pulizia, link nelle notifiche, interruttore della copia
+
+### Added
+- **Il nome del sito è un link nelle notifiche.** Telegram ed email di sito non raggiungibile,
+  di nuovo raggiungibile, aggiornamenti falliti, report del sito e ripristino automatico;
+  nel riepilogo del ciclo, sia nel blocco "Da guardare" (dove compare "la home è cambiata") sia
+  nel titolo di ogni sito. Chi aveva i testi predefiniti precedenti riceve quelli nuovi da solo;
+  i testi personalizzati non vengono toccati.
+- **Interruttore della copia di sicurezza prima degli aggiornamenti** (Impostazioni, accanto
+  al ripristino automatico; `pre_update_backup`, di base accesa). È l'operazione più pesante
+  sugli hosting. Spenta, il pannello manda `backup=0` e il connettore WordPress **2.33.0** non
+  fa lo zip; i connettori precedenti ignorano il parametro e copiano come sempre.
+
+### Fixed
+- Pulsante "Aggiorna anteprima": aspettava 30 secondi e poi diceva "non ancora pronta" anche
+  quando lo scatto stava finendo (verifiche antibot e video richiedono fino a 1-2 minuti). Ora
+  aspetta fino a ~100 secondi, e quando il sito respinge l'accesso automatico lo dice.
+- `tests/test_check_gate.py` non terminava mai: il Redis finto esegue gli script Lua del
+  semaforo solo con `lupa`, che mancava da `tests/requirements.txt`. Aggiunta; senza `lupa` il
+  test ora si dichiara saltato invece di restare appeso.
+- Residui della rimozione delle statistiche server (2.28.14) tolti: `load_history.py`,
+  `server_metrics.py`, `nightly.py`, `routers/server_status.py`, il collettore
+  `includes/linux-metrics.php` del connettore WordPress (non più caricato), le prove
+  `test_server_metrics.py`, `test_nightly_summary.py` e `linux_metrics.test.php` (non si
+  caricavano più) e il passo del workflow che lanciava quest'ultima.
+- Il file `.env` di produzione non va nel pacchetto: controlla il repository.
+
 ## 2.28.17 — Registro offline persistente
 
 - Statistiche → Registro offline: una riga per episodio confermato, primo errore,
