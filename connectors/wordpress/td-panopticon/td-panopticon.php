@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.33.0
+ * Version: 2.34.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -978,6 +978,9 @@ function tdpanop_status($req = null)
     return new WP_REST_Response([
         'cms'  => 'wp',
         'connector' => TDPANOP_VERSION,   // il pannello sa quale versione gira su ogni sito
+        // nome della macchina (una stringa, costo zero): serve a distinguere due macchine dietro
+        // lo stesso IP in Gestione server. Nessuna misura di carico, RAM o disco.
+        'hostname'  => (string) @gethostname(),
         'core' => ['current' => $core_cur, 'latest' => $core_latest, 'update' => $core_update, 'known' => $core_known],
         'php'  => PHP_VERSION,
         'extensions' => $extensions,

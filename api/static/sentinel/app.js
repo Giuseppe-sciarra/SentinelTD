@@ -43,7 +43,7 @@ function sentinel() {
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
     srvpg: { list: [], q: '', open: {}, editing: '', busy: false },   // pagina Server: dove sta ogni sito
-    tsort: {}, histQ: '', histType: '', problems: [],
+    tsort: { srvpg: { k: 'name', d: 1 } }, histQ: '', histType: '', problems: [],   // Gestione server: di base per nome server
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
            open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
@@ -468,8 +468,9 @@ function sentinel() {
         if (sub) { map[top].subs[sub] = map[top].subs[sub] || { name: sub, tag: t, sites: [] }; map[top].subs[sub].sites.push(s); }
         else map[top].sites.push(s);
       }
-      return Object.values(map).sort((a, b) => a.name.localeCompare(b.name)).map(f => {
-        const subs = Object.values(f.subs).sort((a, b) => a.name.localeCompare(b.name));
+      // cartelle: confronto numerico, cosi' "10." va dopo "9." e non tra "1." e "2."
+      return Object.values(map).sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true, sensitivity: 'base' })).map(f => {
+        const subs = Object.values(f.subs).sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true, sensitivity: 'base' }));
         const all = [...f.sites, ...subs.flatMap(x => x.sites)];
         return { ...f, subs, all, stats: this._stats(all), subStats: Object.fromEntries(subs.map(x => [x.name, this._stats(x.sites)])) };
       });
@@ -698,7 +699,7 @@ function sentinel() {
     instFolders() {
       const map = {};
       for (const s of this.instSites()) for (const t of this.siteTags(s)) map[t] = (map[t] || 0) + 1;
-      return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count }));
+      return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0], 'it', { numeric: true, sensitivity: 'base' })).map(([tag, count]) => ({ tag, count }));
     },
     _instFolderIds(tag) { return this.instSites().filter(s => this.siteTags(s).includes(tag)).map(s => s.id); },
     instFolderOn(tag) { const ids = this._instFolderIds(tag); return ids.length > 0 && ids.every(id => this.inst.sel.includes(id)); },
@@ -809,7 +810,7 @@ function sentinel() {
     domainFolders() {
       const map = {};
       for (const d of this.exp.domains) for (const t of (d.tags || [])) map[t] = (map[t] || 0) + 1;
-      return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count }));
+      return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0], 'it', { numeric: true, sensitivity: 'base' })).map(([tag, count]) => ({ tag, count }));
     },
     // cartella del dominio: stesse regole dei siti (una sottocartella appartiene anche al padre)
     _domInFolder(d, folder) {
@@ -871,7 +872,7 @@ function sentinel() {
         map.get(key).rows.push(d);
       }
       return [...map.entries()]
-        .sort((a, b) => (a[0] === '~') - (b[0] === '~') || a[0].localeCompare(b[0]))
+        .sort((a, b) => (a[0] === '~') - (b[0] === '~') || a[0].localeCompare(b[0], 'it', { numeric: true, sensitivity: 'base' }))
         .map(([, g]) => ({ ...g, rows: g.rows.sort(byExpiry) }));
     },
     validNs(d) { return (d.nameservers || '').split(',').map(s => s.trim()).filter(s => s.includes('.')).join(' · '); },
@@ -1095,7 +1096,7 @@ function sentinel() {
                           'domain_decision_days', 'domain_alert_norenew', 'status_check_attempts', 'status_check_retry_seconds', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
-                       server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, pre_update_backup: this.prefs.pre_update_backup !== false, server_labels: this.prefs.server_labels || {}, server_panels: this.prefs.server_panels || {},
+                       server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, pre_update_backup: this.prefs.pre_update_backup !== false, server_labels: this.prefs.server_labels || {}, server_panels: this.prefs.server_panels || {}, server_split: this.prefs.server_split || [],
                        visual_after_delay: this.prefs.visual_after_delay, visual_retry: this.prefs.visual_retry !== false, visual_noise: this.prefs.visual_noise !== false };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
@@ -1859,6 +1860,7 @@ function sentinel() {
         ext: { name: e => e.name, type: e => e.type, cur: e => ver(e.current_version), avail: e => e.update_available ? ver(e.new_version) : null, state: e => this.isLocked(e) ? 2 : (e.update_available ? 0 : 1) },
         comp: { name: x => x.name, platform: x => x.platform, provider: x => x.provider, date: x => x.expires_at, left: x => x.expires_at },
         sec: { sev: m => ({ critical: 0, high: 1, medium: 2, low: 3 })[m.severity] ?? 4, site: m => m.site_name, ext: m => m.ext_name || m.ext_slug, cve: m => m.cve_id, cur: m => ver(m.site_version), fix: m => ver(m.version_fixed) },
+        srvpg: { name: g => String(g.title || g.ip || g.server).toLowerCase(), sites: g => g.sites },
         dom: { name: x => x.name, site: x => (x.site_names || [])[0] || '', exp: x => x.days ?? null, renew: x => ({ '': 0, yes: 1, no: 2 })[x.renew || ''] },
         plug: { name: p => p.name, status: p => ({ closed: 0, abandoned: 1, stale: 2, ok: 3, unchecked: 4 })[p.status], last: p => p.last_updated || p.closed_date, tested: p => ver(p.tested), ver: p => ver(p.versions[0]), sites: p => -p.sites_count },
       };
@@ -1887,12 +1889,24 @@ function sentinel() {
     problemIcon(k) { return { offline: '🔴', dns: '🌐', failed: '⚠️', php: '🐘', domain: '🌐' }[k] || '•'; },
     get srvLabelList() { return [...new Set(Object.values((this.prefs && this.prefs.server_labels) || {}))].sort((a, b) => a.localeCompare(b, 'it')); },
     // ---------- pagina Server ----------
+    async saveServersPage() { await this.savePrefs(); this.srvpg.editing = ''; await this.loadServersPage(); },
     async loadServersPage() {
       this.srvpg.busy = true;
       try {
-        const r = await this.api('/api/preferences/servers');
+        const r = await this.api('/api/preferences/servers?by=machine');
         if (r.ok) this.srvpg.list = await r.json();
       } finally { this.srvpg.busy = false; }
+    },
+    isSplit(ip) { return (this.prefs.server_split || []).includes(ip); },
+    toggleSplit(ip) { const cur = this.prefs.server_split || []; this.prefs.server_split = cur.includes(ip) ? cur.filter(x => x !== ip) : [...cur, ip]; },
+    // Gestione server: la spunta "Dividi per macchina" fa effetto subito (salva e ridisegna le righe)
+    async toggleSplitNow(ip, where = 'servers') {
+      this.toggleSplit(ip);
+      await this.savePrefs();
+      if (this.prefs.err) { this.toggleSplit(ip); return; }   // salvataggio fallito: la spunta torna com'era
+      this.srvpg.editing = '';
+      if (where === 'settings') await this.loadServers(); else await this.loadServersPage();
+      this.say(this.isSplit(ip) ? 'Server diviso per macchina' : 'Macchine di nuovo insieme');
     },
     srvpgEdit(ip) { this.srvpg.editing = this.srvpg.editing === ip ? '' : ip; this.srvpg.open = { ...this.srvpg.open, [ip]: true }; },
     srvPanel(ip) { return ((this.prefs && this.prefs.server_panels) || {})[ip] || { url: '', note: '' }; },
@@ -1909,10 +1923,10 @@ function sentinel() {
     srvpgHit(g) { return !!(this.srvpg.q || '').trim() && g.items.some(s => this.srvpgMatch(s)); },
     get srvpgFiltered() {
       const q = (this.srvpg.q || '').trim().toLowerCase();
-      const list = [...(this.srvpg.list || [])].sort((a, b) => (this.srvLabel(a.server) || a.host || a.server).localeCompare(this.srvLabel(b.server) || b.host || b.server, 'it'));
+      const list = this.tSorted('srvpg', this.srvpg.list || []);
       if (!q) return list;
       // resta un server se corrisponde lui (nome, IP, host, appunto) o uno dei suoi siti
-      return list.filter(g => [this.srvLabel(g.server), g.server, g.host, this.srvPanel(g.server).note].some(v => String(v || '').toLowerCase().includes(q)) || (g.items || []).some(s => this.srvpgMatch(s)));
+      return list.filter(g => [g.title, this.srvLabel(g.server), g.server, g.ip, g.machine, g.host, this.srvPanel(g.server).note].some(v => String(v || '').toLowerCase().includes(q)) || (g.items || []).some(s => this.srvpgMatch(s)));
     },
     srvLabel(ip) { return ((this.prefs && this.prefs.server_labels) || {})[ip] || ''; },
     setSrvLabel(ip, v) { const l = { ...((this.prefs && this.prefs.server_labels) || {}) }; v = String(v || '').trim(); if (v) l[ip] = v; else delete l[ip]; this.prefs.server_labels = l; },

@@ -2438,5 +2438,22 @@
   "cPanel, Plesk, aaPanel, SiteGround…": "cPanel, Plesk, aaPanel, SiteGround…",
   "provider, nome utente, chi ha le credenziali… (mai password)": "provider, nome utente, chi ha le credenziali… (mai password)",
   "Nome, link al pannello, appunto": "Nome, link al pannello, appunto",
-  "Gestione server": "Gestione server"
+  "Gestione server": "Gestione server",
+  "macchine diverse:": "macchine diverse:",
+  "{0} siti senza nome macchina (arriva col prossimo controllo)": "{0} siti senza nome macchina (arriva col prossimo controllo)",
+  "{0} sito senza nome macchina (arriva col prossimo controllo)": "{0} sito senza nome macchina (arriva col prossimo controllo)",
+  "Divise, ognuna ha la sua riga, il suo nome e il suo link al pannello.": "Divise, ognuna ha la sua riga, il suo nome e il suo link al pannello.",
+  "(fa effetto subito)": "(fa effetto subito)",
+  "Server diviso per macchina": "Server diviso per macchina",
+  "Macchine di nuovo insieme": "Macchine di nuovo insieme",
+  "Divise, ogni macchina ha la sua riga qui e in Gestione server, con il suo nome e il suo link al pannello. Il freno resta per IP.": "Divise, ogni macchina ha la sua riga qui e in Gestione server, con il suo nome e il suo link al pannello. Il freno resta per IP.",
+  "Si dividono da": "Si dividono da",
+  "Impostazioni → Server dei siti": "Impostazioni → Server dei siti",
+  "Freno attivo (vale per tutto l'IP)": "Freno attivo (vale per tutto l'IP)",
+  "Per nome": "Per nome",
+  "Per numero di siti": "Per numero di siti",
+  "{0} sito ancora senza nome macchina: si sposta al prossimo controllo": "{0} sito ancora senza nome macchina: si sposta al prossimo controllo",
+  "{0} siti ancora senza nome macchina: si spostano al prossimo controllo": "{0} siti ancora senza nome macchina: si spostano al prossimo controllo",
+  "Divise, ogni macchina ha la sua riga in Gestione server, con il suo nome e il suo link al pannello. Qui il freno resta per IP.": "Divise, ogni macchina ha la sua riga in Gestione server, con il suo nome e il suo link al pannello. Qui il freno resta per IP.",
+  "senza il nome della macchina, che arriva col controllo del sito: restano sull'IP finché non arriva.": "senza il nome della macchina, che arriva col controllo del sito: restano sull'IP finché non arriva."
 }

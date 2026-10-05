@@ -101,6 +101,9 @@ class Site(Base):
     shot_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # ultima volta che lo shooter e' stato respinto dal sito (antibot, 403): vuoto se l'anteprima riesce
     shot_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # nome della macchina su cui gira il sito (dal controllo normale, WP 2.34+/Joomla 1.41+): una
+    # stringa, serve a Gestione server per dividere piu' macchine dietro lo stesso IP
+    server_hostname: Mapped[str] = mapped_column(String(80), nullable=False, default="", server_default="")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

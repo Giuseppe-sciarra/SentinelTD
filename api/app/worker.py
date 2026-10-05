@@ -2290,6 +2290,14 @@ async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
             await redis.enqueue_job("install_site", job, site_id, 2, _defer_by=60)
             return
         await _inst_set(redis, job, site.id, {**base, **res, "state": "done", "error": clean_error(res.get("error"))})
+        if res.get("ok"):
+            # installato (es. il connettore nuovo): il pannello rifa' da solo il controllo del sito tra
+            # poco, cosi' legge subito versione del connettore, nome macchina e stato, senza aspettare
+            # il giro normale (fino a 3 ore). Passa dal semaforo come ogni controllo
+            try:
+                await redis.enqueue_job("poll_site", site.id, True, _job_id=f"poll-after-install:{site.id}", _defer_by=20)
+            except Exception:  # noqa: BLE001
+                log.warning("Controllo dopo l'installazione non accodato (id=%s)", site.id)
     finally:
         await srv_release(redis, server, slot, True)
 

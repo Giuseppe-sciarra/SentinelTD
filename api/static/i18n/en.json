@@ -2438,5 +2438,22 @@
   "cPanel, Plesk, aaPanel, SiteGround…": "cPanel, Plesk, aaPanel, SiteGround…",
   "provider, nome utente, chi ha le credenziali… (mai password)": "provider, user name, who holds the credentials… (never passwords)",
   "Nome, link al pannello, appunto": "Name, panel link, note",
-  "Gestione server": "Server management"
+  "Gestione server": "Server management",
+  "macchine diverse:": "different machines:",
+  "{0} siti senza nome macchina (arriva col prossimo controllo)": "{0} sites without a machine name (comes with the next check)",
+  "{0} sito senza nome macchina (arriva col prossimo controllo)": "{0} site without a machine name (comes with the next check)",
+  "Divise, ognuna ha la sua riga, il suo nome e il suo link al pannello.": "Split, each has its own row, name and panel link.",
+  "(fa effetto subito)": "(takes effect at once)",
+  "Server diviso per macchina": "Server split by machine",
+  "Macchine di nuovo insieme": "Machines together again",
+  "Divise, ogni macchina ha la sua riga qui e in Gestione server, con il suo nome e il suo link al pannello. Il freno resta per IP.": "Split, each machine has its own row here and in Server management, with its name and panel link. The brake stays per IP.",
+  "Si dividono da": "They are split from",
+  "Impostazioni → Server dei siti": "Settings → Site servers",
+  "Freno attivo (vale per tutto l'IP)": "Brake on (applies to the whole IP)",
+  "Per nome": "By name",
+  "Per numero di siti": "By number of sites",
+  "{0} sito ancora senza nome macchina: si sposta al prossimo controllo": "{0} site still without a machine name: it moves at the next check",
+  "{0} siti ancora senza nome macchina: si spostano al prossimo controllo": "{0} sites still without a machine name: they move at the next check",
+  "Divise, ogni macchina ha la sua riga in Gestione server, con il suo nome e il suo link al pannello. Qui il freno resta per IP.": "Split, each machine has its own row in Server management, with its name and panel link. Here the brake stays per IP.",
+  "senza il nome della macchina, che arriva col controllo del sito: restano sull'IP finché non arriva.": "without the machine name, which comes with the site check: they stay on the IP until it arrives."
 }

@@ -36,6 +36,7 @@ DEFAULTS = {
     "visual_noise": True,           # due foto "prima": la differenza tra loro (video, slider) e' rumore e si sottrae
     "server_labels": {},            # nome dato a ogni server (IP -> nome), mostrato ovunque accanto all'IP
     "server_panels": {},            # pagina Server: IP -> {"url": link al pannello dell'hosting, "note": appunto}
+    "server_split": [],             # IP da dividere per macchina (nome macchina del connettore): piu' macchine dietro un IP
     "server_limited": [],           # server (IP) con il freno; di base nessuno, si lavora come sempre
 }
 
@@ -91,6 +92,8 @@ def normalize(data: dict | None) -> dict:
     out["visual_noise"] = bool(src.get("visual_noise", out["visual_noise"]))
     labels = src.get("server_labels", out["server_labels"])
     out["server_labels"] = {str(k)[:160]: str(v).strip()[:60] for k, v in (labels.items() if isinstance(labels, dict) else []) if str(v).strip()}
+    rawsplit = src.get("server_split", out["server_split"])
+    out["server_split"] = sorted({str(x).strip() for x in (rawsplit if isinstance(rawsplit, list) else []) if str(x).strip()})[:200]
     panels = src.get("server_panels", out["server_panels"])
     out["server_panels"] = {}
     for k, v in (panels.items() if isinstance(panels, dict) else []):

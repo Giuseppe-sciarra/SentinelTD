@@ -937,16 +937,17 @@
             <div class="small mut" style="margin-top:16px" x-show="srvpg.busy && !srvpg.list.length"><span class="spinner"></span> Lettura dei server…</div>
             <div class="small mut" style="margin-top:16px" x-show="!srvpg.busy && srvpg.list.length && !srvpgFiltered.length">Nessun sito o server corrisponde alla ricerca.</div>
             <div class="srvx-list" x-show="srvpgFiltered.length">
-              <div class="srvx-cols"><span></span><span>Server</span><span>Siti</span><span>Pannello hosting</span><span>Appunto</span><span></span></div>
+              <div class="srvx-cols"><span></span><span class="srvx-sort" @click="tSort('srvpg','name')">Server<span x-text="tMark('srvpg','name')"></span></span><span class="srvx-sort" @click="tSort('srvpg','sites',true)">Siti<span x-text="tMark('srvpg','sites')"></span></span><span>Pannello hosting</span><span>Appunto</span><span></span></div>
               <template x-for="g in srvpgFiltered" :key="'sp'+g.server">
                 <div class="srvx" :class="[srvpg.open[g.server] || srvpgHit(g) ? 'open' : '', srvpgHit(g) ? 'hit' : '']">
                   <div class="srvx-head" @click="srvpg.open = { ...srvpg.open, [g.server]: !srvpg.open[g.server] }">
                     <span class="srvx-caret" x-text="(srvpg.open[g.server] || srvpgHit(g)) ? '▾' : '▸'"></span>
                     <div class="srvx-name">
-                      <b x-text="srvLabel(g.server) || g.host || g.server" translate="no"></b>
-                      <div class="small mut mono" translate="no"><span x-text="g.server"></span><span x-show="g.host && srvLabel(g.server)" x-text="' · ' + g.host"></span></div>
+                      <b x-text="g.title || g.ip" translate="no"></b>
+                      <div class="small mut mono" translate="no"><span x-text="g.ip"></span><span x-show="g.machine && g.title !== g.machine" x-text="' · ' + g.machine"></span><span x-show="g.host && g.title !== g.host" x-text="' · ' + g.host"></span></div>
+                      <div class="small mut" x-show="!g.machine && isSplit(g.ip) && g.unknown" x-text="g.unknown + ' ' + pl(g.unknown, 'sito ancora senza nome macchina: si sposta', 'siti ancora senza nome macchina: si spostano') + ' al prossimo controllo'"></div>
                     </div>
-                    <div><b x-text="g.sites"></b> <span class="small mut" x-text="g.items.filter(s => s.cms !== 'wp').length ? g.items.filter(s => s.cms === 'wp').length + ' WordPress · ' + g.items.filter(s => s.cms !== 'wp').length + ' Joomla' : 'WordPress'"></span></div>
+                    <div><b x-text="g.sites"></b> <span class="small mut" x-text="(w => (j => w && j ? w + ' WordPress · ' + j + ' Joomla' : (j ? 'Joomla' : 'WordPress'))(g.items.filter(s => s.cms !== 'wp').length))(g.items.filter(s => s.cms === 'wp').length)"></span></div>
                     <div><a class="btn primary sm" x-show="srvPanel(g.server).url" :href="srvPanel(g.server).url" target="_blank" rel="noopener" @click.stop>🔑 Apri il pannello</a><span class="small mut" x-show="!srvPanel(g.server).url">—</span></div>
                     <div class="small mut srvpg-note" x-text="srvPanel(g.server).note || '—'" translate="no"></div>
                     <div style="text-align:right"><button class="btn sm" @click.stop="srvpgEdit(g.server)" title="Nome, link al pannello, appunto">✏️</button></div>
@@ -957,7 +958,8 @@
                         <div class="field"><label>Nome del server</label><input class="input" :value="srvLabel(g.server)" @change="setSrvLabel(g.server, $event.target.value)" placeholder="es. SiteGround cliente X"></div>
                         <div class="field"><label>Link al pannello dell'hosting</label><input class="input" :value="srvPanel(g.server).url" @change="setSrvPanel(g.server, 'url', $event.target.value)" placeholder="cPanel, Plesk, aaPanel, SiteGround…"></div>
                         <div class="field"><label>Appunto</label><input class="input" :value="srvPanel(g.server).note" @change="setSrvPanel(g.server, 'note', $event.target.value)" placeholder="provider, nome utente, chi ha le credenziali… (mai password)"></div>
-                        <div class="row" style="gap:8px"><button class="btn primary" @click="savePrefs(); srvpg.editing = ''" :disabled="!!(prefs && prefs.busy)">Salva</button><button class="btn" @click="srvpg.editing = ''">Annulla</button></div>
+                        <div class="row" style="gap:8px"><button class="btn primary" @click="saveServersPage()" :disabled="!!(prefs && prefs.busy)">Salva</button><button class="btn" @click="srvpg.editing = ''">Annulla</button></div>
+                        <div class="small mut" x-show="(g.machines || []).length > 1" style="grid-column:1/-1"><span>Dietro questo IP ci sono</span> <b x-text="g.machines.length"></b> <span>macchine diverse:</span> <span translate="no" x-text="g.machines.map(m => m.hostname + ' (' + m.sites + ')').join(' · ')"></span>. <span>Si dividono da</span> <a href="#/settings">Impostazioni → Server dei siti</a>.</div>
                       </div>
                     </template>
                     <div class="srvpg-sites">
@@ -1668,6 +1670,21 @@
                         <span class="srv-num"><b x-text="sv.sites"></b> <span x-text="pl(sv.sites, 'sito', 'siti')"></span></span>
                         <button class="srv-more" @click="srvOpen[sv.server] = !srvOpen[sv.server]" x-text="srvOpen[sv.server] ? 'Nascondi i siti' : 'Mostra i siti'"></button>
                         <div class="srv-names" x-show="srvOpen[sv.server]" x-text="sv.names.join(' · ')" translate="no"></div>
+                        <div class="srv-split" x-show="(sv.machines || []).length > 1">
+                          <div class="row" style="gap:12px;align-items:center"><label class="check"><input type="checkbox" :checked="isSplit(sv.server)" @change="toggleSplitNow(sv.server, 'settings')"> <b>Dividi per macchina</b> <span class="small mut">(fa effetto subito)</span></label></div>
+                          <div class="small mut"><span>Dietro questo IP ci sono</span> <b x-text="sv.machines.length"></b> <span>macchine diverse, riconosciute dal loro nome:</span> <span translate="no" x-text="sv.machines.map(m => m.hostname + ' (' + m.sites + ')').join(' · ')"></span></div>
+                          <div class="small mut" x-show="!isSplit(sv.server)">Divise, ogni macchina ha la sua riga in Gestione server, con il suo nome e il suo link al pannello. Qui il freno resta per IP.</div>
+                          <div class="srv-machines" x-show="isSplit(sv.server)">
+                            <template x-for="m in sv.machines" :key="sv.server + '|' + m.hostname">
+                              <div class="srv-machine">
+                                <input class="input srv-name" list="srv-labels" :value="srvLabel(sv.server + '|' + m.hostname)" @change="setSrvLabel(sv.server + '|' + m.hostname, $event.target.value)" :placeholder="srvLabel(sv.server) ? srvLabel(sv.server) + ' · ' + m.hostname : 'Dai un nome'">
+                                <span class="mono small" x-text="m.hostname" translate="no"></span>
+                                <span class="small mut"><b x-text="m.sites"></b> <span x-text="pl(m.sites, 'sito', 'siti')"></span></span>
+                              </div>
+                            </template>
+                            <div class="small mut" x-show="sv.unknown"><b x-text="sv.unknown"></b> <span x-text="pl(sv.unknown, 'sito', 'siti')"></span> <span>senza il nome della macchina, che arriva col controllo del sito: restano sull'IP finché non arriva.</span></div>
+                          </div>
+                        </div>
 
                       </div>
                     </template>

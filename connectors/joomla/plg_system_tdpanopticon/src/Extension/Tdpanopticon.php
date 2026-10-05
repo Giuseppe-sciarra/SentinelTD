@@ -349,6 +349,8 @@ final class Tdpanopticon extends CMSPlugin
         return [
             'cms'  => 'joomla',
             'connector' => $this->connectorVersion(),   // il pannello sa quale versione gira su ogni sito
+            // nome della macchina (una stringa, costo zero): distingue due macchine dietro lo stesso IP
+            'hostname'  => (string) @gethostname(),
             'core' => ['current' => $core_current, 'latest' => $core_latest, 'update' => $core_update],
             'php'  => PHP_VERSION,
             'extensions' => $extensions,

@@ -2438,5 +2438,22 @@
   "cPanel, Plesk, aaPanel, SiteGround…": "cPanel, Plesk, aaPanel, SiteGround…",
   "provider, nome utente, chi ha le credenziali… (mai password)": "Anbieter, Benutzername, wer die Zugangsdaten hat… (nie Passwörter)",
   "Nome, link al pannello, appunto": "Name, Panel-Link, Notiz",
-  "Gestione server": "Serververwaltung"
+  "Gestione server": "Serververwaltung",
+  "macchine diverse:": "verschiedene Maschinen:",
+  "{0} siti senza nome macchina (arriva col prossimo controllo)": "{0} Websites ohne Maschinennamen (kommt mit der nächsten Prüfung)",
+  "{0} sito senza nome macchina (arriva col prossimo controllo)": "{0} Website ohne Maschinennamen (kommt mit der nächsten Prüfung)",
+  "Divise, ognuna ha la sua riga, il suo nome e il suo link al pannello.": "Getrennt hat jede ihre eigene Zeile, ihren Namen und ihren Panel-Link.",
+  "(fa effetto subito)": "(wirkt sofort)",
+  "Server diviso per macchina": "Server nach Maschine getrennt",
+  "Macchine di nuovo insieme": "Maschinen wieder zusammen",
+  "Divise, ogni macchina ha la sua riga qui e in Gestione server, con il suo nome e il suo link al pannello. Il freno resta per IP.": "Getrennt hat jede Maschine hier und in der Serververwaltung ihre eigene Zeile, mit Namen und Panel-Link. Die Bremse bleibt pro IP.",
+  "Si dividono da": "Getrennt werden sie unter",
+  "Impostazioni → Server dei siti": "Einstellungen → Website-Server",
+  "Freno attivo (vale per tutto l'IP)": "Bremse aktiv (gilt für die ganze IP)",
+  "Per nome": "Nach Name",
+  "Per numero di siti": "Nach Anzahl Websites",
+  "{0} sito ancora senza nome macchina: si sposta al prossimo controllo": "{0} Website noch ohne Maschinennamen: wechselt bei der nächsten Prüfung",
+  "{0} siti ancora senza nome macchina: si spostano al prossimo controllo": "{0} Websites noch ohne Maschinennamen: wechseln bei der nächsten Prüfung",
+  "Divise, ogni macchina ha la sua riga in Gestione server, con il suo nome e il suo link al pannello. Qui il freno resta per IP.": "Getrennt hat jede Maschine in der Serververwaltung ihre eigene Zeile, mit Namen und Panel-Link. Die Bremse bleibt hier pro IP.",
+  "senza il nome della macchina, che arriva col controllo del sito: restano sull'IP finché non arriva.": "ohne Maschinennamen, der mit der Website-Prüfung kommt: sie bleiben auf der IP, bis er eintrifft."
 }

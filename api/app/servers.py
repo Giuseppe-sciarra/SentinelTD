@@ -103,11 +103,8 @@ async def release(redis, server: str, slot: str | None, worked: bool) -> None:
 # diventa un server a parte, con chiave "IP|nome macchina".
 
 def site_hostname(site) -> str:
-    """Nome della macchina su cui gira il sito, dalla diagnostica (vuoto se non ancora noto)."""
-    try:
-        return str((((site.diag or {}).get("server") or {}).get("hostname")) or "").strip()[:80]
-    except Exception:  # noqa: BLE001
-        return ""
+    """Nome della macchina su cui gira il sito, dal controllo normale (vuoto se non ancora noto)."""
+    return str(getattr(site, "server_hostname", "") or "").strip()[:80]
 
 
 def machine_key(ip: str, hostname: str, split: set) -> str:

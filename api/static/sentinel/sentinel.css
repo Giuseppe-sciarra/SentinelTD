@@ -1226,3 +1226,7 @@ th.sortable:hover { color: var(--txt); }
 .srvpg-site .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--mut); }
 .srvpg-site .dot.ok { background: var(--ok); } .srvpg-site .dot.err { background: var(--err); } .srvpg-site .dot.warn { background: var(--warn); }
 @media (max-width: 1100px) { .srvx-cols { display: none; } .srvx-head { grid-template-columns: 22px 1fr auto; } .srvx-head > :nth-child(4), .srvx-head > :nth-child(5) { display: none; } .srvpg-editbox { grid-template-columns: 1fr; } }
+.srv-split { grid-column: 1 / -1; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); border: 1px dashed var(--bd); display: flex; flex-direction: column; gap: 5px; }
+.srvx-sort { cursor: pointer; user-select: none; } .srvx-sort:hover { color: var(--txt); }
+.srv-machines { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.srv-machine { display: grid; grid-template-columns: 200px minmax(0, 1fr) auto; gap: 12px; align-items: center; }

@@ -306,6 +306,12 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             core_known = True
         unverified = not (core_known and all(known_cat.values()))
 
+        # nome della macchina (WP 2.34+/Joomla 1.41+): una stringa, serve a Gestione server per dividere
+        # due macchine dietro lo stesso IP
+        hn = str(data.get("hostname") or "").strip()[:80]
+        if hn and hn != (site.server_hostname or ""):
+            site.server_hostname = hn
+
         # versione del connettore sul sito: dichiarata (WP 2.23+/Joomla 1.32+) o ricavata dal plugin
         declared = str(data.get("connector") or "").strip()
         if declared:

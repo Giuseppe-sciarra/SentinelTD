@@ -65,6 +65,7 @@ async def run_migrations(conn) -> None:
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS locked_items TEXT NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS connector_version VARCHAR(32) NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS shot_blocked_at TIMESTAMPTZ NULL"))
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS server_hostname VARCHAR(80) NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS shot_attempted_at TIMESTAMPTZ NULL"))
     await conn.execute(text("ALTER TABLE update_history ADD COLUMN IF NOT EXISTS backup_file VARCHAR(255) NOT NULL DEFAULT ''"))
 
