@@ -1,5 +1,61 @@
 # Changelog
 
+## 2.30.6
+
+### Fixed
+- Le cartelle con numero in testa ("1.", "2.", "10.") erano ordinate come testo, con "10." tra
+  "1." e "2.": menu laterale, filtri dell'installazione e gruppi delle scadenze usano ora il
+  confronto numerico.
+
+## 2.30.5
+
+### Changed
+- Impostazioni → Server dei siti: **una riga per IP** come nella 2.28.13, con dentro il blocco
+  "Dividi per macchina" e le macchine **ognuna con il suo campo nome**; freno e nome dell'IP
+  restano per IP. Solo Gestione server mostra una riga per macchina (`/api/preferences/servers?by=machine`).
+- Gestione server: ordinamento **cliccando le intestazioni** Server e Siti (▲▼), di base per nome
+  server; tolti i pulsanti.
+
+## 2.30.4
+
+### Changed
+- Gestione server: i titoli tornano come nella versione con lo Stato server. Il **nome dato**
+  vale sempre; con l'IP diviso le macchine lo ereditano ("Tastiere Digitali · Hosting-Websites-WP"),
+  a meno di un nome dato alla singola macchina; la riga dell'IP tiene il nome e dice quanti siti non
+  hanno ancora mandato il nome macchina. **Ordinamento per nome o per numero di siti.**
+
+## 2.30.3
+
+### Fixed
+- Dopo un'installazione riuscita (per esempio la distribuzione del connettore nuovo) il pannello
+  **rifà da solo il controllo del sito** dopo 20 secondi, passando dal semaforo come ogni controllo:
+  versione del connettore, nome della macchina e stato si aggiornano subito, senza aspettare il giro
+  normale (fino a 3 ore).
+
+## 2.30.2
+
+### Changed
+- **Dividi per macchina** torna in *Impostazioni → Server dei siti*, sotto la riga dell'IP, come nella
+  versione precedente (effetto immediato); dalla matita di Gestione server resta solo l'avviso con il
+  rimando. Con le righe divise, il **freno** vale per l'IP intero, non per la singola macchina.
+
+## 2.30.1
+
+### Fixed
+- Gestione server: la spunta **Dividi per macchina** fa effetto subito (salva da sola e ridisegna
+  le righe), invece di aspettare il Salva del riquadro, che non era evidente.
+
+## 2.30.0 — Dividi per macchina in Gestione server
+
+### Added
+- **Più macchine dietro lo stesso IP.** I connettori WordPress **2.34.0** e Joomla **1.41.0**
+  mandano col controllo normale il **nome della macchina** (`gethostname()`: una stringa, nessuna
+  misura di carico, RAM o disco). Il pannello lo salva in `sites.server_hostname`. In Gestione
+  server, nella matita di un IP dietro cui si vedono almeno due macchine, compare **Dividi per
+  macchina**: spuntata, ogni macchina ha la sua riga (titolo = nome dato, altrimenti nome
+  macchina), il suo nome e il suo link al pannello. Un sito che non ha ancora mandato il nome
+  resta sull'IP fino al prossimo controllo. Impostazione `server_split` (elenco di IP).
+
 ## 2.29.2
 
 ### Changed
