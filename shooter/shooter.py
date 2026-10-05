@@ -175,7 +175,7 @@ async def shot(payload: dict = Body(...)):
     # Nome sempre costruito qui (mai un path dal chiamante) e URL con parametro unico, cosi'
     # la cache del reverse proxy non restituisce la pagina di prima dell'aggiornamento.
     variant = str(payload.get("variant") or "").strip().lower()
-    if variant not in ("", "before", "after"):
+    if variant not in ("", "before", "before2", "after"):
         raise HTTPException(422, "variant non valida")
     if variant:
         sep = "&" if "?" in url else "?"
@@ -395,8 +395,13 @@ async def compare(payload: dict = Body(...)):
     site_id = int(payload.get("site_id") or 0)
     if site_id <= 0:
         raise HTTPException(422, "site_id obbligatorio")
-    a = os.path.join(SHOTS_DIR, f"site_{site_id}_before.jpg")
-    b = os.path.join(SHOTS_DIR, f"site_{site_id}_after.jpg")
+    # di base prima/dopo; il pannello puo' chiedere anche prima/prima2 (il "rumore" del sito:
+    # video, slider, caricamenti lenti) per sottrarlo dal confronto vero
+    va = str(payload.get("a") or "before"); vb = str(payload.get("b") or "after")
+    if va not in ("before", "before2", "after") or vb not in ("before", "before2", "after"):
+        raise HTTPException(422, "varianti non valide")
+    a = os.path.join(SHOTS_DIR, f"site_{site_id}_{va}.jpg")
+    b = os.path.join(SHOTS_DIR, f"site_{site_id}_{vb}.jpg")
     if not (os.path.isfile(a) and os.path.isfile(b)):
         raise HTTPException(404, "istantanee mancanti")
     size = (240, 150)
@@ -405,7 +410,7 @@ async def compare(payload: dict = Body(...)):
         gb = ib.convert("L").resize(size, Image.BILINEAR)
     diff = ImageChops.difference(ga, gb)
     # zone che cambiano da sole (video, iframe, slider) di ENTRAMBE le foto: fuori dal conto
-    ignore = _mask_grid(site_id, size)
+    ignore = _mask_grid(site_id, size, (va, vb))
     total = changed = 0
     for i, v in enumerate(diff.getdata()):
         if ignore[i]:
@@ -420,13 +425,13 @@ async def compare(payload: dict = Body(...)):
     return {"diff": pct, "blank_after": blank_after, "blank_before": blank_before, "masked": masked}
 
 
-def _mask_grid(site_id: int, size: tuple) -> list:
+def _mask_grid(site_id: int, size: tuple, variants=("before", "after")) -> list:
     """Griglia (alla risoluzione del confronto) dei pixel da ignorare: unione delle zone mobili
     annotate nella foto prima e in quella dopo."""
     import json as _json
     W, H = size
     grid = [False] * (W * H)
-    for variant in ("before", "after"):
+    for variant in variants:
         path = os.path.join(SHOTS_DIR, f"site_{site_id}_{variant}.json")
         try:
             with open(path, encoding="utf-8") as fh:

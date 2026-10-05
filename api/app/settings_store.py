@@ -1,5 +1,6 @@
 """Impostazioni operative modificabili dalla UI (mai segreti/token)."""
 import json
+import re
 from copy import deepcopy
 
 from .config import settings
@@ -29,7 +30,12 @@ DEFAULTS = {
     "server_item_pause_seconds": 5, # pausa tra un aggiornamento e l'altro sullo stesso sito (server col freno)
     "connector_auto_update": True,  # ogni notte installa il connettore nuovo sui siti che ne hanno uno vecchio
     "auto_rollback": True,          # se la home si rompe dopo un aggiornamento, rimette le copie e blocca
+    "pre_update_backup": True,      # copia zip di plugin/tema prima di aggiornarlo (serve al ripristino; pesa sull'hosting)
+    "visual_after_delay": 30,       # secondi di attesa prima della foto "dopo": su hosting lenti la pagina si assesta
+    "visual_retry": True,           # se la home risulta cambiata, seconda foto dopo la stessa attesa: vale la migliore
+    "visual_noise": True,           # due foto "prima": la differenza tra loro (video, slider) e' rumore e si sottrae
     "server_labels": {},            # nome dato a ogni server (IP -> nome), mostrato ovunque accanto all'IP
+    "server_panels": {},            # pagina Server: IP -> {"url": link al pannello dell'hosting, "note": appunto}
     "server_limited": [],           # server (IP) con il freno; di base nessuno, si lavora come sempre
 }
 
@@ -76,8 +82,26 @@ def normalize(data: dict | None) -> dict:
     out["email_report_mode"] = mode if mode in ("site", "cycle") else "site"
     out["connector_auto_update"] = bool(src.get("connector_auto_update", out["connector_auto_update"]))
     out["auto_rollback"] = bool(src.get("auto_rollback", out["auto_rollback"]))
+    out["pre_update_backup"] = bool(src.get("pre_update_backup", out["pre_update_backup"]))
+    try:
+        out["visual_after_delay"] = max(0, min(180, int(src.get("visual_after_delay", out["visual_after_delay"]))))
+    except (TypeError, ValueError):
+        pass
+    out["visual_retry"] = bool(src.get("visual_retry", out["visual_retry"]))
+    out["visual_noise"] = bool(src.get("visual_noise", out["visual_noise"]))
     labels = src.get("server_labels", out["server_labels"])
     out["server_labels"] = {str(k)[:160]: str(v).strip()[:60] for k, v in (labels.items() if isinstance(labels, dict) else []) if str(v).strip()}
+    panels = src.get("server_panels", out["server_panels"])
+    out["server_panels"] = {}
+    for k, v in (panels.items() if isinstance(panels, dict) else []):
+        if not isinstance(v, dict):
+            continue
+        url = str(v.get("url") or "").strip()[:500]
+        note = str(v.get("note") or "").strip()[:300]
+        if url and not re.match(r"^https?://", url, re.I):
+            url = "https://" + url      # scritto senza schema: si completa
+        if url or note:
+            out["server_panels"][str(k)[:160]] = {"url": url, "note": note}
     if out["expiry_critical_days"] > out["expiry_warning_days"]:
         out["expiry_critical_days"] = out["expiry_warning_days"]
     return out

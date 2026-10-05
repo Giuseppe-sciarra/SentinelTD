@@ -67,8 +67,10 @@ async def detected_servers(s: AsyncSession = Depends(get_session)):
         keys = await asyncio.gather(*(server_of(r, x.url) for x in sites))
         groups: dict[str, dict] = {}
         for site, key in zip(sites, keys):
-            g = groups.setdefault(key or "?", {"names": [], "folders": {}})
+            g = groups.setdefault(key or "?", {"names": [], "folders": {}, "items": []})
             g["names"].append(site.name)
+            g["items"].append({"id": site.id, "name": site.name, "url": site.url, "cms": site.cms, "status": site.status,
+                               "folder": " / ".join(p.strip() for p in (site.tags or "").split(",")[0].split("/") if p.strip()) if (site.tags or "").strip() else ""})
             tags = [" / ".join(p.strip() for p in t.split("/") if p.strip()) for t in (site.tags or "").split(",") if t.strip()]
             for t in (tags or [""]):
                 g["folders"][t] = g["folders"].get(t, 0) + 1
@@ -80,6 +82,7 @@ async def detected_servers(s: AsyncSession = Depends(get_session)):
         out.append({
             "server": k, "host": host, "sites": len(g["names"]),
             "names": sorted(g["names"], key=str.lower),
+            "items": sorted(g["items"], key=lambda x: x["name"].lower()),
             "folders": [{"name": n, "count": c} for n, c in sorted(g["folders"].items(), key=lambda x: (-x[1], x[0].lower()))],
         })
     return sorted(out, key=lambda x: (-x["sites"], x["server"]))

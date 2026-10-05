@@ -890,10 +890,10 @@ async def _visual_shot(site: Site, variant: str) -> dict | None:
         return None
 
 
-async def _visual_compare(site: Site) -> dict | None:
+async def _visual_compare(site: Site, a: str = "before", b: str = "after") -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(f"{settings.SHOOTER_URL}/compare", json={"site_id": site.id})
+            r = await client.post(f"{settings.SHOOTER_URL}/compare", json={"site_id": site.id, "a": a, "b": b})
             r.raise_for_status()
             return r.json()
     except Exception as ex:  # noqa: BLE001
@@ -904,7 +904,7 @@ async def _visual_compare(site: Site) -> dict | None:
 VISUAL_DIFF_WARN = 35.0   # % di pixel cambiati oltre cui la home va guardata
 
 
-def _visual_verdict(before: dict | None, after: dict | None, cmp: dict | None) -> dict:
+def _visual_verdict(before: dict | None, after: dict | None, cmp: dict | None, noise: float = 0.0) -> dict:
     """ok / warn / ko / na, con un messaggio breve per email e Telegram.
     Gli errori contano solo se NON c'erano gia' prima dell'aggiornamento."""
     if not after:
@@ -926,9 +926,15 @@ def _visual_verdict(before: dict | None, after: dict | None, cmp: dict | None) -
     if not cmp or not before:
         return {"status": "ok", "message": "home raggiungibile (confronto con il prima non disponibile)"}
     diff = float(cmp.get("diff") or 0)
+    # "rumore" del sito: quanto differiscono due foto "prima" scattate a pochi secondi di distanza
+    # (video, slider, caricamenti lenti). Si sottrae: solo l'eccesso e' un cambiamento vero
+    if noise > 0:
+        diff = round(max(0.0, diff - noise), 1)
     masked = float(cmp.get("masked") or 0)
     # video e slider sono esclusi dal confronto (cambiano da soli): si dice quando coprono quasi tutto
     note = f" (video e slider esclusi: {masked:g}% della home)" if masked >= 80 else (" (video e slider esclusi)" if masked > 0 else "")
+    if noise > 0:
+        note += f" (al netto del {noise:g}% che la home cambia da sola)"
     if diff >= VISUAL_DIFF_WARN:
         return {"status": "warn", "diff": diff, "message": f"la home è cambiata del {diff:g}%{note}: controlla che sia tutto a posto"}
     return {"status": "ok", "diff": diff, "message": f"home invariata (differenza {diff:g}%){note}"}
@@ -1115,6 +1121,13 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
         "Pragma": "no-cache",
     }
     cb = int(time.time())   # cache-buster: evita risposte cachate dal reverse proxy
+    # copia zip prima dell'aggiornamento: "1" di base, "0" se spenta in Impostazioni (connettore WP 2.33+;
+    # i connettori piu' vecchi ignorano il parametro e copiano come sempre)
+    try:
+        from .settings_store import get_operational_settings as _gos
+        backup_flag = "1" if (await _gos()).get("pre_update_backup", True) else "0"
+    except Exception:  # noqa: BLE001
+        backup_flag = "1"
     try:
         async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
             if site.cms == "wp":
@@ -1128,7 +1141,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                         f"{site.url.rstrip('/')}/wp-admin/admin-ajax.php",
                         params={"action": "tdpanop_update", "_": cb},
                         headers=headers,
-                        data={"type": ext_type, "slug": slug, "expected": expected or ""},
+                        data={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag},
                     )
                     if ra.status_code == 200:
                         ja = ra.json()
@@ -1139,7 +1152,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                 if d is None:
                     r = await client.post(
                         wp_rest_url(site, "update", f"_={cb}"),
-                        headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or ""},
+                        headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag},
                     )
                     r.raise_for_status()
                     d = r.json()
@@ -1520,6 +1533,20 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
 
         # controllo visivo: istantanea della home PRIMA di toccare qualunque cosa
         shot_before = await _visual_shot(site, "before")
+        # seconda foto "prima": quanto la home cambia DA SOLA (video, slider, hosting lento) e' rumore,
+        # e il confronto vero lo sottrae. Costa una richiesta in piu' solo ai siti che si aggiornano.
+        visual_noise = 0.0
+        try:
+            _vp = await get_operational_settings()
+        except Exception:  # noqa: BLE001
+            _vp = {}
+        if shot_before and _vp.get("visual_noise", True):
+            shot_before2 = await _visual_shot(site, "before2")
+            if shot_before2 and not shot_before2.get("blocked"):
+                _cn = await _visual_compare(site, "before", "before2")
+                visual_noise = float((_cn or {}).get("diff") or 0)
+                if visual_noise:
+                    log.info("CONTROLLO HOME '%s': la home cambia da sola del %s%% (video/slider/lentezza)", site.name, visual_noise)
 
         # 3) aggiorna UNA per volta, con pausa; registra successo/fallimento per il cooldown
         results = []
@@ -1704,9 +1731,23 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
         # controllo visivo DOPO: solo se qualcosa e' cambiato davvero sul sito
         visual = None
         if any(r.get("ok") for r in results):
+            # attesa prima della foto "dopo": su hosting lenti cache e pagina si assestano
+            _delay = int(_vp.get("visual_after_delay", 30) or 0)
+            if _delay > 0:
+                await asyncio.sleep(_delay)
             shot_after = await _visual_shot(site, "after")
             cmp = await _visual_compare(site) if (shot_before and shot_after) else None
-            visual = _visual_verdict(shot_before, shot_after, cmp)
+            visual = _visual_verdict(shot_before, shot_after, cmp, visual_noise)
+            if visual["status"] == "warn" and _vp.get("visual_retry", True):
+                # "cambiata" puo' essere un caricamento a meta': si rifotografa dopo la stessa attesa
+                # e vale il risultato migliore. Una home rotta davvero resta tale
+                await asyncio.sleep(max(10, _delay))
+                shot_after2 = await _visual_shot(site, "after")
+                cmp2 = await _visual_compare(site) if (shot_before and shot_after2) else None
+                visual2 = _visual_verdict(shot_before, shot_after2, cmp2, visual_noise)
+                if visual2["status"] == "ok" or (visual2.get("diff") is not None and visual.get("diff") is not None and visual2["diff"] < visual["diff"]):
+                    log.info("CONTROLLO HOME '%s': seconda foto migliore (%s%% → %s%%)", site.name, visual.get("diff"), visual2.get("diff"))
+                    shot_after, visual = shot_after2, visual2
             lvl = log.warning if visual["status"] in ("warn", "ko") else log.info
             lvl("CONTROLLO HOME '%s' (id=%s): %s — %s", site.name, site.id, visual["status"], visual["message"])
 
@@ -1768,7 +1809,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                     if await redis.set(once, "1", ex=86400, nx=True):
                         held_once.append({"name": r["name"], "error": r.get("error") or ""})
             report = {
-                "site": site.name, "id": site.id, "folder": _folder_label(site),
+                "site": site.name, "id": site.id, "folder": _folder_label(site), "url": site.url,
                 "ok": [{"name": r["name"], "from": r.get("from") or "", "to": r.get("to") or ""} for r in results if r.get("ok")],
                 "failed": [{"name": r["name"], "error": r.get("error") or ""} for r in results
                            if not r.get("ok") and not r.get("manual") and not r.get("held")],
@@ -1787,7 +1828,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                     await redis.incr("tg:cycle:visual_ok")
                 elif visual["status"] in ("warn", "ko"):
                     icon = "⚠️" if visual["status"] == "warn" else "🛑"
-                    await redis.rpush("tg:cycle:visual_detail", f"{icon} {site.name}: {visual['message']}")
+                    await redis.rpush("tg:cycle:visual_detail", f"{icon} {site.name}: {visual['message']}\n   {site.url}")
             redis = ctx["redis"]
             if n_ok:
                 await redis.incrby("tg:cycle:applied", n_ok)

@@ -56,7 +56,7 @@ EVENTS: dict[str, dict[str, Any]] = {
   {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}
   <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>
 </div>""",
-        "telegram": "{{ outcome_icon }} <b>{{ site_name }}</b> — {{ outcome_text }}\n{% if folder %}📁 {{ folder }}\n{% endif %}{{ updates_lines }}",
+        "telegram": "{{ outcome_icon }} <b><a href=\"{{ site_url }}\">{{ site_name }}</a></b> — {{ outcome_text }}\n{% if folder %}📁 {{ folder }}\n{% endif %}{{ updates_lines }}",
     },
     "update_failed": {
         "label": "Update fallito",
@@ -77,7 +77,7 @@ EVENTS: dict[str, dict[str, Any]] = {
   {{ failures_html }}
   <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>
 </div>""",
-        "telegram": "❌ <b>{{ site_name }}</b> — {{ failures_head }}{% if folder %}\n📁 {{ folder }}{% endif %}\n{{ failures_lines }}",
+        "telegram": "❌ <b><a href=\"{{ site_url }}\">{{ site_name }}</a></b> — {{ failures_head }}{% if folder %}\n📁 {{ folder }}{% endif %}\n{{ failures_lines }}",
     },
     "auto_rollback": {
         "label": "Ripristino automatico dopo un aggiornamento",
@@ -99,7 +99,7 @@ EVENTS: dict[str, dict[str, Any]] = {
   <p>I componenti ripristinati sono <b>bloccati</b> alla versione precedente: il ciclo non li riaggiorna finché non li sblocchi dalla pagina del sito.</p>
   <p style="color:#666">{% if panel_url %}<a href="{{ panel_url }}">{{ panel_url }}</a>{% endif %}</p>
 </div>""",
-        "telegram": """⏪ <b>{{ site_name }}</b> — ripristino automatico
+        "telegram": """⏪ <b><a href="{{ site_url }}">{{ site_name }}</a></b> — ripristino automatico
 {% if folder %}📁 {{ folder }}
 {% endif %}La home non rispondeva dopo l'aggiornamento. Rimessa la versione precedente di:
 {{ items_lines }}
@@ -126,7 +126,7 @@ EVENTS: dict[str, dict[str, Any]] = {
         "vars": {"site_name": "Nome", "site_url": "URL", "reason": "Errore riscontrato", "attempts": "Check falliti consecutivi", "window_min": "Minuti dal primo fallimento", "date": "Data e ora"},
         "subject": "[Sentinel] {{ site_name }} non raggiungibile",
         "email": """<p>🔴 <b>{{ site_name }}</b> non raggiungibile<br><a href="{{ site_url }}">{{ site_url }}</a></p><p>{{ reason }}</p><p style="color:#666">Confermato dopo {{ attempts }} check in ~{{ window_min }} min</p>""",
-        "telegram": "🔴 <b>{{ site_name }}</b> non raggiungibile\n{{ site_url }}\nConfermato dopo {{ attempts }} check in ~{{ window_min }} min\n<i>{{ reason }}</i>",
+        "telegram": "🔴 <b><a href=\"{{ site_url }}\">{{ site_name }}</a></b> non raggiungibile\n{{ site_url }}\nConfermato dopo {{ attempts }} check in ~{{ window_min }} min\n<i>{{ reason }}</i>",
     },
     "site_online": {
         "label": "Sito di nuovo raggiungibile",
@@ -135,7 +135,7 @@ EVENTS: dict[str, dict[str, Any]] = {
         "vars": {"site_name": "Nome", "site_url": "URL", "date": "Data e ora"},
         "subject": "[Sentinel] {{ site_name }} di nuovo online",
         "email": """<p>🟢 <b>{{ site_name }}</b> di nuovo raggiungibile<br><a href="{{ site_url }}">{{ site_url }}</a></p>""",
-        "telegram": "🟢 <b>{{ site_name }}</b> di nuovo raggiungibile\n{{ site_url }}",
+        "telegram": "🟢 <b><a href=\"{{ site_url }}\">{{ site_name }}</a></b> di nuovo raggiungibile\n{{ site_url }}",
     },
     "client_report": {
         "label": "Report mensile al cliente",
@@ -296,7 +296,11 @@ def _esc(s: Any) -> str:
 
 # Modelli predefiniti delle versioni precedenti: una copia salvata IDENTICA a uno di questi non
 # e' una personalizzazione, e' il vecchio default rimasto nel database -> si usa quello nuovo.
+_LEGACY_DEFAULTS_2_28_17 = {('update_failed', 'body_telegram'): ('❌ <b>{{ site_name }}</b> — {{ failures_head }}{% if folder %}\\n📁 {{ folder }}{% endif %}\\n{{ failures_lines }}',), ('site_report', 'body_telegram'): ('{{ outcome_icon }} <b>{{ site_name }}</b> — {{ outcome_text }}\\n{% if folder %}📁 {{ folder }}\\n{% endif %}{{ updates_lines }}',), ('site_offline', 'body_telegram'): ('🔴 <b>{{ site_name }}</b> non raggiungibile\\n{{ site_url }}\\nConfermato dopo {{ attempts }} check in ~{{ window_min }} min\\n<i>{{ reason }}</i>',), ('site_online', 'body_telegram'): ('🟢 <b>{{ site_name }}</b> di nuovo raggiungibile\\n{{ site_url }}',), ('auto_rollback', 'body_telegram'): ("⏪ <b>{{ site_name }}</b> — ripristino automatico\n{% if folder %}📁 {{ folder }}\n{% endif %}La home non rispondeva dopo l'aggiornamento. Rimessa la versione precedente di:\n{{ items_lines }}\n{% if fixed %}✅ La home è tornata a rispondere.{% else %}🛑 La home è ancora in errore: va guardata a mano.{% endif %}\n🔒 Componenti bloccati alla versione precedente finché non li sblocchi.",)}
 _LEGACY_DEFAULTS = {('cycle_summary', 'subject'): ('[Sentinel] Ciclo completato: {{ applied }} update su {{ sites_touched }} siti',), ('cycle_summary', 'body_email'): ('<h3>Ciclo aggiornamenti completato</h3><p>✅ {{ applied }} update applicati su {{ sites_touched }} siti</p><pre style="font-family:inherit">{{ ok_lines }}</pre>{% if failed %}<p>❌ {{ failed }} falliti</p><pre style="font-family:inherit">{{ failed_lines }}</pre>{% endif %}',), ('cycle_summary', 'body_telegram'): ('📊 <b>Ciclo aggiornamenti completato</b>\n✅ {{ applied }} update applicati su {{ sites_touched }} siti\n{{ ok_lines }}{% if failed %}\n\n❌ {{ failed }} falliti\n{{ failed_lines }}{% endif %}',), ('site_report', 'subject'): ('[Sentinel] {{ site_name }}: {{ ok_count }} aggiornati, {{ failed_count }} falliti', '[Sentinel] {{ outcome_icon }} {{ site_name }} — {{ outcome_text }}'), ('site_report', 'body_email'): ('<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ updates_table }}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>', '<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">\n  <h2 style="margin:0 0 4px">{{ outcome_icon }} {{ site_name }}</h2>\n  <div style="color:#666;margin-bottom:14px">{{ cms }} &middot; <a href="{{ site_url }}">{{ site_url }}</a></div>\n  {{ status_box }}\n  {{ report_table }}\n  {% if panel_link %}<p style="margin-top:14px">{{ panel_link }}</p>{% endif %}\n  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>\n</div>'), ('site_report', 'body_telegram'): ('🛠 <b>{{ site_name }}</b> — {{ ok_count }} aggiornati, {{ failed_count }} falliti\n{{ updates_lines }}', '{{ outcome_icon }} <b>{{ site_name }}</b> — {{ outcome_text }}\n{{ updates_lines }}'), ('update_failed', 'subject'): ('[Sentinel] Update fallito su {{ site_name }}: {{ item }}',), ('update_failed', 'body_email'): ('<p><b>{{ site_name }}</b> — update fallito: <b>{{ item }}</b></p><p style="color:#b00020">{{ reason }}</p><p><a href="{{ site_url }}">{{ site_url }}</a></p>',), ('update_failed', 'body_telegram'): ('❌ <b>{{ site_name }}</b> — update fallito: {{ item }}\n<i>{{ reason }}</i>',)}
+
+for _k, _v in _LEGACY_DEFAULTS_2_28_17.items():
+    _LEGACY_DEFAULTS[_k] = tuple(_LEGACY_DEFAULTS.get(_k, ())) + _v
 
 
 def default_config(event: str, language: str | None = None) -> dict:
@@ -432,7 +436,10 @@ def _problem_lines(rep, lang, html=True):
     E = _esc if html else (lambda x: str(x or ""))
     out = []
     for x in rep:
-        site = f"<b>{E(x['site'])}</b>" if html else x["site"]
+        # il nome e' un link al sito: si apre dalla notifica senza ricordarsi l'indirizzo
+        site = (f"<b><a href=\"{E(x['url'])}\">{E(x['site'])}</a></b>" if x.get("url") else f"<b>{E(x['site'])}</b>") if html else x["site"]
+        if not html and x.get("url"):
+            site += f" ({x['url']})"
         if x.get("folder"):
             site += f" · <i>{E(x['folder'])}</i>" if html else f" · {x['folder']}"
         v = x.get("visual") or {}
@@ -499,7 +506,8 @@ def _cycle_telegram(rep, lang, panel_url, when):
         if len(items) > MAX_LINES:
             rows.append(f"<i>…{t('e altri', lang)} {len(items) - MAX_LINES}</i>")
         cnt = len(items)
-        title = (f"🌐 <b>{_esc(x['site'])}</b> · {cnt} "
+        name = f"<a href=\"{_esc(x['url'])}\">{_esc(x['site'])}</a>" if x.get("url") else _esc(x["site"])
+        title = (f"🌐 <b>{name}</b> · {cnt} "
                  f"{t('aggiornamento', lang) if cnt == 1 else t('aggiornamenti', lang)}")
         if x.get("folder"):
             title += f"\n📁 {_esc(x['folder'])}"
@@ -542,7 +550,7 @@ def _cycle_email(rep, lang, panel_url, when):
         folder = (f'<br><span style="color:#888;font-weight:400;font-size:12px">📁 {_esc(x["folder"])}</span>'
                   if x.get("folder") else "")
         h.append(f'<tr><td colspan="2" style="padding:14px 10px 6px;font-weight:600;border-bottom:2px solid #ddd">'
-                 f'{_esc(x["site"])} <span style="color:#888;font-weight:400">· {len(x["ok"])}</span>{link}{folder}</td></tr>')
+                 f'{(f"<a href=\"{_esc(x["url"])}\" style=\"color:inherit\">{_esc(x["site"])}</a>" if x.get("url") else _esc(x["site"]))} <span style="color:#888;font-weight:400">· {len(x["ok"])}</span>{link}{folder}</td></tr>')
         for r in x["ok"]:
             name = _esc(r.get("name"))
             if _is_core(r.get("name")) or _is_major_jump(r):

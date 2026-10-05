@@ -1204,3 +1204,25 @@ th.sortable:hover { color: var(--txt); }
 .offline-note{margin:12px 0;line-height:1.55}.offline-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.offline-totals strong{display:block;font-size:27px;line-height:1.4}
 .offline-summary{margin-bottom:14px}.offline-summary-scroll{max-height:260px;overflow:auto}.offline-table{width:100%;border-collapse:collapse;min-width:620px}.offline-table th{font-size:12px;color:var(--mut);text-align:left;background:var(--bg)}.offline-table td,.offline-table th{padding:12px 10px;border-bottom:1px solid var(--bd)}.offline-table .num{text-align:right}.offline-table .name{display:block;font-weight:600}.offline-filter-link{border:0;background:none;color:var(--acc);text-align:left;cursor:pointer;font:inherit;padding:4px 0;min-height:34px}.offline-episodes{min-width:1000px}.offline-reason{max-width:270px;overflow-wrap:anywhere}.offline-pager{justify-content:space-between;gap:10px;margin-top:14px}
 @media(max-width:600px){.offline-totals{gap:8px}.offline-totals .card{padding:12px}.offline-totals .small{font-size:11px}.offline-filters .field{min-width:100%;max-width:100%}.offline-log .card{min-width:0}.offline-log .table-scroll{max-width:100%;overflow:auto}}
+/* pagina Server: una riga per server, si apre a tendina */
+.srvx-list { margin-top: 16px; border: 1px solid var(--bd); border-radius: 14px; overflow: hidden; background: var(--panel); }
+.srvx-cols, .srvx-head { display: grid; grid-template-columns: 22px minmax(220px, 1.4fr) 190px 190px minmax(160px, 1fr) 48px; gap: 14px; align-items: center; padding: 10px 16px; }
+.srvx-cols { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); border-bottom: 1px solid var(--bd); }
+.srvx { border-bottom: 1px solid var(--bd); } .srvx:last-child { border-bottom: 0; }
+.srvx-head { cursor: pointer; } .srvx-head:hover, .srvx.open .srvx-head { background: var(--panel-2); }
+.srvx.hit .srvx-head { box-shadow: inset 3px 0 0 var(--acc); }
+.srvx-caret { color: var(--mut); }
+.srvx-name { min-width: 0; } .srvx-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srvpg-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.srvx-body { padding: 6px 16px 14px 52px; background: var(--panel-2); }
+.srvpg-editbox { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; padding: 10px 12px 12px; margin-bottom: 10px; background: var(--panel); border: 1px dashed var(--bd); border-radius: 10px; }
+.srvpg-editbox .field { margin: 0; }
+.srvpg-sites { display: flex; flex-direction: column; gap: 2px; }
+.srvpg-site { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; min-width: 0; }
+.srvpg-site:hover { background: var(--panel); }
+.srvpg-site.match { background: rgba(97,174,255,.12); box-shadow: inset 2px 0 0 var(--acc); }
+.srvpg-site .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srvpg-url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.srvpg-site .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--mut); }
+.srvpg-site .dot.ok { background: var(--ok); } .srvpg-site .dot.err { background: var(--err); } .srvpg-site .dot.warn { background: var(--warn); }
+@media (max-width: 1100px) { .srvx-cols { display: none; } .srvx-head { grid-template-columns: 22px 1fr auto; } .srvx-head > :nth-child(4), .srvx-head > :nth-child(5) { display: none; } .srvpg-editbox { grid-template-columns: 1fr; } }

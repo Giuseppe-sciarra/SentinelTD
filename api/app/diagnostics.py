@@ -29,7 +29,7 @@ async def store_diagnostics(s: AsyncSession, site: Site, data: dict) -> tuple[di
     """
     prev = site.diag or {}
     now = datetime.now(timezone.utc).isoformat()
-    new = {k: v for k, v in data.items() if k not in ("space", "sizes", "core")}
+    new = {k: v for k, v in data.items() if k not in ("space", "sizes", "core", "server")}
     new["at"] = now
     for part in ("space", "sizes", "core"):
         if data.get(part) is not None:

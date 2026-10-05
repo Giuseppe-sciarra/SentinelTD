@@ -42,6 +42,7 @@ function sentinel() {
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
+    srvpg: { list: [], q: '', open: {}, editing: '', busy: false },   // pagina Server: dove sta ogni sito
     tsort: {}, histQ: '', histType: '', problems: [],
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
@@ -278,7 +279,7 @@ function sentinel() {
       else if (p[0] === 'folder') { r.page = 'sites'; r.folder = decodeURIComponent(p[1] || ''); }
       else if (p[0] === 'site') { r.page = 'site'; r.siteId = parseInt(p[1]); r.tab = ['overview','ext','history'].includes(p[2]) ? p[2] : 'overview'; }
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
-      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins'].includes(p[0])) r.page = p[0];
+      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers'].includes(p[0])) r.page = p[0];
       this.route = r; this.sideOpen = false;
     },
     go(path) { location.hash = '#/' + path; },
@@ -296,6 +297,7 @@ function sentinel() {
       if (this.route.page === 'reports') { await this.loadReports(); }
       if (this.route.page === 'clients') { await this.loadClients(); }
       if (this.route.page === 'plugins') { await this.loadPluginCatalog(); }
+      if (this.route.page === 'servers') { await this.loadPrefs(); await this.loadServersPage(); }
       if (this.route.page === 'domain-expiries') { await this.loadPrefs(); await this.loadDomainExpiries(); }
       if (this.route.page === 'component-expiries') { await this.loadPrefs(); await this.loadComponentExpiries(); }
       window.scrollTo(0, 0);
@@ -1093,7 +1095,8 @@ function sentinel() {
                           'domain_decision_days', 'domain_alert_norenew', 'status_check_attempts', 'status_check_retry_seconds', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
-                       server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, server_labels: this.prefs.server_labels || {} };
+                       server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, pre_update_backup: this.prefs.pre_update_backup !== false, server_labels: this.prefs.server_labels || {}, server_panels: this.prefs.server_panels || {},
+                       visual_after_delay: this.prefs.visual_after_delay, visual_retry: this.prefs.visual_retry !== false, visual_noise: this.prefs.visual_noise !== false };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
           if (Number.isFinite(v)) body[k] = v;
@@ -1454,28 +1457,32 @@ function sentinel() {
       // ricarica dopo qualche minuto: le miniature si aggiornano man mano
       setTimeout(() => this.load(true), 90000);
     },
-    async shootNow(site) {
+    async shootNow(site, tries = 40) {
       this.busy['shot' + site.id] = true;
       try {
         const r = await this.api(`/api/sites/${site.id}/shot`, { method: 'POST' });
         if (!r.ok) { this.say('Anteprima non richiesta: coda non raggiungibile'); return; }
         this.say('Anteprima in aggiornamento…');
-        // lo scatto richiede qualche secondo: ricarico il sito finche' cambia il timestamp
-        const before = site.shot_at || '';
-        for (let i = 0; i < 12; i++) {
+        // lo scatto richiede qualche secondo, e fino a 1-2 minuti se il sito ha una verifica antibot
+        // o un video: si ricarica il sito finche' cambia l'orario dell'anteprima (riuscita) o
+        // compare/cambia quello del blocco (il sito ha respinto l'accesso automatico)
+        const before = site.shot_at || '', beforeBlocked = site.shot_blocked_at || '';
+        for (let i = 0; i < tries; i++) {
           await new Promise(res => setTimeout(res, 2500));
           const d = await this.api(`/api/sites/${site.id}`);
           if (!d.ok) break;
           const fresh = await d.json();
-          if ((fresh.shot_at || '') !== before) {
+          const done = (fresh.shot_at || '') !== before;
+          const blocked = !!fresh.shot_blocked_at && (fresh.shot_blocked_at || '') !== beforeBlocked;
+          if (done || blocked) {
             if (this.detail && this.detail.id === site.id) this.detail = fresh;
             const inList = this.sites.find(x => x.id === site.id);
             if (inList) Object.assign(inList, fresh);
-            this.say('Anteprima aggiornata');
+            this.say(blocked ? "Il sito respinge l'accesso automatico (antibot): anteprima non aggiornata" : 'Anteprima aggiornata');
             return;
           }
         }
-        this.say('Anteprima non ancora pronta: ricarica tra poco');
+        this.say('Lo scatto sta richiedendo più del solito (forse una verifica antibot o un video): ricarica tra poco');
       } finally { this.busy['shot' + site.id] = false; }
     },
 
@@ -1879,6 +1886,34 @@ function sentinel() {
     monthMax(months) { return Math.max(1, ...(months || []).map(m => m.ok + m.failed)); },
     problemIcon(k) { return { offline: '🔴', dns: '🌐', failed: '⚠️', php: '🐘', domain: '🌐' }[k] || '•'; },
     get srvLabelList() { return [...new Set(Object.values((this.prefs && this.prefs.server_labels) || {}))].sort((a, b) => a.localeCompare(b, 'it')); },
+    // ---------- pagina Server ----------
+    async loadServersPage() {
+      this.srvpg.busy = true;
+      try {
+        const r = await this.api('/api/preferences/servers');
+        if (r.ok) this.srvpg.list = await r.json();
+      } finally { this.srvpg.busy = false; }
+    },
+    srvpgEdit(ip) { this.srvpg.editing = this.srvpg.editing === ip ? '' : ip; this.srvpg.open = { ...this.srvpg.open, [ip]: true }; },
+    srvPanel(ip) { return ((this.prefs && this.prefs.server_panels) || {})[ip] || { url: '', note: '' }; },
+    setSrvPanel(ip, k, v) {
+      const all = { ...((this.prefs && this.prefs.server_panels) || {}) };
+      const cur = { ...(all[ip] || { url: '', note: '' }), [k]: String(v || '').trim() };
+      if (cur.url || cur.note) all[ip] = cur; else delete all[ip];
+      this.prefs.server_panels = all;
+    },
+    srvpgMatch(s) {
+      const q = (this.srvpg.q || '').trim().toLowerCase();
+      return !!q && [s.name, s.url, s.folder].some(v => String(v || '').toLowerCase().includes(q));
+    },
+    srvpgHit(g) { return !!(this.srvpg.q || '').trim() && g.items.some(s => this.srvpgMatch(s)); },
+    get srvpgFiltered() {
+      const q = (this.srvpg.q || '').trim().toLowerCase();
+      const list = [...(this.srvpg.list || [])].sort((a, b) => (this.srvLabel(a.server) || a.host || a.server).localeCompare(this.srvLabel(b.server) || b.host || b.server, 'it'));
+      if (!q) return list;
+      // resta un server se corrisponde lui (nome, IP, host, appunto) o uno dei suoi siti
+      return list.filter(g => [this.srvLabel(g.server), g.server, g.host, this.srvPanel(g.server).note].some(v => String(v || '').toLowerCase().includes(q)) || (g.items || []).some(s => this.srvpgMatch(s)));
+    },
     srvLabel(ip) { return ((this.prefs && this.prefs.server_labels) || {})[ip] || ''; },
     setSrvLabel(ip, v) { const l = { ...((this.prefs && this.prefs.server_labels) || {}) }; v = String(v || '').trim(); if (v) l[ip] = v; else delete l[ip]; this.prefs.server_labels = l; },
     // ---------- plugin del parco e plugin abbandonati ----------

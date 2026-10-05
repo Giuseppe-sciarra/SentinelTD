@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.32.0
+ * Version: 2.33.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -1009,6 +1009,9 @@ function tdpanop_update(WP_REST_Request $req)
 {
     $type = (string) $req->get_param('type');
     $slug = (string) $req->get_param('slug');
+    // copia zip prima dell'aggiornamento: il pannello manda backup=0 quando e' spenta in Impostazioni
+    // (e' l'operazione piu' pesante sull'hosting). Di base resta attiva.
+    $doBackup = (string) $req->get_param('backup') !== '0';
 
     require_once ABSPATH . 'wp-admin/includes/file.php';
     require_once ABSPATH . 'wp-admin/includes/misc.php';
@@ -1053,7 +1056,9 @@ function tdpanop_update(WP_REST_Request $req)
                 $expected = (string) $upd->response[$file]->new_version;
             }
 
-            tdpanop_backup_item('plugin', $slug);   // copia della versione attuale, per il ripristino
+            if ($doBackup) {
+                tdpanop_backup_item('plugin', $slug);   // copia della versione attuale, per il ripristino
+            }
             $up  = new Plugin_Upgrader($skin);
 
             // IMPORTANTE: Plugin_Upgrader disattiva il plugin PRIMA dell'upgrade quando NON
@@ -1122,7 +1127,9 @@ function tdpanop_update(WP_REST_Request $req)
                 $expected = (string) $upd->response[$slug]['new_version'];
             }
 
-            tdpanop_backup_item('theme', $slug);   // copia della versione attuale, per il ripristino
+            if ($doBackup) {
+                tdpanop_backup_item('theme', $slug);   // copia della versione attuale, per il ripristino
+            }
             $up  = new Theme_Upgrader($skin);
             $res = $up->upgrade($slug);
 
@@ -1318,6 +1325,7 @@ function tdpanop_ajax_update()
     $req->set_param('type', sanitize_key(wp_unslash((string) ($_POST['type'] ?? ''))));
     $req->set_param('slug', sanitize_text_field(wp_unslash((string) ($_POST['slug'] ?? ''))));
     $req->set_param('expected', sanitize_text_field(wp_unslash((string) ($_POST['expected'] ?? ''))));
+    $req->set_param('backup', sanitize_text_field(wp_unslash((string) ($_POST['backup'] ?? '1'))));
     $resp = tdpanop_update($req);
     $data = ($resp instanceof WP_REST_Response) ? (array) $resp->get_data() : (array) $resp;
     $data['context'] = 'admin';

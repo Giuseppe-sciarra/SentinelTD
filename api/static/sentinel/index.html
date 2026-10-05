@@ -85,6 +85,9 @@
         <a :class="route.page==='plugins'?'on':''" href="#/plugins">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z"/><path d="M12 6v6l4 2"/></svg>
           <span class="txt">Plugin abbandonati</span></a>
+        <a :class="route.page==='servers'?'on':''" href="#/servers">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>
+          <span class="txt">Gestione server</span></a>
 
         <div class="lbl">Cartelle</div>
         <template x-for="f in folderTree" :key="f.name">
@@ -914,6 +917,67 @@
         </template>
 
         <!-- ===== REPORT MENSILE ===== -->
+        <template x-if="route.page==='servers'">
+          <div>
+            <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+              <div style="flex:1;min-width:280px">
+                <h1 class="page-title">Gestione server</h1>
+                <div class="page-sub">Dove sta ogni sito. Il server è l'indirizzo IP del dominio; tu gli dai un nome, il link al pannello dell'hosting e un appunto. Cerca un sito per sapere su che hosting sta.</div>
+              </div>
+              <button class="btn" @click="loadServersPage()" :disabled="srvpg.busy">Ricarica</button>
+            </div>
+            <div class="card" style="margin-top:16px">
+              <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
+                <input class="input" style="flex:1;min-width:260px" x-model="srvpg.q" placeholder="Cerca un sito, un server, un IP o una cartella…">
+                <span class="small mut" x-text="srvpgFiltered.length + ' ' + pl(srvpgFiltered.length, 'server', 'server') + ' · ' + srvpgFiltered.reduce((n, g) => n + g.items.length, 0) + ' ' + pl(srvpgFiltered.reduce((n, g) => n + g.items.length, 0), 'sito', 'siti')"></span>
+              </div>
+              <div class="small ok" style="margin-top:8px" x-show="prefs && prefs.msg" x-text="prefs && prefs.msg"></div>
+              <div class="small err" style="margin-top:8px" x-show="prefs && prefs.err" x-text="prefs && prefs.err"></div>
+            </div>
+            <div class="small mut" style="margin-top:16px" x-show="srvpg.busy && !srvpg.list.length"><span class="spinner"></span> Lettura dei server…</div>
+            <div class="small mut" style="margin-top:16px" x-show="!srvpg.busy && srvpg.list.length && !srvpgFiltered.length">Nessun sito o server corrisponde alla ricerca.</div>
+            <div class="srvx-list" x-show="srvpgFiltered.length">
+              <div class="srvx-cols"><span></span><span>Server</span><span>Siti</span><span>Pannello hosting</span><span>Appunto</span><span></span></div>
+              <template x-for="g in srvpgFiltered" :key="'sp'+g.server">
+                <div class="srvx" :class="[srvpg.open[g.server] || srvpgHit(g) ? 'open' : '', srvpgHit(g) ? 'hit' : '']">
+                  <div class="srvx-head" @click="srvpg.open = { ...srvpg.open, [g.server]: !srvpg.open[g.server] }">
+                    <span class="srvx-caret" x-text="(srvpg.open[g.server] || srvpgHit(g)) ? '▾' : '▸'"></span>
+                    <div class="srvx-name">
+                      <b x-text="srvLabel(g.server) || g.host || g.server" translate="no"></b>
+                      <div class="small mut mono" translate="no"><span x-text="g.server"></span><span x-show="g.host && srvLabel(g.server)" x-text="' · ' + g.host"></span></div>
+                    </div>
+                    <div><b x-text="g.sites"></b> <span class="small mut" x-text="g.items.filter(s => s.cms !== 'wp').length ? g.items.filter(s => s.cms === 'wp').length + ' WordPress · ' + g.items.filter(s => s.cms !== 'wp').length + ' Joomla' : 'WordPress'"></span></div>
+                    <div><a class="btn primary sm" x-show="srvPanel(g.server).url" :href="srvPanel(g.server).url" target="_blank" rel="noopener" @click.stop>🔑 Apri il pannello</a><span class="small mut" x-show="!srvPanel(g.server).url">—</span></div>
+                    <div class="small mut srvpg-note" x-text="srvPanel(g.server).note || '—'" translate="no"></div>
+                    <div style="text-align:right"><button class="btn sm" @click.stop="srvpgEdit(g.server)" title="Nome, link al pannello, appunto">✏️</button></div>
+                  </div>
+                  <div class="srvx-body" x-show="srvpg.open[g.server] || srvpgHit(g)">
+                    <template x-if="srvpg.editing === g.server">
+                      <div class="srvpg-editbox">
+                        <div class="field"><label>Nome del server</label><input class="input" :value="srvLabel(g.server)" @change="setSrvLabel(g.server, $event.target.value)" placeholder="es. SiteGround cliente X"></div>
+                        <div class="field"><label>Link al pannello dell'hosting</label><input class="input" :value="srvPanel(g.server).url" @change="setSrvPanel(g.server, 'url', $event.target.value)" placeholder="cPanel, Plesk, aaPanel, SiteGround…"></div>
+                        <div class="field"><label>Appunto</label><input class="input" :value="srvPanel(g.server).note" @change="setSrvPanel(g.server, 'note', $event.target.value)" placeholder="provider, nome utente, chi ha le credenziali… (mai password)"></div>
+                        <div class="row" style="gap:8px"><button class="btn primary" @click="savePrefs(); srvpg.editing = ''" :disabled="!!(prefs && prefs.busy)">Salva</button><button class="btn" @click="srvpg.editing = ''">Annulla</button></div>
+                      </div>
+                    </template>
+                    <div class="srvpg-sites">
+                      <template x-for="s in g.items" :key="'sps'+s.id">
+                        <div class="srvpg-site" :class="srvpgMatch(s) ? 'match' : ''">
+                          <span class="dot" :class="s.status==='ok' ? 'ok' : (s.status==='error' ? 'err' : 'warn')" :title="s.status==='ok' ? 'raggiungibile' : (s.status==='error' ? 'offline' : 'in attesa')"></span>
+                          <a :href="'#/site/'+s.id" class="name" x-text="s.name" translate="no"></a>
+                          <span class="cms" :class="s.cms" x-text="s.cms==='wp' ? 'WP' : 'J'"></span>
+                          <a :href="s.url" target="_blank" rel="noopener" class="small mono mut srvpg-url" x-text="(s.url || '').replace(/^https?:\/\//, '')" translate="no"></a>
+                          <span class="small mut" x-show="s.folder" x-text="s.folder" translate="no"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
         <template x-if="route.page==='plugins'">
           <div>
             <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
@@ -1455,6 +1519,13 @@
                     <div class="field"><label>Conserva la cronologia dettagliata per</label><div class="input-suffix"><input class="input" type="number" min="7" max="3650" x-model.number="prefs.history_retention_days"><span>giorni</span></div><div class="hint">Serve al report dettagliato ("dalla versione X alla Y" per ogni aggiornamento). I totali mensili restano per sempre.</div></div>
                     <div class="field"><label>Email dei report di aggiornamento</label><select class="input" x-model="prefs.email_report_mode"><option value="site" :selected="prefs.email_report_mode==='site'">Un'email per ogni sito</option><option value="cycle" :selected="prefs.email_report_mode==='cycle'">Un riepilogo unico per ciclo</option></select><div class="hint">Con il riepilogo unico arriva una sola email a fine ciclo, con tutti i siti aggiornati, invece di una per sito. Telegram non cambia.</div></div>
                     <label class="check" style="padding:4px 0 10px;grid-column:1/-1"><input type="checkbox" x-model="prefs.auto_rollback"> Ripristino automatico: se la home si rompe dopo un aggiornamento, rimetti le copie fatte prima e blocca quei componenti</label>
+                    <div style="grid-column:1/-1;padding:0 0 10px"><label class="check"><input type="checkbox" x-model="prefs.pre_update_backup"> Copia di sicurezza prima di ogni aggiornamento: zip del plugin o tema sull'hosting, serve al ripristino</label><div class="hint" style="margin-top:4px">È l'operazione più pesante che Sentinel fa sugli hosting (fino a 300 MB per componente). Spenta, il ripristino manuale e quello automatico non hanno nulla da rimettere. Vale per WordPress con connettore 2.33 o più recente.</div></div>
+                    <div class="field"><label>Controllo della home: attesa prima della foto "dopo"</label><div class="input-suffix"><input class="input" type="number" min="0" max="180" x-model.number="prefs.visual_after_delay"><span>secondi</span></div><div class="hint">Su un hosting lento la pagina si assesta solo dopo un po': fotografare subito la segnava "cambiata" per niente. 0 la disattiva.</div></div>
+                    <div class="field">
+                      <label class="check" style="margin-top:26px"><input type="checkbox" x-model="prefs.visual_retry"> Se risulta cambiata, rifotografa e tieni il risultato migliore</label>
+                      <label class="check" style="margin-top:8px"><input type="checkbox" x-model="prefs.visual_noise"> Misura quanto la home cambia da sola e sottrailo</label>
+                      <div class="hint">Due foto "prima" a pochi secondi: se differiscono (video, slider, lentezza) quella differenza è rumore, non un cambiamento. Una home rotta davvero resta segnalata.</div>
+                    </div>
                     <div class="field"><label>Tentativi totali per un check del sito</label><input class="input" type="number" min="1" max="5" x-model.number="prefs.status_check_attempts"><div class="hint">Comprende il primo controllo. 1 = nessun retry; 3 = primo controllo più 2 retry.</div></div>
                     <div class="field"><label>Pausa tra i retry del sito</label><div class="input-suffix"><input class="input" type="number" min="1" max="60" x-model.number="prefs.status_check_retry_seconds"><span>secondi</span></div><div class="hint">Vale per errori di connessione e DNS temporanei. I timeout di lettura passano al ricontrollo successivo, evitando richieste duplicate.</div></div>
                     <div class="field"><label>Avvisa che un sito non risponde dopo</label><div class="input-suffix"><input class="input" type="number" min="0" max="120" x-model.number="prefs.offline_alert_minutes"><span>minuti</span></div><div class="hint">Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.</div></div>
