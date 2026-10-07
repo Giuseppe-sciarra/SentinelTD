@@ -3,6 +3,7 @@ from datetime import timezone
 from urllib.parse import urlsplit
 
 from sqlalchemy import select
+from .eventlog import record as evlog
 from .models import OfflineEpisode, Site
 
 
@@ -33,6 +34,9 @@ async def record_availability(session, site):
     if site.status == "ok":
         if episode and checked >= utc(episode.last_failed_at):
             episode.ended_at = checked
+            mins = int((checked - utc(episode.confirmed_at)).total_seconds() // 60)
+            await evlog(session, "availability", "ok", f"Di nuovo raggiungibile dopo {mins} min", site=site,
+                        details={"offline_minutes": mins, "failed_checks": episode.failed_checks})
         return
     if episode:
         # Applying the same result twice (worker notification path) is idempotent.
@@ -51,5 +55,7 @@ async def record_availability(session, site):
     session.add(OfflineEpisode(site_id=site.id, site_name=site.name, site_url=site.url,
                               server_key=server, started_at=min(utc(site.offline_since), checked),
                               confirmed_at=checked, last_failed_at=checked, reason=(site.error or "")[:480]))
+    await evlog(session, "availability", "error", f"Sito non raggiungibile: {(site.error or 'nessuna risposta')[:200]}", site=site,
+                details={"reason": site.error or "", "since": str(site.offline_since or "")})
     # Make it visible if the worker reuses this transaction before committing.
     await session.flush()

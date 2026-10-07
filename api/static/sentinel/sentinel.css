@@ -1230,3 +1230,18 @@ th.sortable:hover { color: var(--txt); }
 .srvx-sort { cursor: pointer; user-select: none; } .srvx-sort:hover { color: var(--txt); }
 .srv-machines { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .srv-machine { display: grid; grid-template-columns: 200px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+/* Registro degli eventi */
+.evl-days { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.evl-day-h { font-size: 13.5px; padding: 0 2px 6px; border-bottom: 1px solid var(--bd); margin-bottom: 6px; text-transform: capitalize; }
+.evl-day-h .small { text-transform: none; }
+.evl-row { display: grid; grid-template-columns: 70px 26px minmax(0, 1fr); gap: 10px; align-items: start; padding: 6px 10px; border-radius: 8px; border-left: 3px solid transparent; }
+.evl-row:hover { background: var(--panel-2); }
+.evl-row.lv-error { border-left-color: var(--err); background: rgba(255,93,108,.05); }
+.evl-row.lv-warn { border-left-color: var(--warn); }
+.evl-row.lv-ok { border-left-color: var(--ok); }
+.evl-time { padding-top: 2px; }
+.evl-cat { text-align: center; }
+.evl-main { min-width: 0; line-height: 1.5; }
+.evl-site { font-weight: 600; margin-right: 6px; }
+.evl-more { background: none; border: 0; color: var(--acc); cursor: pointer; margin-left: 6px; padding: 0; }
+.evl-details { margin: 6px 0 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--bd); border-radius: 8px; white-space: pre-wrap; max-height: 220px; overflow: auto; }

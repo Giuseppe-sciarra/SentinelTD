@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.31.1 — Tetto del registro
+
+### Changed
+- La voce **Registro** nel menu sta sotto **Account**, non più sotto Sicurezza.
+
+### Added
+- **Tetto massimo del registro**: *Impostazioni → Tetto massimo del registro* N righe
+  (`log_max_rows`, di base 20000, da 500 a 1.000.000). La pulizia notturna cancella le righe
+  più vecchie dei giorni impostati **e** quelle oltre il tetto, anche se rientrano nei giorni:
+  il registro non cresce mai oltre. `eventlog.purge(days, max_rows)`.
+
+## 2.31.0 — Registro degli eventi
+
+### Added
+- **Pagina Registro** nel menu: tutto quello che Sentinel fa o vede, una riga per evento, in ordine
+  di tempo e divisa per giorno. Categorie: offline / online, aggiornamenti (riusciti, falliti,
+  saltati, ripristini automatici, riepilogo del ciclo), controllo della home, anteprime respinte,
+  connettori installati, avvisi di scadenza, vulnerabilità trovate, report inviati, sistema.
+  Filtri per categoria (con i conteggi), livello (errori, avvisi, riusciti), intervallo (24 ore,
+  7 giorni, 30 giorni, o da… a… con data e ora) e ricerca per testo su messaggio, sito e dettagli.
+  Ogni riga ha l'ora, il link al sito e i dettagli apribili. Tabella `event_log`, modulo
+  `app/eventlog.py`, API `GET /api/eventlog`. Scrivere nel registro non interrompe mai il lavoro
+  vero: ogni errore è inghiottito.
+- **Conservazione impostabile**: *Impostazioni → Conserva il registro degli eventi per* N giorni
+  (`log_retention_days`, di base 30); pulizia ogni notte alle 3:10.
+- Gli alert di sicurezza portano anche `site_id` (serve al registro per linkare il sito).
+
 ## 2.30.6
 
 ### Fixed

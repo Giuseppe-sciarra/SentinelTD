@@ -42,7 +42,8 @@ function sentinel() {
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
-    srvpg: { list: [], q: '', open: {}, editing: '', busy: false },   // pagina Server: dove sta ogni sito
+    srvpg: { list: [], q: '', open: {}, editing: '', busy: false },
+    evl: { items: [], total: 0, counts: {}, q: '', category: '', level: '', range: '7', since: '', until: '', open: {}, busy: false },   // Registro   // pagina Server: dove sta ogni sito
     tsort: { srvpg: { k: 'name', d: 1 } }, histQ: '', histType: '', problems: [],   // Gestione server: di base per nome server
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
@@ -279,7 +280,7 @@ function sentinel() {
       else if (p[0] === 'folder') { r.page = 'sites'; r.folder = decodeURIComponent(p[1] || ''); }
       else if (p[0] === 'site') { r.page = 'site'; r.siteId = parseInt(p[1]); r.tab = ['overview','ext','history'].includes(p[2]) ? p[2] : 'overview'; }
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
-      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers'].includes(p[0])) r.page = p[0];
+      else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers', 'eventlog'].includes(p[0])) r.page = p[0];
       this.route = r; this.sideOpen = false;
     },
     go(path) { location.hash = '#/' + path; },
@@ -298,6 +299,7 @@ function sentinel() {
       if (this.route.page === 'clients') { await this.loadClients(); }
       if (this.route.page === 'plugins') { await this.loadPluginCatalog(); }
       if (this.route.page === 'servers') { await this.loadPrefs(); await this.loadServersPage(); }
+      if (this.route.page === 'eventlog') { await this.loadEventLog(); }
       if (this.route.page === 'domain-expiries') { await this.loadPrefs(); await this.loadDomainExpiries(); }
       if (this.route.page === 'component-expiries') { await this.loadPrefs(); await this.loadComponentExpiries(); }
       window.scrollTo(0, 0);
@@ -1092,7 +1094,7 @@ function sentinel() {
         // una nuova impostazione non richiede di ricordarsi di inserirla anche qui
         // (era successo con screenshot_every_hours: il valore non partiva e tornava al default).
         const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'domain_pause_seconds', 'domain_source_attempts', 'expiry_warning_days',
-                          'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days',
+                          'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days', 'log_retention_days', 'log_max_rows',
                           'domain_decision_days', 'domain_alert_norenew', 'status_check_attempts', 'status_check_retry_seconds', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
@@ -1888,6 +1890,44 @@ function sentinel() {
     monthMax(months) { return Math.max(1, ...(months || []).map(m => m.ok + m.failed)); },
     problemIcon(k) { return { offline: '🔴', dns: '🌐', failed: '⚠️', php: '🐘', domain: '🌐' }[k] || '•'; },
     get srvLabelList() { return [...new Set(Object.values((this.prefs && this.prefs.server_labels) || {}))].sort((a, b) => a.localeCompare(b, 'it')); },
+    // ---------- Registro ----------
+    get evlCats() {
+      return [['availability', '🔴', 'Offline / online'], ['updates', '📦', 'Aggiornamenti'], ['home', '🖼', 'Controllo home'], ['screenshots', '📷', 'Anteprime'], ['connectors', '🔌', 'Connettori'], ['domains', '🌐', 'Scadenze'], ['security', '🛡', 'Sicurezza'], ['reports', '📄', 'Report'], ['system', '⚙️', 'Sistema']].map(([key, icon, label]) => ({ key, icon, label }));
+    },
+    evlCatIcon(k) { const c = this.evlCats.find(x => x.key === k); return c ? c.icon : '•'; },
+    evlCatLabel(k) { const c = this.evlCats.find(x => x.key === k); return c ? c.label : k; },
+    evlPretty(d) { try { return JSON.stringify(JSON.parse(d), null, 2); } catch (e) { return d; } },
+    evlRange() { if (this.evl.range !== 'custom') { this.evl.since = ''; this.evl.until = ''; } this.loadEventLog(); },
+    async loadEventLog(more = false) {
+      this.evl.busy = true;
+      try {
+        const p = new URLSearchParams();
+        if (this.evl.q) p.set('q', this.evl.q);
+        if (this.evl.category) p.set('category', this.evl.category);
+        if (this.evl.level === 'warn') { /* avvisi ed errori: si filtra lato client */ } else if (this.evl.level) p.set('level', this.evl.level);
+        if (this.evl.range === 'custom') {
+          if (this.evl.since) p.set('since', new Date(this.evl.since).toISOString());
+          if (this.evl.until) p.set('until', new Date(this.evl.until).toISOString());
+        } else p.set('since', new Date(Date.now() - parseInt(this.evl.range, 10) * 86400000).toISOString());
+        p.set('limit', '300'); p.set('offset', more ? String(this.evl.items.length) : '0');
+        const r = await this.api('/api/eventlog?' + p.toString());
+        if (!r.ok) return;
+        const d = await r.json();
+        let items = d.items;
+        if (this.evl.level === 'warn') items = items.filter(e => e.level === 'warn' || e.level === 'error');
+        this.evl.items = more ? [...this.evl.items, ...items] : items;
+        this.evl.total = d.total; this.evl.counts = d.counts || {};
+      } finally { this.evl.busy = false; }
+    },
+    get evlByDay() {
+      const out = []; let cur = null;
+      for (const e of this.evl.items) {
+        const t = new Date(e.at), d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+        if (!cur || cur.day !== d) { cur = { day: d, rows: [], errors: 0 }; out.push(cur); }
+        cur.rows.push(e); if (e.level === 'error') cur.errors++;
+      }
+      return out;
+    },
     // ---------- pagina Server ----------
     async saveServersPage() { await this.savePrefs(); this.srvpg.editing = ''; await this.loadServersPage(); },
     async loadServersPage() {

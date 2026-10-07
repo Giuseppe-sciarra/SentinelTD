@@ -94,6 +94,9 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 **Sicurezza e scadenze**
 - Vulnerabilità note confrontate con le estensioni realmente installate, con gravità e
   versione che risolve
+- **Registro**: tutto quello che Sentinel fa o vede, in ordine di tempo — siti offline e tornati
+  online, aggiornamenti, controlli della home, anteprime, connettori, scadenze, vulnerabilità,
+  report — cercabile per testo, sito, categoria, giorno e ora; conservato per i giorni che imposti
 - **Gestione server**: dove sta ogni sito, raggruppati per server (l'IP del dominio) con il nome che gli
   dai, un pulsante al pannello dell'hosting e un appunto; cerchi un sito e sai su che hosting sta.
   Nessuna statistica: sugli hosting non si misura niente

@@ -131,6 +131,19 @@ class OfflineEpisode(Base):
                            postgresql_where=ended_at.is_(None), sqlite_where=ended_at.is_(None)),)
 
 
+class EventLog(Base):
+    """Registro degli eventi (pagina Registro): una riga per cosa successa, pulita ogni notte."""
+    __tablename__ = "event_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    category: Mapped[str] = mapped_column(String(32), index=True)
+    level: Mapped[str] = mapped_column(String(8), default="info")
+    site_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    site_name: Mapped[str] = mapped_column(String(190), default="")
+    message: Mapped[str] = mapped_column(String(500))
+    details: Mapped[str] = mapped_column(Text, default="")
+
+
 class Extension(Base):
     __tablename__ = "extensions"
 

@@ -30,6 +30,7 @@ from .errtext import clean_error
 from .servers import server_of, acquire as srv_acquire, release as srv_release
 from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
+from .eventlog import record as evlog, record_now as evlog_now
 from .screenshot_schedule import screenshot_due, enqueue_screenshot
 from .telegram import send_telegram
 from .i18n import DEFAULT_LANGUAGE, t
@@ -468,6 +469,9 @@ async def _dispatch_expiry(*, kind: str, item: str, provider: str, notes: str,
     })
     if result["email"] or result["telegram"]:
         sent.add(threshold)
+        await evlog_now("domains", "warn" if days > 0 else "error",
+                        f"Avviso di scadenza inviato: {kind} {item} scade {'tra ' + str(days) + ' giorni' if days > 0 else 'oggi' if days == 0 else 'da ' + str(-days) + ' giorni'}",
+                        site_name=site_name, details={"kind": kind, "item": item, "days": days, "threshold": threshold})
         return _save_alert_state(state, sent), True
     return _save_alert_state(state, sent), False
 
@@ -820,6 +824,7 @@ async def shoot_site(ctx, site_id: int):
                 if res.get("blocked"):
                     # il sito respinge l'accesso automatico (antibot, 403): lo segno, cosi' si vede
                     site.shot_blocked_at = now
+                    await evlog(s, "screenshots", "warn", "Anteprima respinta dal sito (antibot): tenuta l'ultima buona", site=site)
                     log.warning("ANTEPRIMA RESPINTA DAL SITO '%s' (id=%s): probabile antibot, consenti l'IP del pannello",
                                 site.name, site.id)
                 else:
@@ -1420,6 +1425,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # PRIMA usciva in silenzio: se il connect moriva proprio qui, il ciclo saltava
             # il sito senza log ne' notifica e il pending restava li' per ore senza che
             # nessuno se ne accorgesse (caso reale: core WP di shop). Ora lascia traccia.
+            await evlog_now("updates", "warn", "Aggiornamenti saltati: il sito era in errore al momento del ciclo, si riprova al prossimo", site=site, details={"error": site.error or ""})
             log.warning("UPDATE SALTATO '%s' (id=%s): sito in errore dopo il refresh (%s) — riprovo al prossimo ciclo",
                         site.name, site.id, (site.error or "status=" + str(site.status))[:200])
             if site.status == "check_pending":
@@ -1674,6 +1680,8 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             if not res["ok"]:
                 log.warning("UPDATE FALLITO '%s' (id=%s): %s  %s -> %s  | motivo: %s",
                             site.name, site.id, name, current, res["new"] or "?", res.get("error") or "")
+                await evlog(s, "updates", "error", f"Aggiornamento fallito: {name} {current or '?'} → {res['new'] or '?'}: {(res.get('error') or '')[:200]}",
+                            site=site, details={"type": etype, "slug": sl, "from": current, "to": res["new"], "error": res.get("error") or ""})
                 failures.append({"name": name, "from": current or "",
                                  "to": res["new"] or (ext.new_version if ext is not None else "")
                                        or (site.core_latest if etype == "core" else "") or "",
@@ -1681,6 +1689,8 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             elif res["new"]:
                 log.info("UPDATE OK '%s' (id=%s): %s  %s -> %s",
                          site.name, site.id, name, current, res["new"])
+                await evlog(s, "updates", "ok", f"Aggiornato {name} {current or '?'} → {res['new']}", site=site,
+                            details={"type": etype, "slug": sl, "from": current, "to": res["new"], "backup": res.get("backup") or ""})
             await asyncio.sleep(item_pause)
 
         for (e, _t, sl, nm, cur) in held:
@@ -1750,6 +1760,8 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                     shot_after, visual = shot_after2, visual2
             lvl = log.warning if visual["status"] in ("warn", "ko") else log.info
             lvl("CONTROLLO HOME '%s' (id=%s): %s — %s", site.name, site.id, visual["status"], visual["message"])
+            await evlog(s, "home", {"ok": "ok", "warn": "warn", "ko": "error"}.get(visual["status"], "info"), f"Controllo della home: {visual['message']}", site=site,
+                        details={"status": visual["status"], "diff": visual.get("diff")})
 
             # RIPRISTINO AUTOMATICO: la home si e' ROTTA (errore o 5xx che prima non c'erano) e
             # ci sono copie fatte prima degli aggiornamenti -> si rimettono, dall'ultimo al
@@ -1767,6 +1779,8 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                     await record_rollback(s, site, r["type"], r["name"], r["slug"], rb, "automatico")
                     rolled.append({"name": r["name"], "from": r["to"], "to": rb.get("to") or r["from"], "ok": rb["ok"], "error": rb.get("error") or ""})
                     log.warning("RIPRISTINO AUTOMATICO '%s' (id=%s): %s %s -> %s: %s", site.name, site.id, r["name"], r["to"], rb.get("to"), "ok" if rb["ok"] else rb.get("error"))
+                await evlog(s, "updates", "warn", "Ripristino automatico: la home era in errore, rimessa la versione precedente di " + ", ".join(r["name"] for r in rolled),
+                            site=site, details={"items": rolled})
                 await s.commit()
                 shot_fixed = await _visual_shot(site, "after")
                 fixed = _visual_verdict(shot_before, shot_fixed, None)
@@ -1968,6 +1982,21 @@ _CYCLE_KEYS = ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed", "tg:cycl
                "tg:cycle:report")
 
 
+async def eventlog_purge(ctx):
+    """Registro eventi: cancella le righe piu' vecchie di `log_retention_days` (Impostazioni)."""
+    from .eventlog import purge
+    try:
+        prefs = await get_operational_settings()
+        days = int(prefs.get("log_retention_days") or 30)
+        max_rows = int(prefs.get("log_max_rows") or 0)
+        n = await purge(days, max_rows)
+        if n:
+            log.info("registro eventi: cancellate %d righe (oltre %d giorni o oltre il tetto di %d righe)", n, days, max_rows)
+            await evlog_now("system", "info", f"Pulizia del registro: cancellate {n} righe (oltre {days} giorni o oltre il tetto di {max_rows} righe)")
+    except Exception as ex:  # noqa: BLE001
+        log.warning("registro eventi: pulizia non riuscita: %s", ex)
+
+
 async def cycle_summary(ctx):
     """Legge i contatori del ciclo da Redis e manda UN riepilogo Telegram (parte B).
 
@@ -2010,6 +2039,9 @@ async def cycle_summary(ctx):
         manual_detail = _dec(r_manual_detail)
         visual_detail = _dec(r_visual_detail)
         visual_ok = int(r_visual_ok or 0)
+        if applied > 0 or failed > 0:
+            await evlog_now("updates", "error" if failed else "ok", f"Ciclo di aggiornamento concluso: {applied} aggiornati su {sites_touched} siti, {failed} falliti",
+                            details={"applied": applied, "sites": sites_touched, "failed": failed, "home_ok": visual_ok, "home_to_check": len(visual_detail)})
         if applied > 0 or failed > 0:
             MAX_ROWS = 30
             ok_lines = "\n".join(f"• {x}" for x in ok_detail[:MAX_ROWS]) + (f"\n…e altri {len(ok_detail) - MAX_ROWS} siti" if len(ok_detail) > MAX_ROWS else "")
@@ -2065,6 +2097,16 @@ async def security_scan(ctx):
         len(new_alerts),
     )
 
+    for a in new_alerts[:50]:
+        try:
+            v = a["vuln"]
+            sev = str(v.severity or "unknown").lower()
+            await evlog_now("security", "error" if sev in ("critical", "high") else "warn",
+                            f"Vulnerabilità: {a.get('ext_name') or '?'} {a.get('ext_version') or ''} — {v.cve_id or ''} ({sev}){' · sfruttata in rete' if v.exploited_in_wild else ''}",
+                            site_id=a.get("site_id"), site_name=a.get("site_name") or "",
+                            details={"cve_id": v.cve_id or "", "severity": sev, "version_fixed": v.version_fixed or "", "exploited": bool(v.exploited_in_wild)})
+        except Exception:  # noqa: BLE001
+            pass
     if new_alerts:
         try:
             sent = await _notify_vulns(new_alerts)
@@ -2151,6 +2193,10 @@ async def monthly_report(ctx):
         results += await send_clients(period, only_pending=True, already=sent_before)
     if not results:
         return
+    for r in results:
+        await evlog_now("reports", "ok" if r.get("sent") else "error",
+                        (f"Report {period} inviato: {r.get('scope_label') or r.get('scope')}" if r.get("sent") else f"Report {period} NON inviato ({r.get('scope_label') or r.get('scope')}): {(r.get('error') or '')[:200]}"),
+                        details={"period": period, "scope": r.get("scope"), "to": r.get("to"), "error": r.get("error") or ""})
     ok_scopes = sent_before + [r["scope"] for r in results if r.get("sent")]
     async with SessionLocal() as s:
         row = await s.get(AppSetting, rep.LAST_SENT_KEY)
@@ -2290,6 +2336,9 @@ async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
             await redis.enqueue_job("install_site", job, site_id, 2, _defer_by=60)
             return
         await _inst_set(redis, job, site.id, {**base, **res, "state": "done", "error": clean_error(res.get("error"))})
+        await evlog_now("connectors", "ok" if res.get("ok") else "error",
+                        (f"Connettore installato ({res.get('version') or 'versione sconosciuta'})" if res.get("ok") else f"Installazione del connettore fallita: {clean_error(res.get('error'))[:200]}"),
+                        site=site, details={"version": res.get("version"), "error": res.get("error") or ""})
         if res.get("ok"):
             # installato (es. il connettore nuovo): il pannello rifa' da solo il controllo del sito tra
             # poco, cosi' legge subito versione del connettore, nome macchina e stato, senza aspettare
@@ -2345,7 +2394,7 @@ async def retired_diagnostics_job(ctx, *args):
 
 
 class WorkerSettings:
-    functions = [poll_site, arq_func(shoot_site, keep_result=0), update_site, cycle_summary, mass_update_now,
+    functions = [poll_site, arq_func(shoot_site, keep_result=0), update_site, cycle_summary, mass_update_now, eventlog_purge,
                  mass_update_selected, security_scan, vendor_scan, arq_func(domain_expiry_scan, timeout=21600, keep_result=0), monthly_report,
                  arq_func(retired_diagnostics_job, name="diag_site", keep_result=0), connector_rollout, plugin_catalog_scan, install_site]
     cron_jobs = [
@@ -2357,7 +2406,8 @@ class WorkerSettings:
         cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True, timeout=21600),  # reminder giornalieri; registro secondo i giorni impostati; errori ritentati ogni giorno
         cron(monthly_report, minute=set(range(0, 60, 5))),   # ogni 5 minuti: invia quando giorno e orario sono arrivati
         cron(connector_rollout, hour={4}, minute={30}),   # connettore nuovo sui siti che ne hanno uno vecchio
-        cron(plugin_catalog_scan, weekday={6}, hour={5}, minute={0}, run_at_startup=True),   # catalogo plugin da wordpress.org: la domenica, e al primo avvio
+        cron(plugin_catalog_scan, weekday={6}, hour={5}, minute={0}, run_at_startup=True),
+        cron(eventlog_purge, hour={3}, minute={10}),   # registro eventi: via le righe piu' vecchie di log_retention_days   # catalogo plugin da wordpress.org: la domenica, e al primo avvio
     ]
     on_startup = _startup
     on_shutdown = _shutdown

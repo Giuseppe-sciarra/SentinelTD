@@ -79,6 +79,9 @@ Your server, your data, your branding.
 **Security and renewals**
 - Vulnerability feed matched against the extensions actually installed, with severity and
   the version that fixes each issue
+- **Log**: everything Sentinel does or sees, in time order — sites offline and back online,
+  updates, homepage checks, previews, connectors, expiries, vulnerabilities, reports — searchable
+  by text, site, category, day and time; kept for a configurable number of days
 - **Server management**: where each site lives, grouped by server (the domain's IP) with the name you give
   it, a button to the hosting panel and a note; search a site to know which hosting it is on.
   No server statistics: nothing is measured on the hostings

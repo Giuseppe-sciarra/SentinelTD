@@ -19,6 +19,8 @@ DEFAULTS = {
     "expiry_critical_days": 7,
     "screenshot_every_hours": 12,   # ogni quante ore rigenerare l'anteprima dei siti
     "history_retention_days": 400,  # cronologia dettagliata degli update (report dettagliato)
+    "log_retention_days": 30,       # registro degli eventi (pagina Registro): giorni conservati
+    "log_max_rows": 20000,          # registro degli eventi: tetto massimo di righe, oltre si cancellano le piu' vecchie
     "domain_decision_days": 60,     # quanti giorni prima chiedere "si rinnova o no?"
     "domain_alert_norenew": 1,      # 1 = avvisa anche per i domini da NON rinnovare
     "status_check_attempts": settings.STATUS_CHECK_ATTEMPTS,
@@ -63,6 +65,8 @@ def normalize(data: dict | None) -> dict:
         ("expiry_critical_days", 1, 3650),
         ("screenshot_every_hours", 1, 720),
         ("history_retention_days", 7, 3650),
+        ("log_retention_days", 1, 3650),
+        ("log_max_rows", 500, 1000000),
         ("domain_decision_days", 0, 3650),
         ("domain_alert_norenew", 0, 1),
         ("status_check_attempts", 1, 5),

@@ -524,7 +524,7 @@ async def _rebuild_matches(session, vulns: list[Vulnerability]) -> list[dict]:
                     existing.site_version = ext.current_version
                     if not existing.notified:
                         new_alerts.append({
-                            "site_name": site.name, "site_url": site.url,
+                            "site_id": site.id, "site_name": site.name, "site_url": site.url,
                             "ext_name": ext.name, "ext_version": ext.current_version,
                             "notifications_silenced": bool(site.notifications_silenced),
                             "vuln": v,
@@ -540,6 +540,7 @@ async def _rebuild_matches(session, vulns: list[Vulnerability]) -> list[dict]:
                     )
                     session.add(m)
                     new_alerts.append({
+                        "site_id": site.id,
                         "site_name": site.name,
                         "site_url": site.url,
                         "ext_name": ext.name,
