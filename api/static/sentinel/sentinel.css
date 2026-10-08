@@ -27,8 +27,8 @@
   --shadow: 0 8px 30px rgba(0,0,0,.35);
   --sidebar-w: 264px;
   --topbar-h: 60px;
-  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla";
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla";
 }
 
 * { box-sizing: border-box; }
@@ -351,7 +351,7 @@ textarea.input { resize: vertical; line-height: 1.45; font-size: 12.5px; }
   color: #d7def0;
   border: 1px solid var(--bd);
   border-radius: 10px;
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla";
 }
 .input-suffix { position: relative; }
 .input-suffix .input { padding-right: 104px; }
@@ -1245,3 +1245,8 @@ th.sortable:hover { color: var(--txt); }
 .evl-site { font-weight: 600; margin-right: 6px; }
 .evl-more { background: none; border: 0; color: var(--acc); cursor: pointer; margin-left: 6px; padding: 0; }
 .evl-details { margin: 6px 0 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--bd); border-radius: 8px; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+
+/* Firefox recente (macOS) non ripiega piu' da solo sul font emoji quando la famiglia
+   dichiarata non ha il glifo: le icone diventano quadratini. Le famiglie emoji sono in
+   coda a --font e --mono; .emj forza il font emoji su un singolo elemento. */
+.emj { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", var(--font); font-style: normal; }

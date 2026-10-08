@@ -1647,7 +1647,6 @@
   "in Sentinel (Impostazioni → Pacchetti): si aggiorneranno insieme": "in Sentinel (Impostazioni → Pacchetti): si aggiorneranno insieme",
   "il server del produttore non ha consegnato il file di aggiornamento a questo sito": "il server del produttore non ha consegnato il file di aggiornamento a questo sito",
   "Avvisa che un sito non risponde dopo": "Avvisa che un sito non risponde dopo",
-  "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.": "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.",
   "WordPress non aveva i dati di aggiornamento di questo prodotto al momento di installarlo": "WordPress non aveva i dati di aggiornamento di questo prodotto al momento di installarlo",
   "Controllo di {0} in corso…": "Controllo di {0} in corso…",
   "{0}: online": "{0}: online",
@@ -2482,5 +2481,9 @@
   "La pagina Registro: siti offline, aggiornamenti, controlli della home, anteprime, connettori, scadenze, vulnerabilità, report. Le righe più vecchie si cancellano ogni notte.": "La pagina Registro: siti offline, aggiornamenti, controlli della home, anteprime, connettori, scadenze, vulnerabilità, report. Le righe più vecchie si cancellano ogni notte.",
   "Tetto massimo del registro": "Tetto massimo del registro",
   "righe": "righe",
-  "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.": "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre."
+  "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.": "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.",
+  "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. Scaduto il tempo, prima dell'avviso Sentinel fa una controprova sulla home del sito: se la home risponde è il server che è lento, non offline (niente avviso, si riprova dopo 10 minuti). 0 = avviso immediato.": "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. Scaduto il tempo, prima dell'avviso Sentinel fa una controprova sulla home del sito: se la home risponde è il server che è lento, non offline (niente avviso, si riprova dopo 10 minuti). 0 = avviso immediato.",
+  "Server lenti": "Server lenti",
+  "il connettore non risponde in tempo ma la home sì: non sono offline, si riprova ogni 10 minuti": "il connettore non risponde in tempo ma la home sì: non sono offline, si riprova ogni 10 minuti",
+  "server lento": "server lento"
 }

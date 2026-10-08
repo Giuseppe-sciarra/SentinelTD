@@ -1647,7 +1647,6 @@
   "in Sentinel (Impostazioni → Pacchetti): si aggiorneranno insieme": "dans Sentinel (Paramètres → Paquets) : ils se mettront à jour ensemble",
   "il server del produttore non ha consegnato il file di aggiornamento a questo sito": "le serveur de l'éditeur n'a pas livré le fichier de mise à jour à ce site",
   "Avvisa che un sito non risponde dopo": "Signaler un site injoignable après",
-  "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.": "Un site qui ne répond pas est revérifié chaque minute : l'alerte ne part que s'il reste injoignable pendant toute cette durée, et entre-temps il ne passe pas au rouge dans le panneau. 0 = alerte immédiate.",
   "WordPress non aveva i dati di aggiornamento di questo prodotto al momento di installarlo": "WordPress n'avait pas les données de mise à jour de ce produit au moment de l'installer",
   "Controllo di {0} in corso…": "Vérification de {0} en cours…",
   "{0}: online": "{0} : en ligne",
@@ -2482,5 +2481,9 @@
   "La pagina Registro: siti offline, aggiornamenti, controlli della home, anteprime, connettori, scadenze, vulnerabilità, report. Le righe più vecchie si cancellano ogni notte.": "La page Journal : sites hors ligne, mises à jour, contrôles de la page d'accueil, aperçus, connecteurs, échéances, vulnérabilités, rapports. Les lignes plus anciennes sont supprimées chaque nuit.",
   "Tetto massimo del registro": "Taille maximale du journal",
   "righe": "lignes",
-  "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.": "Au-delà de ce nombre, les lignes les plus anciennes sont supprimées, même dans les jours conservés. Le journal ne dépasse jamais ce plafond."
+  "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.": "Au-delà de ce nombre, les lignes les plus anciennes sont supprimées, même dans les jours conservés. Le journal ne dépasse jamais ce plafond.",
+  "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. Scaduto il tempo, prima dell'avviso Sentinel fa una controprova sulla home del sito: se la home risponde è il server che è lento, non offline (niente avviso, si riprova dopo 10 minuti). 0 = avviso immediato.": "Un site qui ne répond pas est recontrôlé chaque minute : l'alerte ne part que s'il reste injoignable pendant tout ce temps, et entre-temps il ne devient pas rouge dans le panneau. Le délai écoulé, avant d'alerter Sentinel fait une contre-vérification sur la page d'accueil : si elle répond, le serveur est lent, pas hors ligne (pas d'alerte, nouvel essai après 10 minutes). 0 = alerte immédiate.",
+  "Server lenti": "Serveurs lents",
+  "il connettore non risponde in tempo ma la home sì: non sono offline, si riprova ogni 10 minuti": "le connecteur ne répond pas à temps mais la page d'accueil si : ils ne sont pas hors ligne, nouvel essai toutes les 10 minutes",
+  "server lento": "serveur lent"
 }

@@ -381,7 +381,7 @@ async def refresh_now(site_id: int, s: AsyncSession = Depends(get_session)):
     await apply_status(s, site, force=(site.status == "ok"))
     await s.commit()
     await s.refresh(site)
-    if site.status in ("dns_error", "check_pending"):
+    if site.status in ("dns_error", "check_pending", "slow"):
         from ..connectors import schedule_dns_recheck, schedule_pending_recheck
         try:
             pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))

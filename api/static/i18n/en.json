@@ -1647,7 +1647,6 @@
   "in Sentinel (Impostazioni → Pacchetti): si aggiorneranno insieme": "to Sentinel (Settings → Packages): they will update together",
   "il server del produttore non ha consegnato il file di aggiornamento a questo sito": "the vendor's server did not deliver the update file to this site",
   "Avvisa che un sito non risponde dopo": "Report a site as unreachable after",
-  "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.": "A site that does not answer is checked again every minute: the alert goes out only if it stays unreachable for this whole time, and meanwhile it does not turn red in the panel. 0 = alert immediately.",
   "WordPress non aveva i dati di aggiornamento di questo prodotto al momento di installarlo": "WordPress did not have this product's update data when installing it",
   "Controllo di {0} in corso…": "Checking {0}…",
   "{0}: online": "{0}: online",
@@ -2482,5 +2481,9 @@
   "La pagina Registro: siti offline, aggiornamenti, controlli della home, anteprime, connettori, scadenze, vulnerabilità, report. Le righe più vecchie si cancellano ogni notte.": "The Log page: sites offline, updates, homepage checks, previews, connectors, expiries, vulnerabilities, reports. Older rows are deleted every night.",
   "Tetto massimo del registro": "Maximum log size",
   "righe": "rows",
-  "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.": "Above this number the oldest rows are deleted, even if within the days. The log never grows beyond it."
+  "Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.": "Above this number the oldest rows are deleted, even if within the days. The log never grows beyond it.",
+  "Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. Scaduto il tempo, prima dell'avviso Sentinel fa una controprova sulla home del sito: se la home risponde è il server che è lento, non offline (niente avviso, si riprova dopo 10 minuti). 0 = avviso immediato.": "A site that does not answer is checked again every minute: the alert goes out only if it stays unreachable for this whole time, and meanwhile it does not turn red in the panel. Once the time is up, before alerting Sentinel double-checks the site's home page: if the home answers, the server is slow, not offline (no alert, retried after 10 minutes). 0 = alert immediately.",
+  "Server lenti": "Slow servers",
+  "il connettore non risponde in tempo ma la home sì: non sono offline, si riprova ogni 10 minuti": "the connector does not answer in time but the home page does: they are not offline, retried every 10 minutes",
+  "server lento": "slow server"
 }

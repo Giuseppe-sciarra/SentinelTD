@@ -25,7 +25,7 @@ from .config import settings
 from .check_gate import updating_server
 from .db import SessionLocal, engine, run_migrations
 from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
-from .connectors import apply_status, fetch_status, _category, wp_rest_url, ConnectorTooOld, schedule_dns_recheck, schedule_pending_recheck
+from .connectors import SLOW_PREFIX, apply_status, fetch_status, _category, wp_rest_url, ConnectorTooOld, schedule_dns_recheck, schedule_pending_recheck
 from .errtext import clean_error
 from .servers import server_of, acquire as srv_acquire, release as srv_release
 from .notify import dispatch as notify_dispatch
@@ -696,6 +696,7 @@ async def poll_site(ctx, site_id: int, force: bool = False):
         # stato PRIMA del check, per rilevare la transizione (no spam: notifico solo
         # quando lo stato cambia, non a ogni check mentre resta offline)
         prev_status = site.status
+        prev_error = site.error or ""
         await apply_status(s, site, force=force)
 
         if site.status == "check_pending":
@@ -717,6 +718,21 @@ async def poll_site(ctx, site_id: int, force: bool = False):
         # del worker per minuti: con piu' siti giu' insieme si fermava tutto, aggiornamenti
         # compresi. Ora si segna l'inizio dell'episodio, si programma un ricontrollo fra un
         # minuto e il posto si libera subito; basta un controllo riuscito per annullare.
+        slow = site.status == "slow"
+        if slow:
+            # Il connettore non risponde in tempo ma la home si': server lento, NON offline.
+            # Niente finestra, niente episodio, niente avviso. Si riprova fra 10 minuti
+            # (non ogni minuto: a un server gia' in affanno non serve altro traffico).
+            await s.commit()
+            if prev_status != "slow":
+                await evlog_now("availability", "warn", "Server lento: il connettore non risponde in tempo, ma la home del sito risponde. Non e' offline.",
+                                site=site, details={"error": site.error or ""})
+            log.warning("SERVER LENTO '%s' (id=%s): %s", site.name, site.id, (site.error or "")[:200])
+            now_c = datetime.now(timezone.utc)
+            await ctx["redis"].enqueue_job("poll_site", site_id, _defer_by=600,
+                                           _job_id=f"slow-recheck:{site_id}:{int(now_c.timestamp()) // 600}")
+            return
+
         if site.status == "error" and not site.offline_notified:
             try:
                 from .settings_store import get_operational_settings
@@ -1434,6 +1450,8 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             elif site.status == "dns_error":
                 await schedule_dns_recheck(ctx["redis"], site_id)
                 outcome["text"] = f"verifica DNS non riuscita: {(site.error or '')[:200]}"
+            elif site.status == "slow":
+                outcome["text"] = "server lento: il connettore non ha risposto in tempo (la home risponde), aggiornamento rimandato"
             else:
                 outcome["text"] = f"il sito non risponde: {(site.error or str(site.status))[:200]}"
             return

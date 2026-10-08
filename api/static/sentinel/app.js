@@ -407,9 +407,10 @@ function sentinel() {
     hasUpd(s) { return s.core_update || (s.updates_count || 0) > 0; },
     isDnsIssue(s) { return s.status === 'dns_error'; },
     isCheckPending(s) { return s.status === 'check_pending'; },
-    isOff(s) { return s.status && s.status !== 'ok' && !this.isDnsIssue(s) && !this.isCheckPending(s); },
-    statusTone(s) { return this.isCheckPending(s) ? 'warn' : this.isDnsIssue(s) ? 'warn' : (this.isOff(s) ? 'err' : (this.hasUpd(s) ? 'warn' : 'ok')); },
-    statusTitle(s) { return this.isCheckPending(s) ? (s.error || 'Verifica da confermare') : this.isDnsIssue(s) ? (s.error || 'Verifica DNS non riuscita') : (this.isOff(s) ? (s.error || 'offline') : (this.hasUpd(s) ? 'update disponibili' : 'ok')); },
+    isSlow(s) { return s.status === 'slow'; },
+    isOff(s) { return s.status && s.status !== 'ok' && !this.isDnsIssue(s) && !this.isCheckPending(s) && !this.isSlow(s); },
+    statusTone(s) { return this.isCheckPending(s) ? 'warn' : this.isSlow(s) ? 'warn' : this.isDnsIssue(s) ? 'warn' : (this.isOff(s) ? 'err' : (this.hasUpd(s) ? 'warn' : 'ok')); },
+    statusTitle(s) { return this.isCheckPending(s) ? (s.error || 'Verifica da confermare') : this.isSlow(s) ? (s.error || 'Server lento') : this.isDnsIssue(s) ? (s.error || 'Verifica DNS non riuscita') : (this.isOff(s) ? (s.error || 'offline') : (this.hasUpd(s) ? 'update disponibili' : 'ok')); },
     coreLabel(s) { return s.core_current || '—'; },
     fmtDate(d) { if (!d) return '—'; const x = new Date(d); return x.toLocaleString(I18n.locale, { dateStyle: 'short', timeStyle: 'short' }); },
     fmtDay(d) { if (!d) return '—'; const x = new Date(d); return Number.isNaN(x.getTime()) ? '—' : x.toLocaleDateString(I18n.locale); },
@@ -478,7 +479,7 @@ function sentinel() {
       });
     },
     get noFolder() { return this.sites.filter(s => this.siteTags(s).length === 0); },
-    _stats(arr) { return { count: arr.length, upd: arr.filter(s => this.hasUpd(s)).length, off: arr.filter(s => this.isOff(s)).length, dns: arr.filter(s => this.isDnsIssue(s)).length, checking: arr.filter(s => this.isCheckPending(s)).length }; },
+    _stats(arr) { return { count: arr.length, upd: arr.filter(s => this.hasUpd(s)).length, off: arr.filter(s => this.isOff(s)).length, dns: arr.filter(s => this.isDnsIssue(s)).length, checking: arr.filter(s => this.isCheckPending(s)).length, slow: arr.filter(s => this.isSlow(s)).length }; },
     get totStats() { return { ...this._stats(this.sites), auto: this.sites.filter(s => s.auto_update).length, wp: this.sites.filter(s => s.cms === 'wp').length, joomla: this.sites.filter(s => s.cms === 'joomla').length }; },
     folderSites(tag) {
       if (tag === '__none') return this.noFolder;
@@ -612,7 +613,7 @@ function sentinel() {
     exportCsv() {
       const esc = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
       const rows = [['Nome','URL','CMS','Core','PHP','Cartelle','Stato','Update','Ultimo check','Scadenza dominio','Notifiche']];
-      for (const x of this.filtered) rows.push([x.name,x.url,x.cms,x.core_current||'',x.php_version||'',this.siteTags(x).join(' | '),this.isDnsIssue(x)?'verifica DNS non riuscita':(this.isOff(x)?'offline':'ok'),x.updates_count||0,x.last_checked||'',x.domain_expires_at||'',x.notifications_silenced?'silenziate':'attive']);
+      for (const x of this.filtered) rows.push([x.name,x.url,x.cms,x.core_current||'',x.php_version||'',this.siteTags(x).join(' | '),this.isDnsIssue(x)?'verifica DNS non riuscita':this.isSlow(x)?'server lento':(this.isOff(x)?'offline':'ok'),x.updates_count||0,x.last_checked||'',x.domain_expires_at||'',x.notifications_silenced?'silenziate':'attive']);
       const csv = '\ufeff' + rows.map(r => r.map(esc).join(';')).join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `sentinel-siti-${new Date().toISOString().slice(0,10)}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     },
@@ -1880,13 +1881,13 @@ function sentinel() {
     },
     // problemi della riga chiusa, a parole: "1 spazio · 1 PHP · 2 domini"
     problemWords(g) {
-      const w = { offline: ['offline', 'offline'], space: ['spazio', 'spazio'], failed: ['aggiornamento fallito', 'aggiornamenti falliti'], php: ['PHP', 'PHP'], domain: ['dominio', 'domini'], dns: ['verifica DNS', 'verifiche DNS'], check: ['verifica da confermare', 'verifiche da confermare'] };
+      const w = { offline: ['offline', 'offline'], slow: ['server lento', 'server lenti'], space: ['spazio', 'spazio'], failed: ['aggiornamento fallito', 'aggiornamenti falliti'], php: ['PHP', 'PHP'], domain: ['dominio', 'domini'], dns: ['verifica DNS', 'verifiche DNS'], check: ['verifica da confermare', 'verifiche da confermare'] };
       return Object.keys(w).filter(k => g.problem_counts && g.problem_counts[k]).map(k => ({ kind: k, n: g.problem_counts[k], label: g.problem_counts[k] === 1 ? w[k][0] : w[k][1] }));
     },
-    problemLong(k) { return { offline: 'offline', space: 'spazio quasi esaurito', failed: 'aggiornamenti falliti', php: 'PHP fuori supporto', domain: 'dominio scaduto', dns: 'verifica DNS non riuscita', check: 'verifica da confermare' }[k] || k; },
+    problemLong(k) { return { offline: 'offline', slow: 'server lento: il connettore non risponde in tempo', space: 'spazio quasi esaurito', failed: 'aggiornamenti falliti', php: 'PHP fuori supporto', domain: 'dominio scaduto', dns: 'verifica DNS non riuscita', check: 'verifica da confermare' }[k] || k; },
     problemSev(k) { return ({ offline: 'err', domain: 'err', failed: 'warn', dns: 'warn', check: 'warn', php: 'info' })[k] || 'info'; },
     siteSev(s) { const r = { err: 0, warn: 1, info: 2 }; return s.problems.map(p => this.problemSev(p.kind)).sort((a, b) => r[a] - r[b])[0] || 'info'; },
-    problemShort(k) { return { offline: 'offline', dns: 'verifica DNS', check: 'verifica da confermare', failed: 'aggiornamenti falliti', php: 'PHP vecchio', domain: 'dominio scaduto' }[k] || k; },
+    problemShort(k) { return { offline: 'offline', slow: 'server lento', dns: 'verifica DNS', check: 'verifica da confermare', failed: 'aggiornamenti falliti', php: 'PHP vecchio', domain: 'dominio scaduto' }[k] || k; },
     monthMax(months) { return Math.max(1, ...(months || []).map(m => m.ok + m.failed)); },
     problemIcon(k) { return { offline: '🔴', dns: '🌐', failed: '⚠️', php: '🐘', domain: '🌐' }[k] || '•'; },
     get srvLabelList() { return [...new Set(Object.values((this.prefs && this.prefs.server_labels) || {}))].sort((a, b) => a.localeCompare(b, 'it')); },

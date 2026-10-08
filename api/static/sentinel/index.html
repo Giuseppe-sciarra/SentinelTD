@@ -161,6 +161,7 @@
       <main class="content">
         <div class="msg warn" x-show="totStats.dns > 0"><span>Verifica DNS non riuscita</span>: <span x-text="totStats.dns"></span> <span>siti da ricontrollare. Il loro stato attuale non è verificato.</span></div>
         <div class="msg warn" x-show="totStats.checking > 0"><span>Verifiche da confermare</span>: <span x-text="totStats.checking"></span> · <span>ricontrollo automatico programmato</span></div>
+        <div class="msg warn" x-show="totStats.slow > 0"><span>Server lenti</span>: <span x-text="totStats.slow"></span> · <span>il connettore non risponde in tempo ma la home sì: non sono offline, si riprova ogni 10 minuti</span></div>
         <div class="msg info" x-show="needs2faSetup">Non hai ancora configurato la verifica in due passaggi: <a href="#/settings">configurala nelle Impostazioni</a>.</div>
 
         <!-- ===== DASHBOARD ===== -->
@@ -589,7 +590,7 @@
                       <td><span class="cms" :class="s.cms" x-text="s.cms==='wp'?'WP':'JOOMLA'"></span> <span class="mono small" x-text="coreLabel(s)"></span> <span class="badge warn" x-show="s.core_update" x-text="'→ '+s.core_latest"></span></td>
                       <td class="hide-m"><span class="mono small" x-text="s.php_version||'—'"></span> <span class="badge" :class="phpState(s.php_version).cls" x-show="phpState(s.php_version).label" x-text="phpState(s.php_version).label"></span></td>
                       <td class="hide-m"><span class="badge" :class="domainExpiryClass(s)" :title="s.domain_check_error || ''" x-show="s.domain_expires_at || s.domain_check_error" x-text="domainExpiryText(s)"></span><span class="mut small" x-show="!s.domain_expires_at && !s.domain_check_error">—</span></td>
-                      <td class="num"><span class="badge warn" x-show="hasUpd(s)" x-text="s.updates_count"></span><span class="badge ok" x-show="!hasUpd(s)&&!isOff(s)&&!isDnsIssue(s)&&!isCheckPending(s)">ok</span><span class="badge warn" x-show="isDnsIssue(s)" :title="s.error">verifica DNS</span><span class="badge warn" x-show="isCheckPending(s)" :title="s.error">da confermare</span><span class="badge err" x-show="isOff(s)">offline</span></td>
+                      <td class="num"><span class="badge warn" x-show="hasUpd(s)" x-text="s.updates_count"></span><span class="badge ok" x-show="!hasUpd(s)&&!isOff(s)&&!isDnsIssue(s)&&!isCheckPending(s)">ok</span><span class="badge warn" x-show="isDnsIssue(s)" :title="s.error">verifica DNS</span><span class="badge warn" x-show="isCheckPending(s)" :title="s.error">da confermare</span><span class="badge warn" x-show="isSlow(s)" :title="s.error">server lento</span><span class="badge err" x-show="isOff(s)">offline</span></td>
                       <td class="hide-m mut small" x-text="ago(s.last_checked)"></td>
                       <td @click.stop><div class="acts">
                         <button class="btn sm icon" title="Check" @click="check(s)" :disabled="!!(busy[s.id])"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6"/></svg></button>
@@ -642,6 +643,7 @@
                 <div class="card">
                   <h3>Stato</h3>
                   <div class="msg warn" x-show="isCheckPending(detail)" x-text="'Verifica da confermare: '+(detail.error||'ricontrollo programmato')"></div>
+                  <div class="msg warn" x-show="isSlow(detail)" x-text="'Server lento: '+(detail.error||'il connettore non risponde in tempo, la home sì')"></div>
                   <div class="msg err" x-show="isOff(detail)" x-text="'Offline: '+(detail.error||detail.status)"></div>
                   <div class="msg warn" x-show="isDnsIssue(detail)" x-text="detail.error || 'Verifica DNS non riuscita'"></div>
                   <div class="kv">
@@ -1015,7 +1017,7 @@
                     <div class="srvpg-sites">
                       <template x-for="s in g.items" :key="'sps'+s.id">
                         <div class="srvpg-site" :class="srvpgMatch(s) ? 'match' : ''">
-                          <span class="dot" :class="s.status==='ok' ? 'ok' : (s.status==='error' ? 'err' : 'warn')" :title="s.status==='ok' ? 'raggiungibile' : (s.status==='error' ? 'offline' : 'in attesa')"></span>
+                          <span class="dot" :class="s.status==='ok' ? 'ok' : (s.status==='error' ? 'err' : 'warn')" :title="s.status==='ok' ? 'raggiungibile' : (s.status==='error' ? 'offline' : (s.status==='slow' ? 'server lento' : 'in attesa'))"></span>
                           <a :href="'#/site/'+s.id" class="name" x-text="s.name" translate="no"></a>
                           <span class="cms" :class="s.cms" x-text="s.cms==='wp' ? 'WP' : 'J'"></span>
                           <a :href="s.url" target="_blank" rel="noopener" class="small mono mut srvpg-url" x-text="(s.url || '').replace(/^https?:\/\//, '')" translate="no"></a>
@@ -1582,7 +1584,7 @@
                     </div>
                     <div class="field"><label>Tentativi totali per un check del sito</label><input class="input" type="number" min="1" max="5" x-model.number="prefs.status_check_attempts"><div class="hint">Comprende il primo controllo. 1 = nessun retry; 3 = primo controllo più 2 retry.</div></div>
                     <div class="field"><label>Pausa tra i retry del sito</label><div class="input-suffix"><input class="input" type="number" min="1" max="60" x-model.number="prefs.status_check_retry_seconds"><span>secondi</span></div><div class="hint">Vale per errori di connessione e DNS temporanei. I timeout di lettura passano al ricontrollo successivo, evitando richieste duplicate.</div></div>
-                    <div class="field"><label>Avvisa che un sito non risponde dopo</label><div class="input-suffix"><input class="input" type="number" min="0" max="120" x-model.number="prefs.offline_alert_minutes"><span>minuti</span></div><div class="hint">Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. 0 = avviso immediato.</div></div>
+                    <div class="field"><label>Avvisa che un sito non risponde dopo</label><div class="input-suffix"><input class="input" type="number" min="0" max="120" x-model.number="prefs.offline_alert_minutes"><span>minuti</span></div><div class="hint">Un sito che non risponde viene ricontrollato ogni minuto: l'avviso parte solo se resta irraggiungibile per tutto questo tempo, e nel frattempo nel pannello non diventa rosso. Scaduto il tempo, prima dell'avviso Sentinel fa una controprova sulla home del sito: se la home risponde è il server che è lento, non offline (niente avviso, si riprova dopo 10 minuti). 0 = avviso immediato.</div></div>
                     <div class="field"><label>Aggiorna anteprime siti ogni</label><div class="input-suffix"><input class="input" type="number" min="1" max="720" x-model.number="prefs.screenshot_every_hours"><span>ore</span></div>
                       <button class="btn sm" style="margin-top:6px" @click="shootBulk(false)">🖼 Rigenera tutte adesso</button></div>
                     <div class="field"><label>Soglia gialla</label><div class="input-suffix"><input class="input" type="number" min="1" x-model.number="prefs.expiry_warning_days"><span>giorni</span></div></div>

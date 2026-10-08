@@ -251,7 +251,29 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
     return payload
 
 
+SLOW_PREFIX = "Lento: "
+
+
+async def probe_home(url: str, timeout: float = 45.0) -> tuple[int, float] | None:
+    """Controprova senza connettore: una GET alla home del sito, con tempo largo.
+    Torna (codice HTTP, secondi) se il sito risponde, None se non risponde affatto."""
+    t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=15.0), follow_redirects=True,
+                                     headers={"User-Agent": "Mozilla/5.0 Sentinel-TD/2.31 (+availability)"}) as c:
+            r = await c.get(url)
+            return r.status_code, round(time.monotonic() - t0, 1)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def _pending_failure(site: Site, reason: str):
+    """Timeout / errore di rete del connettore. NON e' una prova di sito offline: si apre una
+    finestra (Impostazioni → "Avvisa che un sito non risponde dopo") e si ricontrolla ogni
+    minuto. Solo quando la finestra e' scaduta si fa la CONTROPROVA sulla home del sito:
+    se la home risponde il sito e' su, e' il server che e' lento (o il connettore che non ce
+    la fa in tempo): lo stato resta "error" con la spiegazione, ma niente episodio offline e
+    niente avviso "non raggiungibile". Offline confermato solo se non risponde nemmeno la home."""
     from .settings_store import get_operational_settings
     window = (await get_operational_settings())["offline_alert_minutes"]
     now = datetime.now(timezone.utc)
@@ -259,8 +281,24 @@ async def _pending_failure(site: Site, reason: str):
     if since is not None and since.tzinfo is None:
         since = since.replace(tzinfo=timezone.utc)
     site.offline_since = since or now
-    confirmed = window == 0 or site.offline_notified or (now - site.offline_since).total_seconds() >= window * 60
-    site.status = "error" if confirmed else "check_pending"
+    elapsed = (now - site.offline_since).total_seconds()
+    # (prima qui contava anche offline_notified: un flag rimasto acceso da un episodio
+    #  precedente confermava "offline" al PRIMO timeout, senza finestra. Ora decide solo il tempo.)
+    if window > 0 and elapsed < window * 60:
+        site.status = "check_pending"
+        site.error = reason
+        return
+    probe = await probe_home(site.url)
+    if probe is not None and probe[0] < 500:
+        code, secs = probe
+        site._availability_observed = False      # niente episodio offline: il sito risponde
+        site._slow_not_offline = True
+        site.status = "slow"                    # stato a parte: nel pannello e' giallo, non rosso
+        site.error = (f"{SLOW_PREFIX}il connettore non ha risposto in tempo ({reason[:160]}), "
+                      f"ma la home risponde (HTTP {code} in {secs}s). Server lento, non offline.")[:480]
+        site.offline_since = None               # la finestra riparte da zero al prossimo timeout
+        return
+    site.status = "error"
     site.error = reason
 
 
@@ -286,7 +324,17 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         # i 20s. Col timeout corto il ciclo di auto-update andava in timeout -> status err
         # -> return silenzioso PRIMA di tentare gli update: pending eternamente acceso e
         # mai processato (caso reale: core WP di shop mai aggiornato, senza errori nei log).
-        data = await fetch_status(site, timeout=(120.0 if force else 20.0), force=force)
+        try:
+            data = await fetch_status(site, timeout=(120.0 if force else 20.0), force=force)
+        except httpx.TimeoutException:
+            if not force:
+                raise
+            # Il ricalcolo FORZATO (wp_update_plugins verso wordpress.org, rebuild canali Joomla)
+            # su un server lento puo' superare anche i 120s: non e' il sito che e' giu', e' il
+            # ricalcolo che e' pesante. Si ritenta in passivo, con tempo largo: se risponde, si
+            # va avanti con i dati che il connettore ha (il connettore dice se la cache c'era).
+            log.warning("CHECK FORZATO LENTO '%s' (id=%s): ricalcolo oltre il tempo, ritento in passivo", site.name, site.id)
+            data = await fetch_status(site, timeout=40.0, force=False)
         core = data.get("core", {})
         exts = data.get("extensions", []) or []
 

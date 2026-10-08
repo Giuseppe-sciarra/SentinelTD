@@ -4,9 +4,9 @@ tolto quando poi riesce): niente avvisi rimasti indietro dallo storico."""
 from .domain_sources import site_renewal_pending
 from datetime import datetime, timezone
 
-KINDS = ("offline", "failed", "php", "domain", "dns", "check")
+KINDS = ("offline", "slow", "failed", "php", "domain", "dns", "check")
 LABELS = {"offline": "offline", "failed": "aggiornamenti falliti",
-          "php": "PHP fuori supporto", "domain": "dominio scaduto", "dns": "verifica DNS non riuscita", "check": "verifica da confermare"}
+          "php": "PHP fuori supporto", "domain": "dominio scaduto", "dns": "verifica DNS non riuscita", "check": "verifica da confermare", "slow": "server lento"}
 
 
 def site_problems(site, failed_names: list[str] | None = None, now: datetime | None = None) -> list[dict]:
@@ -19,6 +19,8 @@ def site_problems(site, failed_names: list[str] | None = None, now: datetime | N
         out.append({"kind": "dns", "text": (site.error or "verifica DNS non riuscita da Sentinel")[:160]})
     elif site.status == "check_pending":
         out.append({"kind": "check", "text": (site.error or "verifica non conclusa: ricontrollo programmato")[:160]})
+    elif site.status == "slow":
+        out.append({"kind": "slow", "text": (site.error or "server lento: il connettore non risponde in tempo, la home si'")[:160]})
     elif site.status != "ok":
         out.append({"kind": "offline", "text": (site.error or "non risponde")[:160]})
     names = failed_names or []
