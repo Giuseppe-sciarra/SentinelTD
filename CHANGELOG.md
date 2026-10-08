@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.31.3 — Emoji su Firefox
+
+### Fixed
+- Firefox recente (macOS) non ripiega più da solo sul font emoji quando la famiglia dichiarata
+  non ha il glifo: le icone del pannello (🖼, 📷, ✅, …) diventavano quadratini. Le famiglie
+  emoji (`Apple Color Emoji`, `Segoe UI Emoji`, `Noto Color Emoji`, `Twemoji Mozilla`) sono
+  ora in coda a `--font`, `--mono` e al blocco `pre`/log in `sentinel.css`; classe `.emj` per
+  forzare il font emoji su un singolo elemento.
+
+## 2.31.2 — Server lenti non sono offline
+
+### Fixed
+- **Falsi "non raggiungibile" su server lenti.** Tre cause, tutte chiuse:
+  1. Un flag `offline_notified` rimasto acceso da un episodio precedente confermava "offline"
+     al PRIMO timeout, saltando la finestra dei minuti (`_pending_failure`). Ora decide solo
+     il tempo impostato.
+  2. **Controprova sulla home**: scaduta la finestra, prima di dichiarare offline Sentinel fa
+     una GET alla home del sito (45 s, senza connettore). Se la home risponde (HTTP < 500) il
+     sito **non è offline**: nuovo stato `slow` ("server lento", giallo nel pannello),
+     niente episodio nel registro offline, niente avviso Telegram/email, ricontrollo fra
+     10 minuti invece che ogni minuto. Offline confermato solo se non risponde nemmeno la home.
+  3. Il ricalcolo forzato degli aggiornamenti (ciclo di update, WP sempre forzato) su un
+     server lento può superare i 120 s: ora al timeout si ritenta in passivo (40 s) prima di
+     dichiarare il check fallito.
+- Registro: riga "Server lento" (categoria disponibilità, livello avviso) quando scatta la
+  controprova; "Cosa non va" e CSV mostrano "server lento" invece di "offline".
+
 ## 2.31.1 — Tetto del registro
 
 ### Changed
