@@ -6,7 +6,8 @@ class SiteIn(BaseModel):
     name: str
     url: str
     cms: str                      # 'wp' | 'joomla'
-    token: str                    # copiato dal connettore installato sul sito
+    token: str = ""               # copiato dal connettore installato sul sito; vuoto se gen_token
+    gen_token: bool = False       # True: lo genera il pannello (flusso mu-plugin headless)
     admin_url: str = ""
     group: str = ""
     tags: str = ""
@@ -76,6 +77,9 @@ class SiteOut(BaseModel):
     shot_at: datetime | None
     shot_attempted_at: datetime | None = None
     shot_blocked_at: datetime | None = None
+    # versione del connettore che gira sul sito e dove gira (WP: "mu", "plugin:<cartella>", "other")
+    connector_version: str = ""
+    connector_mode: str = ""
 
 
 class SiteDetailOut(SiteOut):
@@ -86,7 +90,6 @@ class SiteDetailOut(SiteOut):
     extensions: list[ExtensionOut] = []
     updates_unverified_at: datetime | None = None
     locked: list[str] = []   # componenti bloccati alla versione installata
-    connector_version: str = ""
 
 
 class LoginIn(BaseModel):

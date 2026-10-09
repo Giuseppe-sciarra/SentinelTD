@@ -138,10 +138,14 @@ async def mass_install(
 
 
 async def start_install_job(targets: list, content: bytes, fname: str, cms: str, kind: str, activate: bool,
-                            label: str = "") -> dict:
+                            label: str = "", per_site: dict | None = None, connector: str = "",
+                            target: str = "") -> dict:
     """Avvia un'installazione in blocco in sottofondo: lo zip su disco, un lavoro del worker per
     sito (rispetta i posti sui server), avanzamento leggibile da /api/install/jobs/{id}.
-    Usata dall'installazione in blocco e dalla distribuzione del connettore."""
+    Usata dall'installazione in blocco e dalla distribuzione del connettore.
+    per_site: {id sito: zip o [zip, ...]} per i siti che ricevono pacchetti propri (connettore WP:
+    uno per ogni copia, nella sua cartella), installati uno dopo l'altro.
+    connector: "wp"/"joomla" se e' la distribuzione del connettore; target: la versione consegnata."""
     import json
     import os
     import uuid
@@ -156,7 +160,24 @@ async def start_install_job(targets: list, content: bytes, fname: str, cms: str,
     path = os.path.join(jobs_dir, f"{job}.zip")
     with open(path, "wb") as f:
         f.write(content)
+    paths: dict[str, list] = {}
+    variants: dict[int, str] = {}           # stesso zip -> stesso file
+    for sid, packs in (per_site or {}).items():
+        out = []
+        for data in (packs if isinstance(packs, list) else [packs]):
+            if data is content:
+                out.append(path)
+                continue
+            key = id(data)
+            if key not in variants:
+                vpath = os.path.join(jobs_dir, f"{job}-{len(variants) + 1}.zip")
+                with open(vpath, "wb") as f:
+                    f.write(data)
+                variants[key] = vpath
+            out.append(variants[key])
+        paths[str(sid)] = out
     meta = {"job": job, "filename": fname, "cms": cms, "kind": kind, "activate": bool(activate), "path": path,
+            "paths": paths, "connector": connector, "target": target,
             "total": len(targets), "site_ids": [t.id for t in targets], "created": int(time.time()), "label": label}
     pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
     try:
@@ -201,10 +222,11 @@ async def install_job(job: str):
     done = count("done")
     finished = done >= meta["total"]
     if finished:
-        try:
-            os.remove(meta["path"])      # lo zip non serve piu'
-        except OSError:
-            pass
+        for zpath in {meta["path"], *(p for ps in (meta.get("paths") or {}).values() for p in (ps if isinstance(ps, list) else [ps]))}:
+            try:
+                os.remove(zpath)         # lo zip non serve piu'
+            except OSError:
+                pass
     return {
         "job": job, "filename": meta["filename"], "cms": meta["cms"], "kind": meta["kind"], "activate": meta["activate"],
         "total": meta["total"], "done": done, "ok": sum(1 for x in results if x.get("state") == "done" and x.get("ok")),

@@ -19,13 +19,14 @@ import httpx
 from arq import cron
 from arq.worker import func as arq_func
 from arq.connections import RedisSettings
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, update, or_
 
 from .config import settings
 from .check_gate import updating_server
 from .db import SessionLocal, engine, run_migrations
 from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
 from .connectors import SLOW_PREFIX, apply_status, fetch_status, _category, wp_rest_url, ConnectorTooOld, schedule_dns_recheck, schedule_pending_recheck
+from .connectors import CONNECTOR_PREFIX, confirmation_running, start_confirmation, down_kind, needs_confirmation
 from .errtext import clean_error
 from .servers import server_of, acquire as srv_acquire, release as srv_release
 from .notify import dispatch as notify_dispatch
@@ -684,6 +685,97 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings.REDIS_URL)
 
 
+async def _offline_window_minutes() -> int:
+    try:
+        return int((await get_operational_settings()).get("offline_alert_minutes", 5))
+    except Exception:  # noqa: BLE001
+        return 5
+
+
+async def _confirm_down(s, site: Site) -> None:
+    """Sito in errore CONFERMATO (finestra passata, o episodio gia' confermato): registra il
+    tipo dell'episodio e manda il suo avviso, una volta sola.
+
+    - Episodio nuovo o cambiato di tipo (connettore -> sito giu' davvero, o il contrario):
+      il tipo si aggiorna e l'avviso del nuovo tipo parte anche se c'era gia' quello vecchio.
+    - L'avviso si "prenota" con un UPDATE condizionato: se due lavori arrivano insieme (ciclo
+      degli aggiornamenti e controllo normale) parte un solo messaggio. Se nessun canale lo
+      consegna la prenotazione si toglie, e il prossimo passaggio ritenta senza chiedere
+      altro al sito (usa il risultato che ha gia')."""
+    kind = down_kind(site)
+    current = site.offline_kind or ("site" if site.offline_notified else "")   # vuoto + avvisato = versioni precedenti
+    reason = site.error or ""
+    since = site.offline_since
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    if current != kind:
+        site.offline_kind = kind
+        site.offline_notified = False
+        if kind == "connector":
+            site.offline_since = None
+        await s.commit()
+        if kind == "connector":
+            # nessun episodio offline per il connettore: la riga del registro la scrive qui
+            await evlog_now("availability", "error",
+                            "Connettore non risponde: " + reason[len(CONNECTOR_PREFIX):][:200],
+                            site=site, details={"reason": reason})
+    elif kind == "connector" and site.offline_since is not None:
+        # al connettore la finestra non serve piu' (anche dopo un timeout passeggero): se poi il
+        # sito va giu' davvero, quella conferma riparte da zero con il suo inizio vero
+        site.offline_since = None
+        await s.commit()
+    if site.offline_notified or site.notifications_silenced:
+        return
+    claimed = await s.execute(update(Site).where(Site.id == site.id, Site.offline_notified == False)  # noqa: E712
+                              .values(offline_notified=True))
+    await s.commit()
+    if claimed.rowcount != 1:
+        return                                   # l'ha gia' preso un altro lavoro
+    _elapsed = (datetime.now(timezone.utc) - since).total_seconds() if since else 0
+    _window = max(0, round(_elapsed / 60))
+    _attempts = _window + 1                      # un controllo al minuto
+    if kind == "connector":
+        # il sito risponde, il connettore no (rimosso, disattivato, token rifiutato):
+        # avviso suo, non "sito non raggiungibile"
+        _r = await notify_dispatch("connector_down", {"site_name": site.name, "site_url": site.url,
+                                   "reason": reason[len(CONNECTOR_PREFIX):],
+                                   "attempts": _attempts, "window_min": _window})
+    else:
+        _r = await notify_dispatch("site_offline", {"site_name": site.name, "site_url": site.url,
+                                   "reason": reason, "attempts": _attempts, "window_min": _window})
+    if not (_r["email"] or _r["telegram"]):
+        # nessun canale l'ha consegnato: si ritenta al prossimo passaggio
+        await s.execute(update(Site).where(Site.id == site.id).values(offline_notified=False))
+        await s.commit()
+
+
+async def _notify_back(s, site: Site) -> None:
+    """Il sito (o il connettore) risponde di nuovo: avviso di ritorno del tipo dell'avviso
+    partito, riga nel registro per il connettore, flag e tipo azzerati. Prima lo faceva solo
+    il controllo normale: se il ritorno lo vedeva il ciclo degli aggiornamenti (o il Check ora)
+    il flag restava acceso e l'episodio successivo non veniva piu' avvisato.
+    Azzeramento con UPDATE condizionato: un solo messaggio anche con due lavori insieme."""
+    was_notified = bool(site.offline_notified)
+    kind = site.offline_kind or ("site" if was_notified else "")
+    if not (was_notified or site.offline_kind):
+        return
+    cleared = await s.execute(
+        update(Site).where(Site.id == site.id, Site.status == "ok",   # nel frattempo e' ricaduto? niente "di nuovo raggiungibile"
+                           or_(Site.offline_notified == True, Site.offline_kind != ""))  # noqa: E712
+        .values(offline_notified=False, offline_kind="")
+        .execution_options(synchronize_session=False))
+    await s.commit()
+    if cleared.rowcount != 1:
+        return                                   # gia' fatto da un altro lavoro, o ricaduto nel frattempo
+    site.offline_notified, site.offline_kind = False, ""
+    if was_notified and not site.notifications_silenced:
+        await notify_dispatch("connector_up" if kind == "connector" else "site_online",
+                              {"site_name": site.name, "site_url": site.url})
+    if kind == "connector":
+        # per il connettore non c'e' un episodio offline che si chiude: la riga la scrive qui
+        await evlog_now("availability", "ok", "Il connettore risponde di nuovo", site=site)
+
+
 async def poll_site(ctx, site_id: int, force: bool = False):
     """Controllo di un sito. force=True: ricalcolo forzato degli aggiornamenti sul sito, usato
     per il PRIMO controllo di un sito appena aggiunto (non c'e' ancora nessuna conoscenza
@@ -733,7 +825,8 @@ async def poll_site(ctx, site_id: int, force: bool = False):
                                            _job_id=f"slow-recheck:{site_id}:{int(now_c.timestamp()) // 600}")
             return
 
-        if site.status == "error" and not site.offline_notified:
+        if needs_confirmation(site):
+            # episodio non ancora confermato (per il suo tipo): finestra di conferma
             try:
                 from .settings_store import get_operational_settings
                 window_min = int((await get_operational_settings()).get("offline_alert_minutes", 5))
@@ -767,33 +860,20 @@ async def poll_site(ctx, site_id: int, force: bool = False):
         await record_availability(s, site)
         await s.commit()
 
-        # --- notifica Telegram robusta (parte A) ---
-        # NON si basa sulla transizione effimera vista da questo singolo check (che salta
-        # se il worker era fermo al momento del down), ma sullo STATO corrente + un flag
-        # persistente 'offline_notified'. Cosi':
-        #  - se il sito e' in error e non e' ancora stato avvisato -> avvisa
-        #  - il flag si segna SOLO a invio riuscito: se Telegram fallisce, il prossimo
-        #    check ritenta (niente notifica persa)
-        #  - una sola notifica per episodio offline (niente spam mentre resta giu')
-        #  - quando torna ok -> 🟢 e azzera il flag
-        if site.status == "error" and not site.offline_notified and not site.notifications_silenced:
-            _since = site.offline_since
-            if _since is not None and _since.tzinfo is None:
-                _since = _since.replace(tzinfo=timezone.utc)
-            _elapsed = (datetime.now(timezone.utc) - _since).total_seconds() if _since else 0
-            _window = max(0, round(_elapsed / 60))
-            _attempts = _window + 1              # un controllo al minuto
-            _r = await notify_dispatch("site_offline", {"site_name": site.name, "site_url": site.url,
-                                        "reason": site.error or "", "attempts": _attempts, "window_min": _window})
-            sent = _r["email"] or _r["telegram"]
-            if sent:
-                site.offline_notified = True
-                await s.commit()
-        elif site.status == "ok" and site.offline_notified:
-            if not site.notifications_silenced:
-                await notify_dispatch("site_online", {"site_name": site.name, "site_url": site.url})
-            site.offline_notified = False
-            await s.commit()
+        # --- avvisi (parte A) ---
+        # NON si basano sulla transizione effimera vista da questo singolo check (che salta
+        # se il worker era fermo al momento del down), ma sullo STATO corrente + i campi
+        # persistenti offline_notified / offline_kind. Cosi':
+        #  - sito in errore confermato e non ancora avvisato -> avvisa (sito o connettore)
+        #  - il flag resta acceso SOLO a invio riuscito: se Telegram fallisce, il prossimo
+        #    passaggio ritenta (niente notifica persa)
+        #  - una sola notifica per episodio (niente spam mentre resta giu'), una nuova se
+        #    l'episodio cambia tipo
+        #  - quando torna ok -> avviso di ritorno del tipo giusto e flag azzerati
+        if site.status == "error":
+            await _confirm_down(s, site)
+        elif site.status == "ok" and (site.offline_notified or site.offline_kind):
+            await _notify_back(s, site)
 
 
 async def screenshot_tick(ctx):
@@ -877,18 +957,36 @@ async def tick(ctx):
         pass
     """Dispatcher: accoda i siti il cui ultimo check e' piu' vecchio del loro intervallo."""
     now = datetime.now(timezone.utc)
+    window_min = await _offline_window_minutes()
     async with SessionLocal() as s:
         rows = (await s.execute(select(Site).where(Site.enabled == True))).scalars().all()  # noqa: E712
         for site in rows:
+            last = site.last_checked
+            if last is not None and last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
             due = (
-                site.last_checked is None
-                or site.last_checked < now - timedelta(minutes=site.poll_interval_minutes)
+                last is None
+                or last < now - timedelta(minutes=site.poll_interval_minutes)
             )
             if due:
                 # _job_id stabile: arq deduplica. Se un poll_site per questo sito e'
                 # gia' in coda o in esecuzione, non ne accoda un secondo (evita che su
                 # batch lenti o poll piu' lunghi del tick i job si impilino).
                 await ctx["redis"].enqueue_job("poll_site", site.id, _job_id=f"poll:{site.id}")
+                continue
+            # Rete di sicurezza degli avvisi. La conferma la fa solo il controllo normale: un
+            # errore scritto da un altro percorso, senza una conferma partita (offline_since
+            # vuoto) e senza episodio confermato, passa al controllo normale anche se il sito
+            # non e' "da controllare" (un id ogni 10 minuti: un controllo in piu', una volta).
+            # Un sito gia' tornato a posto con l'avviso ancora acceso riceve l'avviso di ritorno
+            # e i flag si spengono, altrimenti l'episodio dopo resterebbe muto.
+            if (needs_confirmation(site) and not site.notifications_silenced and site.offline_since is None
+                    and not confirmation_running(site, window_min, now)):
+                await ctx["redis"].enqueue_job("poll_site", site.id,
+                                               _job_id=f"confirm:{site.id}:{int(now.timestamp()) // 600}")
+            elif site.status == "ok" and (site.offline_notified or site.offline_kind):
+                # gia' a posto: l'avviso di ritorno parte da qui, senza chiedere niente al sito
+                await _notify_back(s, site)
 
 
 # --------------------------------------------------------------------------
@@ -1436,7 +1534,38 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
         _had_pending = bool(site.core_update) or ((site.upd_plugins or 0) + (site.upd_themes or 0) + (site.upd_other or 0)) > 0
         _force = (site.cms == "wp") or _had_pending
         await apply_status(s, site, force=_force)
+        if needs_confirmation(site) and await _offline_window_minutes() > 0:
+            # Errore non ancora avvisato visto dal ciclo (connettore rimosso o disattivato, token
+            # rifiutato, risposta che non e' del connettore...). PRIMA si scriveva l'errore e si
+            # usciva: nessun ricontrollo e nessun avviso, perche' l'avviso lo da' solo il
+            # controllo normale, che sui siti con l'aggiornamento automatico non partiva mai
+            # (il ciclo aggiorna last_checked ogni ora). Ora entra nella stessa conferma del
+            # controllo normale: nel pannello il sito resta com'era, ricontrollo fra un minuto,
+            # avviso quando la finestra e' passata.
+            _err = site.error or ""
+            await s.rollback()
+            site = await s.get(Site, site_id)
+            if not site:
+                return
+            await start_confirmation(s, site, ctx["redis"])
+            await evlog_now("updates", "warn", "Aggiornamenti saltati: il sito era in errore al momento del ciclo, si riprova al prossimo", site=site, details={"error": _err})
+            log.warning("UPDATE SALTATO '%s' (id=%s): %s — conferma in corso, riprovo al prossimo ciclo",
+                        site.name, site.id, _err[:200])
+            outcome["text"] = f"il sito non risponde: {_err[:200]}"
+            return
+        if needs_confirmation(site):
+            # avviso immediato (Impostazioni: 0 minuti): niente attesa ne' ricontrollo
+            if site.offline_since is None:
+                site.offline_since = datetime.now(timezone.utc)
+            from .availability import record_availability
+            await record_availability(s, site)
         await s.commit()
+        if site.status == "error":
+            # episodio gia' confermato: cambio di tipo, o avviso da ritentare, con il risultato
+            # appena letto (nessuna richiesta in piu' al sito)
+            await _confirm_down(s, site)
+        elif site.status == "ok" and (site.offline_notified or site.offline_kind):
+            await _notify_back(s, site)
         if site.status != "ok":
             # PRIMA usciva in silenzio: se il connect moriva proprio qui, il ciclo saltava
             # il sito senza log ne' notifica e il pending restava li' per ore senza che
@@ -1735,6 +1864,12 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
         # lo stato vero (contatta i server di update); gira una sola volta per sito toccato.
         await apply_status(s, site, force=True)
         await s.commit()
+        # un aggiornamento puo' aver rotto il sito o il connettore: stessa conferma di sempre.
+        # Prima l'errore restava li' senza ricontrollo fino al ciclo dopo, e senza avviso.
+        if site.status == "check_pending":
+            await schedule_pending_recheck(ctx["redis"], site.id)
+        elif needs_confirmation(site):
+            await start_confirmation(s, site, ctx["redis"])
 
         # Nessun aggiornamento REALE in questo giro (solo "niente da fare", tipicamente la
         # riga fantasma Balbooa appena ripulita): il re-check sopra serve comunque a
@@ -2340,14 +2475,23 @@ async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
         return
     try:
         await _inst_set(redis, job, site.id, {**base, "state": "running", "ok": False, "error": ""})
+        # pacchetti propri del sito (connettore WP: uno per ogni copia, nella sua cartella), altrimenti
+        # lo zip comune
+        own = (meta.get("paths") or {}).get(str(site_id)) or [meta["path"]]
+        contents = []
         try:
-            with open(meta["path"], "rb") as f:
-                content = f.read()
+            for zpath in (own if isinstance(own, list) else [own]):
+                with open(zpath, "rb") as f:
+                    contents.append(f.read())
         except OSError as ex:
             await _inst_set(redis, job, site.id, {**base, "state": "done", "ok": False,
                                                   "error": f"pacchetto non leggibile: {ex}"})
             return
-        res = await _install_one(site, content, meta["filename"], meta["kind"], bool(meta["activate"]))
+        res = {}
+        for content in contents:
+            res = await _install_one(site, content, meta["filename"], meta["kind"], bool(meta["activate"]))
+            if not res.get("ok"):
+                break
         if not res.get("ok") and attempt == 1 and _TRANSIENT.search(str(res.get("error") or "")):
             await _inst_set(redis, job, site.id, {**base, **res, "state": "retry", "ok": False,
                                                   "error": clean_error(res.get("error"))})
@@ -2355,8 +2499,16 @@ async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
             return
         await _inst_set(redis, job, site.id, {**base, **res, "state": "done", "error": clean_error(res.get("error"))})
         await evlog_now("connectors", "ok" if res.get("ok") else "error",
-                        (f"Connettore installato ({res.get('version') or 'versione sconosciuta'})" if res.get("ok") else f"Installazione del connettore fallita: {clean_error(res.get('error'))[:200]}"),
-                        site=site, details={"version": res.get("version"), "error": res.get("error") or ""})
+                        (f"Connettore installato ({res.get('new') or res.get('version') or 'versione sconosciuta'})" if res.get("ok") else f"Installazione del connettore fallita: {clean_error(res.get('error'))[:200]}"),
+                        site=site, details={"version": res.get("new") or res.get("version"), "error": res.get("error") or ""})
+        if res.get("ok") and meta.get("connector") and meta.get("target"):
+            # una sola installazione per versione consegnata: se dopo il sito dichiara ancora una
+            # versione vecchia (gira un'altra copia, es. un mu-plugin), il giro non riprova ogni notte
+            async with SessionLocal() as s:
+                fresh = await s.get(Site, site_id)
+                if fresh is not None:
+                    fresh.connector_hold = str(meta["target"])[:32]
+                    await s.commit()
         if res.get("ok"):
             # installato (es. il connettore nuovo): il pannello rifa' da solo il controllo del sito tra
             # poco, cosi' legge subito versione del connettore, nome macchina e stato, senza aspettare
@@ -2372,28 +2524,44 @@ async def install_site(ctx, job: str, site_id: int, attempt: int = 1):
 # --------------------------------------------------------------------------
 # DIAGNOSTICA DEI SITI (2.9.0)
 # --------------------------------------------------------------------------
+def _purge_old_job_files(days: int = 2) -> None:
+    """Zip delle installazioni in blocco piu' vecchie di due giorni: il lavoro e' finito da un pezzo
+    (in Redis scade dopo un giorno). Prima si cancellavano solo se qualcuno riapriva il lavoro."""
+    import os
+    import time as _time
+    from .routers.packages import PACKAGES_DIR
+    folder = os.path.join(PACKAGES_DIR, "_jobs")
+    limit = _time.time() - days * 86400
+    try:
+        for name in os.listdir(folder):
+            full = os.path.join(folder, name)
+            if name.endswith(".zip") and os.path.isfile(full) and os.path.getmtime(full) < limit:
+                os.remove(full)
+    except OSError:
+        pass
+
+
 async def connector_rollout(ctx):
     """Ogni notte: il connettore consegnato dal pannello sui siti che ne hanno uno piu' vecchio,
     con i lavori dell'installazione in blocco (un sito per lavoro, posti sui server rispettati).
     Si spegne da Impostazioni -> Connettori."""
-    from .routers.connectors import KINDS, connector_package, outdated_sites, shipped_version
-    from .routers.install import start_install_job
+    from .routers.connectors import KINDS, outdated_sites, shipped_version, start_connector_rollout
+    _purge_old_job_files()
     prefs = await get_operational_settings()
     if not prefs.get("connector_auto_update", True):
         return
     for kind in KINDS:
+        # solo la copia in uso, nella sua cartella: mai un mu-plugin, mai una seconda copia
         async with SessionLocal() as s:
             targets = await outdated_sites(kind, s)
         if not targets:
             continue
         try:
-            content, name = await connector_package(kind)
+            res = await start_connector_rollout(kind, targets, label=f"connettore {kind} {shipped_version(kind)} (notturno)")
         except Exception as ex:  # noqa: BLE001
             log.warning("Connettore %s: pacchetto non pronto, distribuzione saltata: %s", kind, ex)
             continue
-        res = await start_install_job(targets, content, name, "wp" if kind == "wp" else "joomla", "plugin", True,
-                                      label=f"connettore {kind} {shipped_version(kind)} (notturno)")
-        log.info("Connettore %s %s: distribuzione notturna su %s siti (lavoro %s)", kind, shipped_version(kind), len(targets), res["job"])
+        log.info("Connettore %s %s: distribuzione notturna su %s siti (lavoro %s)", kind, shipped_version(kind), res.get("total"), res.get("job"))
 
 
 async def plugin_catalog_scan(ctx, force: bool = False):

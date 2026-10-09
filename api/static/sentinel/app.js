@@ -19,7 +19,7 @@ function sentinel() {
     sites: [], loading: false, checkAllBusy: false, busy: {}, toast: '', toastTimer: null,
     detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [], 
     sec: { summary: null, items: [], loading: false, sev: '' },
-    conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false, rollout: null, rolling: '', rolloutKind: '', rolloutOpen: false },
+    conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false, rollout: null, rolling: '', rolloutKind: '', rolloutOpen: false, keptOpen: '' },
     pkg: { list: [], msg: '', err: '', busy: false, q: '', cands: [], searching: false, hbusy: '' }, servers: [], serversLoading: false, srvOpen: {},
     brand: { logo_url: '/static/logo.png', favicon_url: '/static/favicon.png', custom_logo: false, custom_favicon: false, busy: false },
     exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, whoisProgress: null, dSort: 'folder' },
@@ -412,6 +412,20 @@ function sentinel() {
     statusTone(s) { return this.isCheckPending(s) ? 'warn' : this.isSlow(s) ? 'warn' : this.isDnsIssue(s) ? 'warn' : (this.isOff(s) ? 'err' : (this.hasUpd(s) ? 'warn' : 'ok')); },
     statusTitle(s) { return this.isCheckPending(s) ? (s.error || 'Verifica da confermare') : this.isSlow(s) ? (s.error || 'Server lento') : this.isDnsIssue(s) ? (s.error || 'Verifica DNS non riuscita') : (this.isOff(s) ? (s.error || 'offline') : (this.hasUpd(s) ? 'update disponibili' : 'ok')); },
     coreLabel(s) { return s.core_current || '—'; },
+    // versione confrontabile come testo: "2.36.0" -> "00002.00036.00000"
+    verKey(v) { return (String(v || '').match(/\d+/g) || []).slice(0, 4).map(n => n.padStart(5, '0')).join('.'); },
+    // connettore del sito: versione, dove gira e se ce n'e' uno piu' nuovo nel pannello
+    connInfo(s) {
+      const v = (s && s.connector_version) || '', mode = (s && s.connector_mode) || '';
+      const latest = ((this.meta && this.meta.connectors) || {})[s && s.cms] || '';
+      let where = '';
+      if (s && s.cms === 'joomla') where = 'plugin di sistema';
+      else if (mode === 'mu') where = 'mu-plugin';
+      else if (mode.startsWith('plugin:')) where = 'plugin · ' + mode.slice(7);
+      else if (mode === 'other') where = 'fuori dai plugin';
+      const old = !!(v && latest && this.verKey(latest) > this.verKey(v));
+      return { v, where, mu: mode === 'mu', old, latest };
+    },
     fmtDate(d) { if (!d) return '—'; const x = new Date(d); return x.toLocaleString(I18n.locale, { dateStyle: 'short', timeStyle: 'short' }); },
     fmtDay(d) { if (!d) return '—'; const x = new Date(d); return Number.isNaN(x.getTime()) ? '—' : x.toLocaleDateString(I18n.locale); },
     ago(d) {
@@ -504,6 +518,7 @@ function sentinel() {
         if (k === 'status') { va = this.isOff(a) ? 2 : (this.hasUpd(a) ? 1 : 0); vb = this.isOff(b) ? 2 : (this.hasUpd(b) ? 1 : 0); }
         else if (k === 'updates') { va = a.updates_count || 0; vb = b.updates_count || 0; }
         else if (k === 'checked') { va = a.last_checked || ''; vb = b.last_checked || ''; }
+        else if (k === 'connector') { va = this.verKey(a.connector_version); vb = this.verKey(b.connector_version); }
         else { va = (a[k] || '').toString().toLowerCase(); vb = (b[k] || '').toString().toLowerCase(); }
         return (va > vb ? 1 : va < vb ? -1 : 0) * d;
       });
@@ -619,16 +634,22 @@ function sentinel() {
     },
 
     // ---------- site form (drawer) ----------
-    openNew() { this.form = { name: '', url: '', cms: 'wp', admin_url: '', token: '', group: '', tags: this.route.folder && this.route.folder !== '__none' ? this.route.folder : '', poll_interval_minutes: 180, auto_update: true, notifications_silenced: false, enabled: true }; this.formErr = ''; this.drawer = 'site'; },
+    openNew() { this.form = { name: '', url: '', cms: 'wp', admin_url: '', token: '', gen_token: false, group: '', tags: this.route.folder && this.route.folder !== '__none' ? this.route.folder : '', poll_interval_minutes: 180, auto_update: true, notifications_silenced: false, enabled: true }; this.formErr = ''; this.drawer = 'site'; },
     openEdit(s) { this.form = { id: s.id, name: s.name, url: s.url, cms: s.cms, admin_url: s.admin_url || '', token: s.token || '', group: s.group || '', tags: s.tags || '', poll_interval_minutes: s.poll_interval_minutes, auto_update: s.auto_update, notifications_silenced: !!s.notifications_silenced, enabled: s.enabled }; this.formErr = ''; this.drawer = 'site'; },
     async saveSite() {
       this.formErr = '';
       const f = this.form; const isNew = !f.id;
-      const body = { ...f }; delete body.id;
+      const muFlow = isNew && f.gen_token && f.cms === 'wp';   // crea col token coniato + scarica il mu-plugin
+      const body = { ...f }; delete body.id; if (!isNew) delete body.gen_token;
       const r = await this.api(isNew ? '/api/sites' : `/api/sites/${f.id}`, { method: isNew ? 'POST' : 'PATCH', body: JSON.stringify(body) });
       if (!r.ok) { const d = await r.json().catch(() => ({})); this.formErr = d.detail || 'Errore nel salvataggio'; return; }
+      const created = isNew ? await r.json().catch(() => null) : null;
       this.drawer = null; this.say(isNew ? 'Sito aggiunto' : 'Sito salvato');
       await this.load(true); if (this.detail && this.detail.id === f.id) await this.loadDetail(f.id);
+      if (muFlow && created && created.id) {
+        await this.downloadMuHeadless(created.id);
+        this.say('Connettore mu-plugin scaricato: mettilo in wp-content/mu-plugins/ del sito');
+      }
     },
 
     // ---------- tags (bulk) ----------
@@ -1243,6 +1264,22 @@ function sentinel() {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = (m && m[1]) || `${kind}.zip`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      } catch (e) { this.say('Download non riuscito'); }
+    },
+    async downloadMuHeadless(siteId) {
+      // Connettore WP come mu-plugin headless, token del sito già cablato: niente token in
+      // query (il file contiene chiave e token), si scarica con l'header Authorization.
+      try {
+        const r = await this.api(`/api/sites/${siteId}/connector-mu`);
+        if (!r.ok) { this.say((await r.json().catch(() => ({}))).detail || 'Download non riuscito'); return; }
+        const blob = await r.blob();
+        const cd = r.headers.get('content-disposition') || '';
+        const m = cd.match(/filename="?([^";]+)"?/);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (m && m[1]) || 'sentinel-td-agent.php';
         document.body.appendChild(a); a.click();
         setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
       } catch (e) { this.say('Download non riuscito'); }

@@ -34,6 +34,17 @@ class Site(Base):
     offline_notified: Mapped[bool] = mapped_column(Boolean, default=False)
     # primo errore dell'episodio in corso: l'avviso parte solo dopo N minuti di errori continui
     offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # tipo dell'episodio CONFERMATO: "site" (sito che non risponde) o "connector" (il sito
+    # risponde, il connettore no). Vuoto = nessun episodio confermato. Decide quale avviso
+    # parte, quale avviso di ritorno, e fa ripartire l'avviso se l'episodio cambia tipo.
+    offline_kind: Mapped[str] = mapped_column(String(16), default="")
+    # dove gira il connettore WordPress: "mu" (mu-plugin), "plugin:<cartella>" o "other". Lo dichiara
+    # il connettore (2.36.0+) o si ricava dall'elenco dei plugin. Il giro notturno aggiorna solo la
+    # copia in uso, nella sua cartella; mai un mu-plugin ne' un posto sconosciuto.
+    connector_mode: Mapped[str] = mapped_column(String(80), default="")
+    # versione del connettore installata dal giro ma rimasta "non in uso" (sul sito gira un'altra
+    # copia, per esempio un mu-plugin vecchio): il giro non la ripropone
+    connector_hold: Mapped[str] = mapped_column(String(32), default="")
     # Campi legacy conservati per compatibilità del database; diagnostica rimossa
     diag_json: Mapped[str] = mapped_column(Text, default="")
     diag_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

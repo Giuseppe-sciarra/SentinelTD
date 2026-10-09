@@ -66,9 +66,12 @@ app.include_router(availability.router)  # registro offline passivo e persistent
 
 @app.get("/api/version", dependencies=[Depends(require_auth)])
 async def app_version():
-    """Versione e crediti mostrati nel pie' di pagina del pannello."""
+    """Versione e crediti mostrati nel pie' di pagina del pannello, e le versioni dei connettori
+    che il pannello consegna (servono a segnalare nell'elenco dei siti quelli piu' vecchi)."""
+    from .routers.connectors import shipped_version
     return {"version": __version__, "name": APP_NAME, "vendor": VENDOR,
-            "vendor_url": VENDOR_URL, "author": AUTHOR}
+            "vendor_url": VENDOR_URL, "author": AUTHOR,
+            "connectors": {"wp": shipped_version("wp"), "joomla": shipped_version("joomla")}}
 
 
 @app.get("/healthz")

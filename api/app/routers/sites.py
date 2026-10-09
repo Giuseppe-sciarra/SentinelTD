@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from fastapi.responses import FileResponse, RedirectResponse
 import os
+import re
 import httpx
 from arq import create_pool
 from arq.connections import RedisSettings
@@ -241,11 +242,18 @@ async def _resolve_final_url(url: str) -> str:
 async def create_site(payload: SiteIn, s: AsyncSession = Depends(get_session)):
     if payload.cms not in ("wp", "joomla"):
         raise HTTPException(422, "cms deve essere 'wp' o 'joomla'")
-    if not payload.token.strip():
+    token = payload.token.strip()
+    if payload.gen_token and not token:
+        # Flusso mu-plugin: il pannello conia il token e lo cuoce nel connettore headless che
+        # si scarica. Niente da copiare dal sito: i due combaciano perche' la sorgente e' una.
+        import secrets
+        token = secrets.token_hex(24)
+    if not token:
         raise HTTPException(422, "Token mancante: copialo dal connettore installato sul sito")
     # risolvi l'URL reale del sito (segue redirect: www, https) cosi' admin/status partono giusti
     resolved = await _resolve_final_url(payload.url)
-    data = payload.model_dump(exclude={"admin_url"})
+    data = payload.model_dump(exclude={"admin_url", "gen_token"})
+    data["token"] = token
     data["url"] = resolved
     data["tags"] = _norm_tags(data.get("tags"))
     admin = payload.admin_url or (
@@ -266,6 +274,29 @@ async def get_site(site_id: int, s: AsyncSession = Depends(get_session)):
     if not site:
         raise HTTPException(404)
     return site
+
+
+@router.get("/{site_id}/connector-mu")
+async def connector_mu_headless(site_id: int, s: AsyncSession = Depends(get_session)):
+    """Scarica il connettore WordPress come mu-plugin HEADLESS gia' configurato per QUESTO sito:
+    il suo token e' cablato dentro, hub e chiave compilati, nessuna voce di menu. Va messo in
+    wp-content/mu-plugins/ (un solo file): niente pulsante Disattiva, resta visibile nella tab
+    Must-Use con la sua intestazione. Solo per siti WordPress gia' collegati (serve il token).
+    Richiede il JWT pieno (come il download del connettore): il file contiene chiave e token."""
+    from fastapi import Response
+    from .connectors import wp_mu_headless
+    site = await s.get(Site, site_id)
+    if not site:
+        raise HTTPException(404)
+    if site.cms != "wp":
+        raise HTTPException(422, "Il mu-plugin headless e' solo per i siti WordPress")
+    if not site.token:
+        raise HTTPException(422, "Il sito non ha ancora un token: collegalo prima dal connettore normale")
+    data = await wp_mu_headless(site.token)
+    slug = re.sub(r"[^a-z0-9]+", "-", (site.name or "sito").lower()).strip("-") or "sito"
+    fname = f"sentinel-td-agent-{slug}.php"
+    return Response(content=data, media_type="application/x-php",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 @router.post("/{site_id}/rollback")
@@ -390,6 +421,21 @@ async def refresh_now(site_id: int, s: AsyncSession = Depends(get_session)):
                 await recheck(pool, site.id)
             finally:
                 await pool.aclose()
+        except Exception:
+            pass  # il risultato del check resta disponibile anche se Redis e' giu'
+    else:
+        # errore visto dal Check ora (es. connettore rimosso): parte la stessa conferma del
+        # controllo normale, che poi manda l'avviso. Prima restava rosso e basta.
+        from ..connectors import needs_confirmation, start_confirmation
+        if not needs_confirmation(site):
+            return site
+        try:
+            pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+            try:
+                await start_confirmation(s, site, pool)
+            finally:
+                await pool.aclose()
+            await s.refresh(site)
         except Exception:
             pass  # il risultato del check resta disponibile anche se Redis e' giu'
     return site

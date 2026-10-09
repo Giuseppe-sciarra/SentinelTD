@@ -58,6 +58,11 @@ async def run_migrations(conn) -> None:
     """))
     # Sito non raggiungibile: inizio dell'episodio, per avvisare solo dopo N minuti
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS offline_since TIMESTAMPTZ NULL"))
+    # 2.34.0: tipo dell'episodio confermato ("site" / "connector"), per l'avviso giusto
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS offline_kind VARCHAR(16) NOT NULL DEFAULT ''"))
+    # 2.35.0: dove gira il connettore WP e versione rimasta non in uso (giro notturno)
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS connector_mode VARCHAR(80) NOT NULL DEFAULT ''"))
+    await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS connector_hold VARCHAR(32) NOT NULL DEFAULT ''"))
     # 2.9.0: diagnostica dal connettore (la tabella site_sizes la crea create_all)
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS diag_json TEXT NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS diag_at TIMESTAMPTZ NULL"))

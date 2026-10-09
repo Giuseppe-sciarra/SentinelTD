@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.34.0
+ * Version: 2.36.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -28,11 +28,8 @@ if (!defined('TDPANOP_VERSION')) {
 }
 
 if (defined('TDPANOP_LOADED')) {
-    add_action('admin_notices', function () {
-        $msg = 'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).';
-        echo '<div class="notice notice-warning"><p><strong>Sentinel TD Agent</strong>: '
-           . esc_html(function_exists('tdpanop__') ? tdpanop__($msg) : $msg) . '</p></div>';
-    });
+    // Un'altra copia e' gia' caricata (mu-plugin, o l'altra cartella): questa esce in silenzio.
+    // Nessun avviso in amministrazione: chi gestisce il sito non deve vedere niente.
     return;
 }
 define('TDPANOP_LOADED', true);
@@ -48,6 +45,10 @@ const TDPANOP_OPT = 'td_panopticon_token';
  * ------------------------------------------------------------------------- */
 const TDPANOP_HUB_URL = '';   // vuoto: si imposta dal backend del sito, oppure lo compila Sentinel nel pacchetto che genera
 const TDPANOP_HUB_KEY = '';   // idem: mai nel repository
+// Token cablato: usato SOLO dalla build mu-plugin headless che Sentinel genera per un sito
+// gia' collegato (col token di quel sito gia' dentro). Vuoto nel sorgente e nelle build
+// normali: li' il token resta quello generato/salvato nell'option, come sempre.
+const TDPANOP_TOKEN = '';
 
 /*
  * Tutto il resto del connettore sta in un blocco condizionale. Motivo: PHP registra
@@ -83,7 +84,6 @@ function tdpanop_translations()
     return [
         'en' => [
             'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Sentinel TD connector: exposes versions and available updates over REST and allows remote updates. Token and connection in Settings → Sentinel TD.',
-            'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).' => 'another copy of the connector is already active on this site. Keep only one copy active (deactivate and remove the unused one).',
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token regenerated. Update it in Sentinel TD as well.',
             'Collegamento fallito: %s' => 'Connection failed: %s',
             'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'This site is ALREADY in Sentinel TD: nothing was changed.',
@@ -119,7 +119,6 @@ function tdpanop_translations()
         ],
         'fr' => [
             'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Connecteur Sentinel TD : expose les versions et les mises à jour disponibles via REST et permet les mises à jour à distance. Jeton et connexion dans Réglages → Sentinel TD.',
-            'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).' => 'une autre copie du connecteur est déjà active sur ce site. Ne gardez qu\'une seule copie active (désactivez et supprimez celle qui ne sert pas).',
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Jeton régénéré. Mettez-le aussi à jour dans Sentinel TD.',
             'Collegamento fallito: %s' => 'Échec de la connexion : %s',
             'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'Ce site est DÉJÀ présent dans Sentinel TD : aucune modification effectuée.',
@@ -155,7 +154,6 @@ function tdpanop_translations()
         ],
         'de' => [
             'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Sentinel-TD-Connector: stellt Versionen und verfügbare Updates per REST bereit und ermöglicht Updates aus der Ferne. Token und Verbindung unter Einstellungen → Sentinel TD.',
-            'un\'altra copia del connettore è già attiva su questo sito. Tieni attiva una sola copia (disattiva e rimuovi quella non usata).' => 'eine weitere Kopie des Connectors ist auf dieser Website bereits aktiv. Lassen Sie nur eine Kopie aktiv (deaktivieren und entfernen Sie die nicht genutzte).',
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token neu erzeugt. Aktualisieren Sie ihn auch in Sentinel TD.',
             'Collegamento fallito: %s' => 'Verbindung fehlgeschlagen: %s',
             'Questo sito è GIÀ presente in Sentinel TD: nessuna modifica fatta.' => 'Diese Website ist BEREITS in Sentinel TD vorhanden: es wurde nichts geändert.',
@@ -221,6 +219,11 @@ register_activation_hook(__FILE__, function () {
 
 function tdpanop_token(): string
 {
+    // Token cablato dalla build headless (ha la precedenza): il mu-plugin autentica senza
+    // pagina di impostazioni e senza dipendere dall'option.
+    if (TDPANOP_TOKEN !== '') {
+        return TDPANOP_TOKEN;
+    }
     $t = get_option(TDPANOP_OPT);
     if (!$t) {
         // Generazione ATOMICA, a prova di object cache (Redis).
@@ -975,9 +978,14 @@ function tdpanop_status($req = null)
         ];
     }
 
+    $tdpanop_where = tdpanop_running_mode();
     return new WP_REST_Response([
         'cms'  => 'wp',
         'connector' => TDPANOP_VERSION,   // il pannello sa quale versione gira su ogni sito
+        // dove gira QUESTA copia: "mu" (mu-plugin) o "plugin" con la sua cartella. Il giro notturno
+        // del pannello aggiorna solo la copia in uso, nella sua cartella, e mai i mu-plugin.
+        'mode'      => $tdpanop_where['mode'],
+        'folder'    => $tdpanop_where['folder'],
         // nome della macchina (una stringa, costo zero): serve a distinguere due macchine dietro
         // lo stesso IP in Gestione server. Nessuna misura di carico, RAM o disco.
         'hostname'  => (string) @gethostname(),
@@ -1560,6 +1568,11 @@ function tdpanop_install(WP_REST_Request $req)
 
     try {
         if ($kind === 'plugin') {
+            // il pacchetto e' il connettore stesso? Mai una seconda copia accanto a quella in uso
+            $conflict = tdpanop_self_package_conflict($tmp);
+            if ($conflict !== '') {
+                return new WP_REST_Response(['ok' => false, 'error' => $conflict], 200);
+            }
             $up  = new Plugin_Upgrader($skin);
             $res = $up->install($tmp, ['overwrite_package' => true]);
 
@@ -1657,6 +1670,94 @@ function tdpanop_install(WP_REST_Request $req)
             @unlink($tmp);
         }
     }
+}
+
+/* ---------------------------------------------------------------------------
+ * Dove gira questa copia del connettore, e guardia contro la seconda copia.
+ * ------------------------------------------------------------------------- */
+function tdpanop_running_mode(): array
+{
+    $norm = function ($p) {
+        return rtrim(str_replace('\\', '/', (string) $p), '/') . '/';
+    };
+    // __FILE__ ha i collegamenti simbolici risolti: si confronta con la cartella com'e' scritta
+    // e con quella risolta, cosi' una wp-content/plugins collegata non sembra "altrove"
+    $under = function ($dir) use ($norm) {
+        $file = str_replace('\\', '/', __FILE__);
+        foreach (array_unique([$norm($dir), $norm(@realpath($dir) ?: $dir)]) as $base) {
+            if (strpos($file, $base) === 0) {
+                return substr($file, strlen($base));
+            }
+        }
+        return null;
+    };
+    if (defined('WPMU_PLUGIN_DIR') && $under(WPMU_PLUGIN_DIR) !== null) {
+        return ['mode' => 'mu', 'folder' => ''];
+    }
+    $rel = null;
+    if (function_exists('plugin_basename')) {
+        // come la vede WordPress (gestisce anche le cartelle dei plugin collegate)
+        // (fuori dalle cartelle dei plugin plugin_basename ridà il percorso intero: si accetta
+        // solo se il file c'e' davvero sotto WP_PLUGIN_DIR)
+        $base = str_replace('\\', '/', plugin_basename(__FILE__));
+        if ($base !== '' && defined('WP_PLUGIN_DIR') && is_file(rtrim(WP_PLUGIN_DIR, '/\\') . '/' . $base)) {
+            $rel = $base;
+        }
+    }
+    if ($rel === null && defined('WP_PLUGIN_DIR')) {
+        $rel = $under(WP_PLUGIN_DIR);
+    }
+    if ($rel !== null) {
+        $cut = strpos($rel, '/');
+        return ['mode' => 'plugin', 'folder' => $cut === false ? '' : substr($rel, 0, $cut)];
+    }
+    return ['mode' => 'other', 'folder' => ''];
+}
+
+/*
+ * Se lo zip da installare e' il connettore stesso, puo' solo SOSTITUIRE una copia che c'e' gia'
+ * (stessa cartella): mai crearne una nuova. Una copia in piu' (accanto a un mu-plugin o in
+ * un'altra cartella) non farebbe niente e il pannello vedrebbe sempre la versione vecchia.
+ * Sostituire una copia esistente invece va sempre bene, anche se non e' quella in uso: diventa
+ * la versione nuova, che quando trova un'altra copia gia' caricata esce in silenzio.
+ * Torna il motivo del rifiuto, o '' se si puo' installare.
+ */
+function tdpanop_self_package_conflict(string $zip): string
+{
+    if (!class_exists('ZipArchive')) {
+        return '';
+    }
+    $za = new ZipArchive();
+    if ($za->open($zip) !== true) {
+        return '';
+    }
+    $root = null;
+    for ($i = 0; $i < $za->numFiles; $i++) {
+        $name = (string) $za->getNameIndex($i);
+        if (preg_match('#^(?:([^/]+)/)?td-panopticon\.php$#', $name, $m)) {
+            $head = (string) $za->getFromIndex($i, 8192);
+            if (preg_match('/^[\s*]*Plugin Name:\s*Sentinel TD Agent\s*$/mi', $head) || strpos($head, 'TDPANOP_LOADED') !== false) {
+                $root = isset($m[1]) ? (string) $m[1] : '';
+                break;
+            }
+        }
+    }
+    $za->close();
+    if ($root === null) {
+        return '';
+    }
+    if ($root === '') {
+        // senza cartella WordPress lo metterebbe in una cartella nuova: sarebbe una copia in piu'
+        return 'Pacchetto del connettore senza cartella: non si installa una copia nuova';
+    }
+    if (defined('WP_PLUGIN_DIR') && is_file(rtrim(WP_PLUGIN_DIR, '/\\') . '/' . $root . '/td-panopticon.php')) {
+        return '';     // sostituisce una copia che c'e' gia'
+    }
+    $me = tdpanop_running_mode();
+    if ($me['mode'] === 'mu') {
+        return 'Il connettore su questo sito gira come mu-plugin: non si installa una copia nuova nei plugin';
+    }
+    return 'Il connettore su questo sito non sta in "' . $root . '": non si installa una copia nuova';
 }
 
 /* Estrae un motivo leggibile dai messaggi dello skin dell'upgrader. */

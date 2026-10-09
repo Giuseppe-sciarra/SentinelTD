@@ -16,9 +16,12 @@ async def record_availability(session, site):
         return
     if site.status not in ("ok", "error") or site.last_checked is None:
         return
+    # Connettore che non risponde con il sito che risponde (connectors._mark_connector): per la
+    # disponibilita' il sito e' SU. Non apre episodi, e chiude quello aperto se il sito era giu'.
+    up = site.status == "ok" or getattr(site, "_site_answers", False)
     # Error states without a confirmation window (e.g. connector credentials) are
     # not evidence of a confirmed outage. Worker may confirm them subsequently.
-    if site.status == "error" and site.offline_since is None:
+    if not up and site.offline_since is None:
         return
     with session.no_autoflush:
         if session.get_bind().dialect.name == "postgresql":
@@ -31,7 +34,7 @@ async def record_availability(session, site):
             OfflineEpisode.site_id == site.id, OfflineEpisode.ended_at.is_(None)
         ).with_for_update())).scalar_one_or_none()
     checked = utc(site.last_checked)
-    if site.status == "ok":
+    if up:
         if episode and checked >= utc(episode.last_failed_at):
             episode.ended_at = checked
             mins = int((checked - utc(episode.confirmed_at)).total_seconds() // 60)

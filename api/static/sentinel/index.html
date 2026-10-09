@@ -565,6 +565,7 @@
                   <th>Cartelle</th>
                   <th class="sort" @click="sortBy('core_current')">CMS / core</th>
                   <th>PHP</th>
+                  <th class="sort" @click="sortBy('connector')">Connettore</th>
                   <th>Dominio</th>
                   <th class="sort" @click="sortBy('updates')">Update</th>
                   <th class="sort" @click="sortBy('checked')">Check</th>
@@ -589,6 +590,7 @@
                       <td class="hide-m"><template x-for="t in siteTags(s)" :key="t"><button type="button" class="chip click-chip" @click.stop="go('folder/'+encodeURIComponent(t))" x-text="t" title="Apri cartella" translate="no"></button></template><span class="mut small" x-show="!siteTags(s).length">—</span></td>
                       <td><span class="cms" :class="s.cms" x-text="s.cms==='wp'?'WP':'JOOMLA'"></span> <span class="mono small" x-text="coreLabel(s)"></span> <span class="badge warn" x-show="s.core_update" x-text="'→ '+s.core_latest"></span></td>
                       <td class="hide-m"><span class="mono small" x-text="s.php_version||'—'"></span> <span class="badge" :class="phpState(s.php_version).cls" x-show="phpState(s.php_version).label" x-text="phpState(s.php_version).label"></span></td>
+                      <td class="hide-m"><span class="mono small" :class="connInfo(s).old ? 'warn' : ''" :title="connInfo(s).old ? ('Nel pannello c\'è la ' + connInfo(s).latest) : ''" x-text="s.connector_version||'—'"></span> <span class="badge" x-show="connInfo(s).mu" title="Connettore installato come mu-plugin: si aggiorna a mano">mu</span></td>
                       <td class="hide-m"><span class="badge" :class="domainExpiryClass(s)" :title="s.domain_check_error || ''" x-show="s.domain_expires_at || s.domain_check_error" x-text="domainExpiryText(s)"></span><span class="mut small" x-show="!s.domain_expires_at && !s.domain_check_error">—</span></td>
                       <td class="num"><span class="badge warn" x-show="hasUpd(s)" x-text="s.updates_count"></span><span class="badge ok" x-show="!hasUpd(s)&&!isOff(s)&&!isDnsIssue(s)&&!isCheckPending(s)">ok</span><span class="badge warn" x-show="isDnsIssue(s)" :title="s.error">verifica DNS</span><span class="badge warn" x-show="isCheckPending(s)" :title="s.error">da confermare</span><span class="badge warn" x-show="isSlow(s)" :title="s.error">server lento</span><span class="badge err" x-show="isOff(s)">offline</span></td>
                       <td class="hide-m mut small" x-text="ago(s.last_checked)"></td>
@@ -628,6 +630,7 @@
               <button class="btn sm" @click="check(detail)" :disabled="!!(busy[detail.id])"><span class="spinner" x-show="busy[detail.id]"></span> Check ora</button>
               <button class="btn sm primary" @click="updateNow(detail)" x-show="hasUpd(detail)">Aggiorna tutto</button>
               <button class="btn sm" @click="goAdmin(detail)">Apri admin ↗</button>
+              <button class="btn sm" x-show="detail.cms==='wp'" @click="downloadMuHeadless(detail.id)" title="Scarica il connettore come mu-plugin headless, col token di questo sito già dentro: va in wp-content/mu-plugins/, niente pulsante Disattiva, nessuna voce di menù. Resta visibile nella tab Must-Use.">Connettore mu-plugin</button>
               <button class="btn sm" :class="detail.notifications_silenced?'danger':''" @click="toggleSilence(detail)" x-text="detail.notifications_silenced?'🔕 Riattiva notifiche':'🔔 Silenzia'"></button>
               <button class="btn sm" @click="openDetailReport([detail.id])" title="Report dettagliato di questo sito">📄 Report</button>
               <button class="btn sm" @click="openEdit(detail)">Modifica</button>
@@ -649,6 +652,7 @@
                   <div class="kv">
                     <div class="k">CMS</div><div><span class="cms" :class="detail.cms" x-text="detail.cms==='wp'?'WP':'JOOMLA'"></span> <span class="mono" x-text="detail.core_current"></span> <span class="badge warn" x-show="detail.core_update" x-text="'disponibile '+detail.core_latest"></span></div>
                     <div class="k">PHP</div><div><span class="mono" x-text="detail.php_version||'—'"></span> <span class="badge" :class="phpState(detail.php_version).cls" x-show="phpState(detail.php_version).label" x-text="phpState(detail.php_version).label"></span></div>
+                    <div class="k">Connettore</div><div><span class="mono" x-text="detail.connector_version||'—'"></span> <span class="badge" :class="connInfo(detail).mu ? 'warn' : ''" x-show="connInfo(detail).where" x-text="connInfo(detail).where"></span> <span class="badge warn" x-show="connInfo(detail).old" x-text="'disponibile ' + connInfo(detail).latest"></span><div class="small mut" x-show="connInfo(detail).mu && connInfo(detail).old" style="margin-top:3px">Il mu-plugin si aggiorna a mano: pulsante Connettore mu-plugin qui sopra, poi sostituisci il file in wp-content/mu-plugins.</div></div>
                     <div class="k">Dominio</div><div><span x-text="detail.domain_name||'—'"></span> <span class="badge" :class="domainExpiryClass(detail)" :title="detail.domain_check_error || ''" x-show="detail.domain_expires_at || detail.domain_check_error" x-text="domainExpiryText(detail)"></span><div class="small warn" x-show="detail.domain_check_error" x-text="detail.domain_check_error"></div></div>
                     <div class="k">Notifiche</div><div><span class="badge" :class="detail.notifications_silenced?'warn':'ok'" x-text="detail.notifications_silenced?'silenziate':'attive'"></span></div>
                     <div class="k">Ultimo check</div><div><span x-text="fmtDate(detail.last_checked)"></span><div class="small warn" x-show="detail.updates_unverified_at" style="margin-top:3px"><span>Aggiornamenti non verificati:</span> <span x-text="fmtDate(detail.updates_unverified_at)"></span> <span>il sito non ha potuto ricalcolarli (cache di WordPress mancante). Qui vale l'ultimo controllo riuscito; un Check ora riprova.</span></div></div>
@@ -1630,8 +1634,10 @@
                         <div class="conn-sites" x-show="conn.rolloutOpen"><template x-for="o in (inst.progress ? inst.progress.results : [])" :key="'ro'+o.site_id"><div class="small"><span class="dot" :class="o.state==='done' ? (o.ok ? 'ok' : 'err') : 'warn'" style="display:inline-block;margin-right:6px"></span><span x-text="o.site_name" translate="no"></span> <span class="mut" x-text="'— ' + instRowText(o)"></span></div></template></div>
                       </div>
                       <div class="small conn-rollout" x-show="rolloutOf(c.kind) && !(inst.job && conn.rolloutKind === c.kind)">
-                          <span class="ok" x-show="rolloutOf(c.kind) && !rolloutOf(c.kind).outdated" x-text="'sui siti: tutti alla ' + (rolloutOf(c.kind)||{}).version"></span>
+                          <span class="ok" x-show="rolloutOf(c.kind) && !rolloutOf(c.kind).outdated && !rolloutOf(c.kind).kept" x-text="'sui siti: tutti alla ' + (rolloutOf(c.kind)||{}).version"></span>
                           <span class="warn" x-show="rolloutOf(c.kind) && rolloutOf(c.kind).outdated" x-text="(rolloutOf(c.kind)||{}).outdated + ' ' + pl((rolloutOf(c.kind)||{}).outdated, 'sito con una versione più vecchia', 'siti con una versione più vecchia') + ' su ' + (rolloutOf(c.kind)||{}).total"></span>
+                          <button class="srv-more" style="margin:0" x-show="rolloutOf(c.kind) && rolloutOf(c.kind).kept" @click="conn.keptOpen = (conn.keptOpen === c.kind ? '' : c.kind)"><span x-text="(rolloutOf(c.kind)||{}).kept + ' ' + pl((rolloutOf(c.kind)||{}).kept, 'sito escluso dal giro', 'siti esclusi dal giro')"></span><span x-text="conn.keptOpen === c.kind ? ' ▴' : ' ▾'"></span></button>
+                          <div class="conn-sites" x-show="conn.keptOpen === c.kind && rolloutOf(c.kind) && rolloutOf(c.kind).kept"><template x-for="k in ((rolloutOf(c.kind)||{}).kept_sites || [])" :key="'kp'+k.id"><div class="small" style="margin-bottom:6px"><span class="dot warn" style="display:inline-block;margin-right:6px"></span><b x-text="k.name" translate="no"></b> <span class="mut" x-text="'— ' + k.version + ' · '"></span><span class="mut" x-text="k.why"></span><div class="mut" style="margin-left:14px" x-show="k.hint" x-text="k.hint"></div></div></template></div>
                         </div>
                     </div>
                   </template>
@@ -1793,7 +1799,9 @@
       <div class="field"><label>Nome</label><input class="input" x-model="form.name"></div>
       <div class="field"><label>URL (senza slash finale)</label><input class="input" x-model="form.url" placeholder="https://sito.it"></div>
       <div class="field"><label>CMS</label><select class="input" x-model="form.cms"><option value="wp">WordPress</option><option value="joomla">Joomla</option></select></div>
-      <div class="field"><label>Token del connettore</label><input class="input mono" x-model="form.token"><div class="hint">Lo trovi nella pagina del connettore sul sito (o si compila da solo con la registrazione automatica).</div></div>
+      <label class="check" x-show="!form.id && form.cms==='wp'" style="margin:2px 0 8px"><input type="checkbox" x-model="form.gen_token"> 🔌 Connettore mu-plugin (genera il token e scaricalo)</label>
+      <div class="hint" x-show="!form.id && form.cms==='wp' && form.gen_token" style="margin:-4px 0 10px 24px">Al salvataggio: Sentinel conia il token, crea il sito e ti scarica un unico <span class="mono">.php</span> con quel token già dentro, da mettere in <span class="mono">wp-content/mu-plugins/</span>. Si collega da solo, non ha il pulsante Disattiva e non aggiunge voci di menù (resta visibile nella tab Must-Use).</div>
+      <div class="field" x-show="!(form.gen_token && !form.id && form.cms==='wp')"><label>Token del connettore</label><input class="input mono" x-model="form.token"><div class="hint">Lo trovi nella pagina del connettore sul sito (o si compila da solo con la registrazione automatica).</div></div>
       <div class="field"><label>URL admin</label><input class="input" x-model="form.admin_url" placeholder="/wp-admin oppure /login (WPS Hide Login)"></div>
       <div class="field"><label>Cartelle (separate da virgola)</label><input class="input" x-model="form.tags" list="tagsdl" placeholder="Clienti interni, ClienteX/Shop"><datalist id="tagsdl"><template x-for="t in allTags" :key="t"><option :value="t"></option></template></datalist><div class="hint">Usa <span class="mono">Padre/Figlio</span> per le sottocartelle.</div></div>
       <div class="field"><label>Intervallo check (minuti)</label><input class="input" type="number" min="15" x-model.number="form.poll_interval_minutes"></div>

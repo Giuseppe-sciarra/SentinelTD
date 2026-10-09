@@ -24,7 +24,7 @@ import time
 import re
 from urllib.parse import quote
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Site, Extension
@@ -39,6 +39,143 @@ log = logging.getLogger("sentinel.connectors")
 # contati nei contatori del sito, altrimenti il pending sparisce a ogni check e la card
 # non mostra la barra gialla.
 VENDOR_SLUGS = {"pkg_BaForms", "pkg_Gallery"}
+
+
+# --------------------------------------------------------------------------
+# Connettore che non risponde con un sito che invece risponde
+# --------------------------------------------------------------------------
+# Il sito ha RISPOSTO (HTTP 4xx, oppure 200 senza i dati del connettore): non e' offline,
+# ma il connettore e' stato rimosso, disattivato, rifiuta il token o qualcosa risponde al
+# posto suo. Su quel sito si fermano aggiornamenti e controlli, quindi va segnalato con
+# un avviso suo ("Connettore non risponde"), non come "sito non raggiungibile", e senza
+# aprire un episodio offline nel registro della disponibilita'.
+CONNECTOR_PREFIX = "Connettore: "
+
+
+class ConnectorReplyError(ValueError):
+    """Il sito ha risposto, ma senza i dati del connettore (com_ajax vuota perche' il plugin
+    Joomla e' disattivato o rimosso, errore del plugin, pagina HTML al posto del JSON).
+    ambiguous=True: la risposta non prova che il CMS giri (pagina HTML): puo' essere anche un
+    hosting sospeso o un dominio parcheggiato, e decide la controprova sulla home.
+    Sottoclasse di ValueError: su WordPress fa ancora provare la forma REST alternativa."""
+
+    def __init__(self, message: str, *, ambiguous: bool = False):
+        super().__init__(message)
+        self.ambiguous = ambiguous
+
+
+def connector_problem(error: str | None) -> bool:
+    """True se l'errore salvato sul sito e' un problema del connettore (non un sito offline)."""
+    return str(error or "").startswith(CONNECTOR_PREFIX)
+
+
+def down_kind(site) -> str:
+    """Tipo dell'errore attuale: "connector" (il sito risponde, il connettore no) o "site"."""
+    return "connector" if connector_problem(site.error) else "site"
+
+
+def needs_confirmation(site) -> bool:
+    """Errore non ancora confermato per il suo tipo, quindi da far passare per la finestra:
+    episodio nuovo, oppure sito che va giu' davvero durante un problema del connettore gia'
+    confermato (un blip di un altro tipo non deve far partire un avviso al primo colpo)."""
+    if site.status != "error":
+        return False
+    if not site.offline_notified and not site.offline_kind:
+        return True
+    return site.offline_kind == "connector" and down_kind(site) == "site"
+
+
+def _connector_json(r: httpx.Response):
+    """r.json(), ma una risposta che non e' JSON diventa un errore che dice cosa e' arrivato."""
+    try:
+        return r.json()
+    except ValueError as exc:
+        ctype = (r.headers.get("content-type") or "").split(";")[0].strip() or "?"
+        raise ConnectorReplyError(
+            f"risposta senza i dati del connettore (HTTP {r.status_code}, {ctype})", ambiguous=True) from exc
+
+
+def _cms_answered(response: httpx.Response) -> bool:
+    """La risposta di errore e' JSON del CMS: errore REST di WordPress ({"code": ...}) o
+    involucro com_ajax di Joomla ({"success": false, "message": ...}). Prova che il CMS gira e
+    che e' il connettore a mancare o a rifiutare. Una pagina HTML invece non prova niente:
+    puo' essere anche un hosting sospeso, un sito cancellato o un firewall."""
+    try:
+        data = response.json()
+    except Exception:  # noqa: BLE001
+        return False
+    return isinstance(data, dict) and any(k in data for k in ("code", "success", "message"))
+
+
+def connector_http_reason(response: httpx.Response) -> str | None:
+    """Motivo leggibile per un errore HTTP che viene dal sito e non da un sito giu'.
+    None per i codici che restano "sito che non risponde" (5xx, 408, 429).
+    I pezzi di testo fissi sono voci del catalogo delle lingue: i codici restano fuori."""
+    code = response.status_code
+    if code < 400 or code >= 500 or code in (408, 429):
+        return None
+    if code in (401, 403):
+        return (f"{CONNECTOR_PREFIX}accesso rifiutato (HTTP {code}): "
+                f"token cambiato, intestazione filtrata dall'hosting o firewall che blocca Sentinel")
+    if code in (404, 410):
+        if _rest_no_route(response):
+            return f"{CONNECTOR_PREFIX}assente o disattivato (HTTP {code}): WordPress risponde ma il connettore non c'è"
+        return f"{CONNECTOR_PREFIX}indirizzo del connettore non trovato (HTTP {code}): rimosso, disattivato o bloccato"
+    return f"{CONNECTOR_PREFIX}risposta inattesa all'indirizzo del connettore (HTTP {code})"
+
+
+# cartelle in cui sta il connettore WordPress (parco storico / nuove installazioni)
+SELF_WP_FOLDERS = ("td-panopticon", "sentinel-td")
+_SAFE_FOLDER = re.compile(r"[A-Za-z0-9._-]{1,80}")
+
+
+def connector_mode_of(data: dict, running: str, exts: list) -> str:
+    """Dove gira il connettore WordPress: "mu", "plugin:<cartella>" o "other" ("" = non si sa).
+
+    Il connettore 2.36.0+ lo dichiara. Per quelli prima si ricava dall'elenco dei plugin, che
+    NON contiene i mu-plugin: la copia in uso e' il plugin del connettore con la stessa versione
+    che il connettore dichiara. Se non c'e', il connettore gira da mu-plugin (o da un posto che
+    il giro notturno non deve toccare)."""
+    mode = str(data.get("mode") or "").strip()
+    folder = str(data.get("folder") or "").strip()
+    if mode == "mu":
+        return "mu"
+    if mode == "plugin" and folder and _SAFE_FOLDER.fullmatch(folder) and folder not in (".", ".."):
+        return f"plugin:{folder}"
+    if mode in ("plugin", "other"):
+        return "other"
+    running = (running or "").strip()
+    if not running:
+        return ""
+    found = sorted(
+        str(e.get("slug") or "") for e in exts
+        if str(e.get("type", "")).lower() == "plugin"
+        and (str(e.get("slug") or "") in SELF_WP_FOLDERS or str(e.get("name") or "") == "Sentinel TD Agent")
+        and str(e.get("current") or "").strip() == running
+    )
+    if not found:
+        return "mu"
+    good = [f for f in found if _SAFE_FOLDER.fullmatch(f) and f not in (".", "..")]
+    return f"plugin:{good[0]}" if good else "other"     # "." = file singolo nella radice dei plugin
+
+
+def connector_crash_reason(response: httpx.Response) -> str:
+    """Motivo per un 500 all'indirizzo del connettore, con il messaggio del CMS se c'e'
+    (errore critico di WordPress, eccezione del plugin Joomla)."""
+    msg = ""
+    try:
+        data = response.json()
+    except Exception:  # noqa: BLE001
+        data = None
+    if isinstance(data, dict):
+        err = (data.get("data") or {}).get("error") if isinstance(data.get("data"), dict) else None
+        if isinstance(err, dict) and err.get("message"):
+            msg = str(err.get("message"))
+        elif data.get("message"):
+            msg = str(data.get("message"))
+    msg = re.sub(r"<[^>]+>", " ", html.unescape(msg))
+    msg = re.sub(r"\s+", " ", msg).strip()[:200]
+    return f"{CONNECTOR_PREFIX}errore interno del connettore (HTTP {response.status_code})" + (f": {msg}" if msg else "")
 
 
 def _vgt(a: str, b: str) -> bool:
@@ -215,7 +352,7 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
     try:
         r = await _status_get(client, endpoint, headers, request_timeout)
         r.raise_for_status()
-        payload = r.json()
+        payload = _connector_json(r)
     except (httpx.HTTPStatusError, ValueError) as exc:
         if site.cms != "wp" or (isinstance(exc, httpx.HTTPStatusError)
                                  and exc.response.status_code in (408, 429, 500, 502, 503, 504)):
@@ -228,26 +365,30 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
         alt = wp_rest_url(site, "status", f"_={cb}" + refresh, style=alternate)
         r = await _status_get(client, alt, headers, request_timeout)
         r.raise_for_status()
-        payload = r.json()
+        payload = _connector_json(r)
         _WP_REST_STYLE[site.id] = alternate
 
     # WordPress: payload diretto. Joomla com_ajax: {"success":bool,"data":[ {...} ]}
     if site.cms == "joomla":
-        # gestisco sia il wrapping com_ajax sia risposte gia' piatte (robustezza)
+        # gestisco sia il wrapping com_ajax sia risposte gia' piatte (robustezza).
+        # com_ajax con il plugin disattivato o rimosso risponde 200 con "data": [] (nessun
+        # plugin ha gestito la richiesta): Joomla e' su, il connettore no.
         if isinstance(payload, dict) and "success" in payload:
             if not payload.get("success"):
-                raise RuntimeError(payload.get("message") or "com_ajax error (token/plugin?)")
+                raise ConnectorReplyError("errore del plugin del connettore: " + str(payload.get("message") or "com_ajax")[:300])
             data = payload.get("data") or []
             if not data:
-                raise RuntimeError("Risposta com_ajax vuota")
+                raise ConnectorReplyError("Joomla risponde ma il plugin del connettore non c'è o è disattivato (com_ajax)")
             return data[0]
         if isinstance(payload, list):
             if not payload:
-                raise RuntimeError("Risposta com_ajax vuota")
+                raise ConnectorReplyError("Joomla risponde ma il plugin del connettore non c'è o è disattivato (com_ajax)")
             return payload[0]
         if isinstance(payload, dict):
             return payload          # gia' piatta
-        raise RuntimeError("Formato risposta Joomla non valido")
+        raise ConnectorReplyError("risposta senza i dati del connettore (Joomla)")
+    if not isinstance(payload, dict):
+        raise ConnectorReplyError("risposta senza i dati del connettore (WordPress)")
     return payload
 
 
@@ -267,14 +408,23 @@ async def probe_home(url: str, timeout: float = 45.0) -> tuple[int, float] | Non
         return None
 
 
-async def _pending_failure(site: Site, reason: str):
+async def _pending_failure(site: Site, reason: str, crash: str | None = None):
     """Timeout / errore di rete del connettore. NON e' una prova di sito offline: si apre una
     finestra (Impostazioni → "Avvisa che un sito non risponde dopo") e si ricontrolla ogni
     minuto. Solo quando la finestra e' scaduta si fa la CONTROPROVA sulla home del sito:
     se la home risponde il sito e' su, e' il server che e' lento (o il connettore che non ce
     la fa in tempo): lo stato resta "error" con la spiegazione, ma niente episodio offline e
-    niente avviso "non raggiungibile". Offline confermato solo se non risponde nemmeno la home."""
+    niente avviso "non raggiungibile". Offline confermato solo se non risponde nemmeno la home.
+
+    crash: motivo pronto quando l'errore e' un HTTP 500 all'indirizzo del connettore. Un 500
+    non e' lentezza: se dura tutta la finestra e la home funziona, e' il connettore che va in
+    errore (o un plugin che rompe l'API), e va segnalato come "Connettore non risponde" invece
+    di finire in "server lento", che non avvisa mai."""
     from .settings_store import get_operational_settings
+    if crash and getattr(site, "offline_kind", "") == "connector":
+        # connettore gia' confermato come non funzionante: resta tale, senza finestra ne' controprova
+        _mark_connector(site, crash)
+        return
     window = (await get_operational_settings())["offline_alert_minutes"]
     now = datetime.now(timezone.utc)
     since = site.offline_since
@@ -289,6 +439,11 @@ async def _pending_failure(site: Site, reason: str):
         site.error = reason
         return
     probe = await probe_home(site.url)
+    if crash and probe is not None and probe[0] < 500:
+        # il sito risponde, il connettore da' 500 da tutta la finestra: non e' un server lento
+        # (un 500 non e' lentezza), e' il connettore che va in errore
+        _mark_connector(site, f"{crash} — home: HTTP {probe[0]}")
+        return
     if probe is not None and probe[0] < 500:
         code, secs = probe
         site._availability_observed = False      # niente episodio offline: il sito risponde
@@ -302,6 +457,49 @@ async def _pending_failure(site: Site, reason: str):
     site.error = reason
 
 
+def _mark_connector(site: Site, reason: str) -> None:
+    """Il sito risponde, il connettore no: errore "Connettore: ...". Per il registro della
+    disponibilita' il sito e' su (nessun episodio offline; se ce n'era uno aperto si chiude)."""
+    site.status = "error"
+    site.error = reason[:480]
+    site._site_answers = True
+
+
+async def _answer_not_from_connector(site: Site, connector_reason: str, plain_reason: str) -> None:
+    """Pagina che non e' del connettore (HTML con 4xx, oppure 200 senza JSON). Puo' essere il
+    connettore tolto con l'API REST bloccata, ma anche un hosting sospeso, un sito cancellato,
+    un dominio parcheggiato: dalla sola risposta non si sa.
+
+    Episodio gia' confermato: resta del suo tipo, senza altre richieste al sito. Episodio
+    nuovo: dentro la finestra si aspetta come prima ("HTTP 404"); scaduta la finestra UNA GET
+    alla home decide: se la home risponde (< 400) e' il connettore, altrimenti e' il sito."""
+    from .settings_store import get_operational_settings
+    site.status = "error"
+    kind = getattr(site, "offline_kind", "") or ""
+    if kind == "connector":
+        _mark_connector(site, connector_reason)
+        return
+    if kind == "site":
+        site.error = plain_reason[:480]
+        return
+    try:
+        window = int((await get_operational_settings()).get("offline_alert_minutes", 5))
+    except Exception:  # noqa: BLE001
+        window = 5
+    now = datetime.now(timezone.utc)
+    since = site.offline_since
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    if window > 0 and (since is None or (now - since).total_seconds() < window * 60):
+        site.error = plain_reason[:480]
+        return
+    probe = await probe_home(site.url)
+    if probe is not None and probe[0] < 400:
+        _mark_connector(site, f"{connector_reason} — home: HTTP {probe[0]}")
+    else:
+        site.error = (f"{plain_reason} — home: " + (f"HTTP {probe[0]}" if probe else "nessuna risposta"))[:480]
+
+
 async def schedule_pending_recheck(redis, site_id: int):
     try:
         await redis.enqueue_job("poll_site", site_id, _defer_by=60,
@@ -310,12 +508,51 @@ async def schedule_pending_recheck(redis, site_id: int):
         log.warning("Ricontrollo non accodato (id=%s): %s", site_id, type(exc).__name__)
 
 
+def confirmation_running(site: Site, window_min: int, now: datetime | None = None) -> bool:
+    """Una conferma (ricontrollo al minuto) e' gia' in corso: l'episodio e' iniziato da meno
+    della finestra impostata, piu' qualche minuto di margine."""
+    since = site.offline_since
+    if since is None:
+        return False
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return now - since < timedelta(minutes=max(0, int(window_min or 0)) + 3)
+
+
+async def start_confirmation(session: AsyncSession, site: Site, redis) -> bool:
+    """Un errore visto FUORI dal controllo normale (ciclo degli aggiornamenti, Check ora,
+    ricontrollo dopo gli aggiornamenti) entra nella stessa conferma del controllo normale:
+    ricontrollo fra un minuto e avviso quando la finestra e' passata.
+
+    Prima l'errore restava scritto e basta. Il controllo normale, l'unico che conferma e
+    avvisa, non partiva mai: il ciclo orario degli aggiornamenti aggiorna last_checked, e il
+    sito non risultava mai "da controllare". Caso reale: connettore tolto da un sito, sito
+    rosso nel pannello per due ore e nessun avviso.
+
+    Torna True se ha programmato il ricontrollo, False se una conferma e' gia' in corso."""
+    from .settings_store import get_operational_settings
+    try:
+        window = int((await get_operational_settings()).get("offline_alert_minutes", 5))
+    except Exception:  # noqa: BLE001
+        window = 5
+    now = datetime.now(timezone.utc)
+    if confirmation_running(site, window, now):
+        return False
+    if site.offline_since is None:
+        site.offline_since = now        # la finestra parte da qui
+        await session.commit()
+    await schedule_pending_recheck(redis, site.id)
+    return True
+
+
 async def apply_status(session: AsyncSession, site: Site, force: bool = False) -> None:
     """Polla il sito e scrive lo stato a DB. Non solleva: registra l'errore sul Site.
     force=True forza il refresh lato connettore (vedi fetch_status)."""
     from .check_gate import observed_server
     observed_server.set("")
     site._availability_observed = True
+    site._site_answers = False
     try:
         # timeout proporzionato: il check passivo deve essere reattivo (20s), ma con
         # force=True il connettore esegue sul sito il refresh COMPLETO (wp_version_check +
@@ -369,6 +606,10 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
                 if str(e.get("slug", "")).lower() in ("td-panopticon", "tdpanopticon"):
                     site.connector_version = str(e.get("current") or "").strip()
                     break
+        if site.cms == "wp":
+            mode = connector_mode_of(data, site.connector_version or "", exts)
+            if mode and mode != (site.connector_mode or ""):
+                site.connector_mode = mode
         site.core_current = str(core.get("current", ""))
         if core_known:
             site.core_latest = str(core.get("latest", core.get("current", "")))
@@ -480,7 +721,18 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         site.status = "error"
         site.error = f"HTTP {ex.response.status_code}"
         if ex.response.status_code in (408, 429, 500, 502, 503, 504):
-            await _pending_failure(site, site.error)
+            crash = connector_crash_reason(ex.response) if ex.response.status_code == 500 else None
+            await _pending_failure(site, site.error, crash=crash)
+        else:
+            reason = connector_http_reason(ex.response)
+            if reason and _cms_answered(ex.response):
+                # il CMS ha risposto (JSON di WordPress o di Joomla): non e' offline, e' il
+                # connettore che manca o rifiuta. L'avviso lo da' il worker dopo la stessa
+                # finestra di conferma, con l'evento "Connettore non risponde".
+                _mark_connector(site, reason)
+            elif reason:
+                # pagina HTML: connettore o hosting sospeso/sito cancellato? decide la home
+                await _answer_not_from_connector(site, reason, site.error)
         site.last_checked = datetime.now(timezone.utc)
         log.warning("CHECK FALLITO '%s' (id=%s): %s", site.name, site.id, site.error)
     except Exception as ex:  # noqa: BLE001
@@ -497,6 +749,12 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             # Waiting in Sentinel is not evidence of a failed connection.
         elif isinstance(ex, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
             await _pending_failure(site, str(ex)[:480] or type(ex).__name__)
+        elif isinstance(ex, ConnectorReplyError):
+            # il sito risponde, ma senza i dati del connettore (vedi connector_http_reason)
+            if ex.ambiguous:
+                await _answer_not_from_connector(site, CONNECTOR_PREFIX + str(ex), str(ex))
+            else:
+                _mark_connector(site, CONNECTOR_PREFIX + str(ex))
         else:
             site.status = "error"
             site.error = str(ex)[:480] or type(ex).__name__
