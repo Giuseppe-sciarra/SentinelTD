@@ -14,4 +14,7 @@ python-jose[cryptography]==3.4.0
 bcrypt==4.2.1
 pyotp==2.9.0
 python-multipart==0.0.31
+slowapi==0.1.9
+qrcode[pil]==8.0
+webauthn==2.5.2
 lupa>=2.0          # fakeredis esegue gli script Lua del semaforo dei controlli (test_check_gate) solo con lupa

@@ -11,6 +11,7 @@
 # Runtime data and backups
 data/
 uploads/
+# solo la cartella dei dati a runtime: docs/screenshots (immagini del README) resta nella repo
 /screenshots/
 backups/
 *.db

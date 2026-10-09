@@ -11,8 +11,10 @@ from arq.connections import ArqRedis
 import test_screenshot_schedule as fixtures
 from app import check_gate as gate
 
-import pytest
-pytest.importorskip('lupa', reason="fakeredis esegue gli script Lua solo con 'lupa' installato (tests/requirements.txt)")
+try:
+    import lupa  # noqa: F401
+except ImportError:  # fakeredis esegue gli script Lua solo con 'lupa' (tests/requirements.txt)
+    raise unittest.SkipTest("serve 'lupa' per gli script Lua di fakeredis")
 
 
 class GateTests(unittest.IsolatedAsyncioTestCase):
