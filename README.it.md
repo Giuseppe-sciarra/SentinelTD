@@ -84,6 +84,12 @@ I dati mostrati sono un parco di prova con nomi inventati (interfaccia in ingles
 - **Blocca un singolo plugin o tema** alla versione installata (pagina del sito → Estensioni →
   *Blocca*): non viene mai aggiornato, né in automatico né a mano, né contato tra quelli in sospeso,
   mentre il resto del sito continua ad aggiornarsi
+- **Aggiorna solo Sentinel**: il connettore WordPress spegne gli aggiornamenti automatici di WordPress
+  (core, plugin, temi, traduzioni) e toglie da Salute del sito il test "aggiornamenti in background",
+  che altrimenti segnerebbe un problema critico falso. Dove `AUTOMATIC_UPDATER_DISABLED` è già
+  impostata, o c'è il mu-plugin `td-site-health-tweaks.php`, quella parte non la tocca. Acceso di base,
+  si spegne in *Impostazioni* (*Spegni gli aggiornamenti automatici di WordPress sui siti*): la scelta
+  arriva a ogni sito al suo controllo successivo (connettore 2.38 o più recente)
 - Dopo qualunque aggiornamento di plugin, temi o core il connettore WordPress **svuota da solo le
   cache del sito**, ognuna col suo comando ufficiale e solo se presente: CSS generati dai costruttori
   di pagine (Elementor, Essential Addons, Beaver Builder, Divi, Avada), cache di pagina (WP Rocket,

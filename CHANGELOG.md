@@ -1,5 +1,81 @@
 # Changelog
 
+## 2.38.1 — Quali siti hanno la verifica da confermare
+
+### Changed
+- Il banner **"Verifiche da confermare: N · ricontrollo automatico programmato"** si apre con un click:
+  elenco dei siti (in ordine di nome) con il motivo e l'ora dell'ultimo controllo; un click sul sito
+  apre la sua pagina. Si richiude con un altro click sul banner o cliccando fuori.
+- Il banner ora si traduce anche in inglese, francese e tedesco (prima le due frasi restavano in
+  italiano).
+
+## 2.38.0 — Aggiornamenti automatici di WordPress: on/off dalle Impostazioni
+
+### Added
+- **Impostazioni → Spegni gli aggiornamenti automatici di WordPress sui siti** (`wp_block_auto_updates`,
+  acceso di base). Il pannello manda la scelta con ogni controllo dei siti WordPress
+  (`wp_auto_updates=block|allow`); il **connettore WordPress 2.38.0** se la segna nell'option
+  `tdpanop_wp_autoupdates` e:
+  - acceso: spegne l'aggiornatore automatico di WordPress e toglie da *Salute del sito* il test
+    "aggiornamenti in background", come nella 2.37.0;
+  - spento: lascia gli aggiornamenti a WordPress e *Salute del sito* torna completa.
+  - Dove `AUTOMATIC_UPDATER_DISABLED` è già `true` in `wp-config.php` o c'è il mu-plugin
+    `td-site-health-tweaks.php`, il connettore non tocca quella parte (la costante vince anche con
+    l'impostazione spenta). Lo stato è nella risposta del connettore (`wp_auto_updates`:
+    `wp-config`, `blocked`, `allowed`).
+  - Connettore appena installato, prima del primo controllo: aggiornamenti automatici spenti.
+  - I connettori più vecchi ignorano il parametro.
+
+### Fixed
+- **Aggiornamento notturno del connettore: lo spegnimento non restava salvato.** Il salvataggio
+  delle impostazioni non mandava `connector_auto_update`, che tornava acceso a ogni salvataggio
+  (anche subito, dall'interruttore in *Connettori*). Ora viaggia con le altre impostazioni.
+
+### Tests
+- `tests/test_wp_auto_updates.py`: impostazione salvata, parametro `wp_auto_updates` nei controlli
+  WordPress (block/allow, anche forzati), Joomla invariato, interruttore notturno conservato.
+- `tests/connector_autoupdates.test.php`: spenti di base, lasciati a WordPress su richiesta, di nuovo
+  spenti, scrittura solo quando la scelta cambia, costante in wp-config che vince.
+
+## 2.37.0 — Aggiorna solo Sentinel
+
+### Added
+- **Connettore WordPress 2.37.0: aggiornamenti automatici di WordPress spenti.** Gli aggiornamenti
+  li fa Sentinel (copia prima, controllo della home, storico, notifiche); quelli che WordPress fa
+  da solo non passano dal pannello e non lasciano traccia. Il connettore fa da sé quello che sui
+  siti gestiti direttamente fanno `define('AUTOMATIC_UPDATER_DISABLED', true)` in `wp-config.php`
+  e il mu-plugin *TD Site Health Tweaks*:
+  - spegne l'aggiornatore automatico di WordPress (core, plugin, temi, traduzioni) con il filtro
+    `automatic_updater_disabled`; anche dove la costante è definita a `false`;
+  - toglie da *Salute del sito* il test "aggiornamenti in background", che con gli aggiornamenti
+    spenti apposta segnerebbe un problema critico falso. Gli altri test restano.
+  - Dove ci sono già (costante a `true`, file `mu-plugins/td-site-health-tweaks.php`) il connettore
+    non aggiunge niente.
+  - Vale anche per il connettore come mu-plugin (*Connettore mu-plugin*). Il giro notturno porta la
+    2.37.0 sulle copie nei plugin; i mu-plugin si aggiornano a mano come sempre.
+
+### Tests
+- `tests/connector_autoupdates.test.php`: sito senza niente, sito con costante e mu-plugin già
+  presenti (il connettore non aggiunge filtri), costante a `false`.
+
+## 2.36.1 — Aggiornamenti di nuovo nello storico e nelle notifiche
+
+### Fixed
+- **Aggiornamenti fatti ma invisibili (dalla 2.31.0).** La riga del Registro scritta dopo ogni
+  aggiornamento usava una variabile mai definita nel giro normale: il lavoro del sito cadeva
+  subito dopo il PRIMO elemento installato, prima di salvare. Sul sito il plugin (o la traduzione)
+  si aggiornava davvero, ma in Sentinel niente storico, niente rollup mensile, niente email,
+  niente Telegram, niente riepilogo del ciclo; il resto della coda slittava all'ora dopo (un
+  elemento all'ora per sito) e un aggiornamento fallito non salvava la pausa, quindi si riprovava
+  ogni ora senza avviso. Il nome giusto è `slug`.
+- **Rollup mensile isolato.** L'aggiornamento del contatore mensile gira in un savepoint: se
+  fallisce, su Postgres non trascina più con sé la riga dello storico e lo stato delle estensioni.
+
+### Tests
+- `tests/test_update_cycle_history.py`: un giro con un plugin e una traduzione da aggiornare
+  deve scrivere storico e Registro, mandare il report del sito e riempire il riepilogo del ciclo;
+  un fallimento deve finire nello storico e mandare `update_failed`.
+
 ## 2.36.0 — Irrobustimenti prima della pubblicazione
 
 ### Security
