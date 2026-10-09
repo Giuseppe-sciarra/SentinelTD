@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 18mm 15mm 16mm; @bottom-center { content: "Pagina " counter(page) " di " counter(pages); font: 9px Helvetica, sans-serif; color: #999; } }
+  * { box-sizing: border-box; }
+  body { font: 11px/1.5 Helvetica, Arial, sans-serif; color: #24292f; margin: 0; }
+  .head { display: flex; align-items: center; border-bottom: 2px solid #1f6feb; padding-bottom: 12px; margin-bottom: 18px; }
+  .head img { max-height: 46px; max-width: 200px; }
+  .head .t { margin-left: auto; text-align: right; }
+  .head h1 { font-size: 17px; margin: 0 0 2px; }
+  .head .p { color: #6a737d; font-size: 11px; }
+  h2 { font-size: 13px; margin: 20px 0 8px; color: #1f2933; border-left: 3px solid #1f6feb; padding-left: 8px; }
+  .intro { color: #444; margin-bottom: 14px; }
+  .kpi { display: flex; gap: 10px; margin-bottom: 6px; }
+  .kpi > div { flex: 1; border: 1px solid #e1e4e8; border-radius: 6px; padding: 10px 12px; }
+  .kpi .v { font-size: 20px; font-weight: 700; color: #1f6feb; }
+  .kpi .k { font-size: 9.5px; color: #6a737d; text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  th { text-align: left; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: #6a737d; border-bottom: 1px solid #d0d7de; padding: 5px 6px; }
+  td { padding: 5px 6px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
+  .site { page-break-inside: avoid; margin-bottom: 14px; }
+  .site h3 { font-size: 12px; margin: 0 0 1px; }
+  .site .u { color: #6a737d; font-size: 10px; margin-bottom: 5px; }
+  .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mut { color: #6a737d; }
+  .ko { color: #b00020; }
+  .up { color: #1a7f4b; } .dn { color: #b00020; }
+  .trend { display: flex; align-items: flex-end; gap: 8px; height: 76px; margin: 10px 0 4px; }
+  .trend .tb { flex: 1; text-align: center; }
+  .trend .tv { font-size: 9px; color: #6a737d; margin-bottom: 2px; }
+  .trend .tbar { background: #cfe0ff; border-radius: 3px 3px 0 0; }
+  .trend .tbar.cur { background: #1f6feb; }
+  .trend .tl { font-size: 9px; color: #6a737d; margin-top: 3px; text-transform: capitalize; }
+  .foot { margin-top: 22px; padding-top: 10px; border-top: 1px solid #e1e4e8; color: #8a949e; font-size: 9.5px; }
+  .st td { font-size: 10px; }
+  .st tr { page-break-inside: avoid; }
+  .st tr.prob td { border-top: 0; padding-top: 0; font-size: 9.5px; }
+  h3.srvh { font-size: 11.5px; margin: 14px 0 4px; color: #444; }
+  .sm { font-size: 9px; margin-top: 1px; }
+</style></head><body>
+
+<div class="head">
+  {% if logo %}<img src="{{ logo }}">{% endif %}
+  <div class="t"><h1>{{ cfg.title }}</h1><div class="p">{{ period_label }}{% if cfg.company %} &middot; {{ cfg.company }}{% endif %}</div>
+  {% if not is_global %}<div class="p" style="font-weight:600;color:#1f6feb">{{ scope_label }}</div>{% endif %}</div>
+</div>
+
+{% if cfg.intro %}<div class="intro">{{ cfg.intro }}</div>{% endif %}
+
+{% if cfg.show_summary %}
+<h2>Riepilogo del periodo</h2>
+<div class="kpi">
+  <div><div class="v">{{ total_updates }}</div><div class="k">Aggiornamenti applicati</div></div>
+  <div><div class="v">{{ sites_touched }}</div><div class="k">Siti aggiornati</div></div>
+  <div><div class="v">{{ distinct_items }}</div><div class="k">Componenti diversi</div></div>
+  <div><div class="v">{{ total_failed }}</div><div class="k">Non riusciti</div></div>
+</div>
+<div class="mut">Siti in monitoraggio: {{ sites_total }} ({{ wp_count }} WordPress, {{ joomla_count }} Joomla).</div>
+{% endif %}
+
+{% if cfg.show_compare %}
+<h2>Confronto con {{ prev.label }}</h2>
+<table>
+  <thead><tr><th>Indicatore</th><th class="n">{{ period_label }}</th><th class="n">{{ prev.label }}</th><th class="n">Variazione</th></tr></thead>
+  <tbody>
+    <tr><td>Aggiornamenti applicati</td><td class="n">{{ total_updates }}</td><td class="n">{{ prev.updates }}</td><td class="n {% if delta.updates.up %}up{% elif delta.updates.down %}dn{% endif %}">{{ delta.updates.arrow }} {{ delta.updates.text }}</td></tr>
+    <tr><td>Siti aggiornati</td><td class="n">{{ sites_touched }}</td><td class="n">{{ prev.sites }}</td><td class="n">{{ delta.sites.arrow }} {{ delta.sites.text }}</td></tr>
+    <tr><td>Componenti diversi</td><td class="n">{{ distinct_items }}</td><td class="n">{{ prev.components }}</td><td class="n">{{ delta.components.arrow }} {{ delta.components.text }}</td></tr>
+    <tr><td>Non riusciti</td><td class="n">{{ total_failed }}</td><td class="n">{{ prev.failed }}</td><td class="n {% if delta.failed.up %}dn{% elif delta.failed.down %}up{% endif %}">{{ delta.failed.arrow }} {{ delta.failed.text }}</td></tr>
+  </tbody>
+</table>
+{% if trend %}
+<div class="trend">
+  {% for t in trend %}<div class="tb"><div class="tv">{{ t.updates }}</div><div class="tbar{% if t.current %} cur{% endif %}" style="height:{{ t.h }}px"></div><div class="tl">{{ t.label.split(' ')[0][:3] }}</div></div>{% endfor %}
+</div>
+<div class="mut">Aggiornamenti applicati negli ultimi 6 mesi.</div>
+{% endif %}
+{% endif %}
+
+{% if cfg.show_sites and sites %}
+<h2>Dettaglio per sito</h2>
+{% for s in sites %}
+<div class="site">
+  <h3>{{ s.name }}</h3>
+  <div class="u">{{ s.url }} &middot; {{ s.cms_label }} &middot; {{ s.total }} aggiornamenti su {{ s.components|length }} componenti</div>
+  <table>
+    <thead><tr><th>Componente</th><th>Tipo</th><th class="n">Volte</th><th>Ultima versione</th></tr></thead>
+    <tbody>
+    {% for i in s.components %}
+      <tr><td>{{ i.name }}</td><td class="mut">{{ i.type_label }}</td><td class="n">{{ i.count }}</td><td class="mut">{{ i.last_version or '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if cfg.show_top and top_items %}
+<h2>Componenti più aggiornati</h2>
+<table>
+  <thead><tr><th>Componente</th><th class="n">Aggiornamenti</th><th class="n">Siti</th></tr></thead>
+  <tbody>{% for t in top_items %}<tr><td>{{ t.name }}</td><td class="n">{{ t.count }}</td><td class="n">{{ t.sites }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+
+{% if cfg.show_failed and failed_items %}
+<h2>Aggiornamenti non riusciti</h2>
+<table>
+  <thead><tr><th>Sito</th><th>Componente</th><th class="n">Tentativi</th></tr></thead>
+  <tbody>{% for f in failed_items %}<tr><td>{{ f.site }}</td><td>{{ f.name }}</td><td class="n ko">{{ f.count }}</td></tr>{% endfor %}</tbody>
+</table>
+<div class="mut">Gli aggiornamenti non riusciti vengono ritentati automaticamente nei cicli successivi.</div>
+{% endif %}
+
+{% if cfg.show_security %}
+<h2>Sicurezza</h2>
+{% if security.total %}
+<div class="mut">Vulnerabilità note attualmente rilevate sulle estensioni installate:</div>
+<table>
+  <thead><tr><th>Gravità</th><th class="n">Occorrenze</th></tr></thead>
+  <tbody>
+    <tr><td>Critiche</td><td class="n">{{ security.critical }}</td></tr>
+    <tr><td>Alte</td><td class="n">{{ security.high }}</td></tr>
+    <tr><td>Medie</td><td class="n">{{ security.medium }}</td></tr>
+    <tr><td>Basse</td><td class="n">{{ security.low }}</td></tr>
+  </tbody>
+</table>
+{% else %}
+<div>Nessuna vulnerabilità nota attiva sui siti monitorati.</div>
+{% endif %}
+{% endif %}
+
+{% if cfg.show_site_stats and site_stats %}
+<h2>Stato dei siti</h2>
+{% set _probs = site_stats | selectattr("problems") | list %}
+<p class="mut">{% if _probs %}{{ _probs | length }} {% if _probs | length == 1 %}sito ha{% else %}siti hanno{% endif %} qualcosa da guardare, indicato sotto il sito.{% else %}Nessun problema rilevato sui siti.{% endif %}</p>
+{% for grp in site_stat_groups %}
+{% if site_stat_groups | length > 1 or grp.server %}<h3 class="srvh">Server {{ grp.server or "non rilevato" }} · {{ grp.sites | length }} {% if grp.sites | length == 1 %}sito{% else %}siti{% endif %}{% if grp.problems %} · <span class="ko">{{ grp.problems }} con problemi</span>{% endif %}</h3>{% endif %}
+<table class="st">
+  <thead><tr><th>Sito</th><th>Versioni</th><th>Dominio</th><th>Peso</th><th>Spazio libero</th><th>File del core</th></tr></thead>
+  <tbody>
+  {% for x in grp.sites %}
+    <tr>
+      <td><b>{{ x.name }}</b><div class="sm mut">{{ x.url }}</div></td>
+      <td>{{ x.cms_label }} {{ x.core or '' }}<div class="sm{% if x.php_state == 'fuori supporto' %} ko{% else %} mut{% endif %}">PHP {{ x.php or '—' }}{% if x.php_state %} · {{ x.php_state }}{% endif %}</div></td>
+      <td>{% if x.domain_date %}{{ x.domain_date }}<div class="sm{% if x.domain_days is not none and x.domain_days < 30 %} ko{% else %} mut{% endif %}">{% if x.domain_days is not none and x.domain_days < 0 %}scaduto da {{ -x.domain_days }} giorni{% else %}tra {{ x.domain_days }} giorni{% endif %}</div>{% else %}<span class="mut">—</span>{% endif %}</td>
+      <td>{% if x.size %}{{ x.size }}<div class="sm mut">{% if x.growth %}{{ x.growth }} in {{ x.growth_days }} giorni{% endif %}{% if x.db %}{% if x.growth %} · {% endif %}database {{ x.db }}{% endif %}</div>{% else %}<span class="mut">—</span>{% endif %}</td>
+      <td>{% if x.space %}<span class="{% if x.space_low %}ko{% endif %}">{{ x.space }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+      <td>{% if x.core_files %}<span class="{% if x.core_issues %}ko{% endif %}">{{ x.core_files }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+    </tr>
+    {% if x.problems %}<tr class="prob"><td colspan="6"><span class="ko">⚠ {{ x.problems | join(" · ") }}</span></td></tr>{% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+<div class="mut">Peso: file e database del sito. Spazio libero: quanto si riesce davvero a scrivere sul sito, misurato con l'ultima diagnostica.</div>
+{% endif %}
+
+{% if cfg.show_expiries and (domains or licenses) %}
+<h2>Scadenze nei prossimi {{ cfg.expiry_horizon_days }} giorni</h2>
+{% if domains %}
+<table>
+  <thead><tr><th>Dominio</th><th>Scadenza</th><th class="n">Giorni</th></tr></thead>
+  <tbody>{% for d in domains %}<tr><td>{{ d.name }}</td><td>{{ d.date }}</td><td class="n">{{ d.days }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+{% if licenses %}
+<table>
+  <thead><tr><th>Licenza / componente</th><th>Fornitore</th><th>Scadenza</th><th class="n">Giorni</th></tr></thead>
+  <tbody>{% for l in licenses %}<tr><td>{{ l.name }}</td><td class="mut">{{ l.provider or '—' }}</td><td>{{ l.date }}</td><td class="n">{{ l.days }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+{% endif %}
+
+<div class="foot">{% if is_client %}{% if cfg.company %}Report di {{ cfg.company }}{% endif %}{% else %}{{ cfg.footer }} &middot; generato il {{ generated_at }}{% if app_version %} &middot; Sentinel TD v{{ app_version }}{% endif %}{% endif %}</div>
+</body></html>
