@@ -40,7 +40,7 @@ def wp_zip(root="td-panopticon"):
     with zipfile.ZipFile(out, "w") as z:
         z.writestr(f"{root}/", "")
         z.writestr(f"{root}/td-panopticon.php", "<?php\n/**\n * Plugin Name: Sentinel TD Agent\n * Version: 2.36.0\n */\n")
-        z.writestr(f"{root}/includes/linux-metrics.php", "<?php\n")
+        z.writestr(f"{root}/includes/helper.php", "<?php\n")
     return out.getvalue()
 
 
@@ -79,7 +79,7 @@ class ModeTests(unittest.TestCase):
 class PackageTests(unittest.TestCase):
     def test_root_folder_renamed_to_the_site_folder(self):
         data = rconn.wp_package_for_folder(wp_zip(), "sentinel-td")
-        self.assertEqual(zip_names(data), ["sentinel-td/", "sentinel-td/includes/linux-metrics.php", "sentinel-td/td-panopticon.php"])
+        self.assertEqual(zip_names(data), ["sentinel-td/", "sentinel-td/includes/helper.php", "sentinel-td/td-panopticon.php"])
         same = wp_zip()
         self.assertIs(rconn.wp_package_for_folder(same, "td-panopticon"), same)
         with self.assertRaises(ValueError):
@@ -147,7 +147,7 @@ class RolloutTests(unittest.IsolatedAsyncioTestCase):
         await self.add_copy(ids["regular"], "td-panopticon", "2.35.0")
         ids["other_dir"] = await self.add_site(name="Cartella nuova", connector_version="2.35.0", connector_mode="plugin:sentinel-td")
         await self.add_copy(ids["other_dir"], "sentinel-td", "2.35.0")
-        ids["mu"] = await self.add_site(name="Alpaflor", connector_version="2.35.0", connector_mode="mu")
+        ids["mu"] = await self.add_site(name="Sito mu", connector_version="2.35.0", connector_mode="mu")
         ids["mu_leftover"] = await self.add_site(name="Mu con copia vecchia", connector_version="2.35.0", connector_mode="mu")
         await self.add_copy(ids["mu_leftover"], "td-panopticon", "2.30.0")
         ids["double"] = await self.add_site(name="Due copie", connector_version="2.35.0", connector_mode="plugin:sentinel-td")

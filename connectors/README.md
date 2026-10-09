@@ -4,8 +4,8 @@ Sentinel TD talks to each website through a small connector installed on the sit
 
 | Platform | Source | Current version |
 |---|---|---|
-| WordPress | `wordpress/td-panopticon/` | 2.30.0 |
-| Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.38.0 |
+| WordPress | `wordpress/td-panopticon/` | 2.38.0 |
+| Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.42.0 |
 
 The internal identifiers (`td-panopticon` folder, `tdpanopticon` Joomla element, REST
 namespace `tdpanopticon/v1`, token option name) are kept from the original project name
@@ -52,10 +52,14 @@ Address and key are written only into the generated zip, never into the sources.
 
 ## Updating the connectors on all sites
 
-Upload the new packages to *Settings → Connectors* (the archive keeps them as masters),
-then use *Install* from the sites list on all WordPress or Joomla sites: the same folder
-and element names mean the new version installs over the old one, keeping each site's
-token and connection.
+Nothing to do by hand: every night the panel installs the connector it ships on the sites
+that run an older one (*Settings → Connectors*, where it can be switched off), and
+*Update on the sites* does it right away. Only copies already on the site are updated, in
+their own folder and without activating them, keeping each site's token and connection.
+
+A WordPress connector installed as a **mu-plugin** is never touched by the panel: download it
+again from the site page (*mu-plugin connector*, with the site's token already inside) and
+replace the file in `wp-content/mu-plugins/`.
 
 
 WordPress 2.31.0 and Joomla 1.39.0 no longer collect CPU, RAM or server disk metrics. The Linux collectors and their command fallbacks have been removed.

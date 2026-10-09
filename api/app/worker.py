@@ -92,7 +92,7 @@ def _registrable_domain(host: str) -> str:
     """Riduce un hostname al dominio registrabile senza interrogazioni esterne.
 
     Copre i TLD semplici (.it, .com, .org, ...) e i suffissi multilivello piu'
-    comuni. Esempio: franchising.5sapori.it -> 5sapori.it.
+    comuni. Esempio: negozio.esempio.it -> esempio.it.
     """
     host = (host or "").strip(".").lower()
     labels = [x for x in host.split(".") if x]
@@ -160,7 +160,7 @@ async def _rdap_expiry(client: httpx.AsyncClient, host: str) -> tuple[str, datet
     """Trova la scadenza del dominio registrabile via RDAP.
 
     Il sottodominio non viene mai interrogato: prima lo normalizziamo al
-    dominio registrabile (es. franchising.5sapori.it -> 5sapori.it).
+    dominio registrabile (es. negozio.esempio.it -> esempio.it).
     """
     domain = _registrable_domain(host)
     if not domain or "." not in domain:
@@ -2002,7 +2002,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 await redis.incrby("tg:cycle:applied", n_ok)
                 await redis.incr("tg:cycle:sites")
                 # dettaglio successi: una riga per sito con i plugin aggiornati e le versioni
-                # es. "Anip: Elementor 4.1.0->4.1.1, Rank Math 1.0.270->1.0.271"
+                # es. "Sito A: Elementor 4.1.0->4.1.1, Rank Math 1.0.270->1.0.271"
                 ok_items = []
                 for r in results:
                     if r["ok"]:

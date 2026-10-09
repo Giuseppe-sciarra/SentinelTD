@@ -303,7 +303,7 @@ function tdpanop_token(): string
         // Il vecchio get+update aveva una race: due richieste quasi simultanee (es. il
         // POST "Collega" e il render della pagina) su worker FPM diversi, con la cache
         // alloptions non coerente, generavano DUE token diversi - uno finiva al pannello,
-        // l'altro restava sul sito -> mismatch dalla nascita (caso reale: Russ Traslochi).
+        // l'altro restava sul sito -> mismatch dalla nascita (caso reale).
         // 1) butta la cache e rileggi il valore VERO dal DB
         wp_cache_delete(TDPANOP_OPT, 'options');
         wp_cache_delete('alloptions', 'options');

@@ -188,8 +188,8 @@ e non viene mai esposto.
 ## Installazione
 
 ```bash
-git clone https://github.com/Giuseppe-TD/sentinel-td.git
-cd sentinel-td
+git clone https://github.com/Giuseppe-sciarra/SentinelTD.git
+cd SentinelTD
 
 # 1. Configurazione
 cp .env.example .env
@@ -348,7 +348,6 @@ con loro storico e impostazioni.
 - `THIRD-PARTY.md` — componenti di terze parti e relative licenze
 - `connectors/README.md` — i connettori WordPress e Joomla
 - `docs/LANGUAGES.md` — manutenzione delle traduzioni
-- `docs/PUBLISHING.md` — pubblicare questo progetto su GitHub
 
 ---
 

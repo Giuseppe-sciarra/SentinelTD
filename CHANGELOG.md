@@ -9,6 +9,17 @@
 - Il banner ora si traduce anche in inglese, francese e tedesco (prima le due frasi restavano in
   italiano).
 
+### Removed
+- File morti dei connettori: `includes/linux-metrics.php` (WordPress) e `src/Support/LinuxMetrics.php`
+  (Joomla), resti della raccolta di CPU/RAM/disco tolta nella 2.31.0: nessuno li caricava più.
+- Documenti superati: `docs/ANALYSIS.md`, `docs/PUBLISHING.md` e le note `docs/AGGIORNAMENTO-2.28.*.md`
+  (la storia completa resta in questo file).
+
+### Fixed
+- README: indirizzo giusto della repository nell'installazione (`Giuseppe-sciarra/SentinelTD`).
+- `connectors/README.md`: versioni attuali dei connettori e aggiornamento notturno al posto della
+  vecchia procedura a mano.
+
 ## 2.38.0 — Aggiornamenti automatici di WordPress: on/off dalle Impostazioni
 
 ### Added
@@ -346,7 +357,7 @@
 
 ### Changed
 - Gestione server: i titoli tornano come nella versione con lo Stato server. Il **nome dato**
-  vale sempre; con l'IP diviso le macchine lo ereditano ("Tastiere Digitali · Hosting-Websites-WP"),
+  vale sempre; con l'IP diviso le macchine lo ereditano ("Hosting A · web-01"),
   a meno di un nome dato alla singola macchina; la riga dell'IP tiene il nome e dice quanti siti non
   hanno ancora mandato il nome macchina. **Ordinamento per nome o per numero di siti.**
 
@@ -575,7 +586,7 @@
 - 121 Python regression tests and 5 translation tests. Real-template browser checks
   cover source comparison, renewal state, sequential progress, visible failures,
   automatic refresh and mobile layout.
-- The who.is parser also reads the actual vivaiomares.it HTML response received
+- The who.is parser also reads the actual .it domain HTML response received
   during verification; no future expiry was invented.
 
 ## 2.28.10
@@ -1325,14 +1336,14 @@
 - **Add sites to an existing client/group**: when the name is the one of a client that already
   exists, the chosen sites are added to it instead of creating a duplicate (sites already in
   are shown as *already in* and locked; typed addresses are added to the existing ones). The
-  button says what will happen, e.g. *Add 3 sites to Flash Factory*. New endpoint
+  button says what will happen, e.g. *Add 3 sites to Agency*. New endpoint
   `POST /api/clients/{id}/add-sites`
 - *Add sites* button inside a group, which opens *Create from sites* already pointed at it
 
 ## 2.11.3
 
 ### Changed
-- Client reports: the PDF footer says only *Report di Tastiere Digitali* (the company set in
+- Client reports: the PDF footer says only *Report di <company>* (the company set in
   Monthly report), without the "generated automatically by Sentinel TD", the generation time
   and the Sentinel version. Your own reports keep the full footer. A saved copy of the previous
   default layout gets the new footer automatically
@@ -1556,7 +1567,7 @@
 - Reports show the folder each site belongs to. Telegram: a 📁 line under every site and the
   folder next to the site name in *To check*. Per-site email: the folder under the address
   and at the end of the subject, so mail rules can sort reports by client. Cycle email:
-  the folder under each site. Subfolders read as a path (*Clients / Flash Factory*), several
+  the folder under each site. Subfolders read as a path (*Clients / Agency*), several
   folders are separated by commas, and sites without a folder simply show none
 - Saved copies of the 2.8.0–2.8.1 report templates are recognised as old defaults too
 

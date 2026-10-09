@@ -175,8 +175,8 @@ network and is never exposed.
 ## Installation
 
 ```bash
-git clone https://github.com/Giuseppe-TD/sentinel-td.git
-cd sentinel-td
+git clone https://github.com/Giuseppe-sciarra/SentinelTD.git
+cd SentinelTD
 
 # 1. Configuration
 cp .env.example .env
@@ -327,7 +327,6 @@ with them your history and settings.
 - `THIRD-PARTY.md` — third-party components and their licences
 - `connectors/README.md` — the WordPress and Joomla connectors
 - `docs/LANGUAGES.md` — translation maintenance
-- `docs/PUBLISHING.md` — publishing this project on GitHub
 
 ---
 

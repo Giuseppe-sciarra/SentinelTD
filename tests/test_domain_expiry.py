@@ -21,7 +21,7 @@ NEW = NOW + timedelta(days=365)
 class RegistryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.requests = []
-        self.body = 'Domain: vivaiomares.it\nExpire Date: 2026-09-30\n'
+        self.body = 'Domain: vivaioesempio.it\nExpire Date: 2026-09-30\n'
         self.status = 200
         async def handler(request):
             self.requests.append(request)
@@ -46,21 +46,21 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
 
     async def test_it_reads_renewal_from_registry_before_stale_web_cache(self):
-        query = AsyncMock(return_value='Domain: vivaiomares.it\nExpire Date: 2027-09-30\n\nRegistrar\n Organization: Test Registrar\n\nNameservers\n ns1.example.test\n ns2.example.test\n')
+        query = AsyncMock(return_value='Domain: vivaioesempio.it\nExpire Date: 2027-09-30\n\nRegistrar\n Organization: Test Registrar\n\nNameservers\n ns1.example.test\n ns2.example.test\n')
         with patch.object(worker, '_whois_query', query):
-            domain, date = await worker._domain_expiry(self.client, 'www.vivaiomares.it')
-        self.assertEqual(domain, 'vivaiomares.it')
+            domain, date = await worker._domain_expiry(self.client, 'www.vivaioesempio.it')
+        self.assertEqual(domain, 'vivaioesempio.it')
         self.assertEqual(date.date().isoformat(), '2027-09-30')
-        query.assert_awaited_once_with('whois.nic.it', 'vivaiomares.it', timeout=20.0)
+        query.assert_awaited_once_with('whois.nic.it', 'vivaioesempio.it', timeout=20.0)
         self.assertEqual(len(self.requests), 2)
         self.assertEqual({r.url.host for r in self.requests}, {"who.is", "www.whois.com"})
         self.assertEqual(worker._LAST_INFO[domain]['registrar'], 'Test Registrar')
         self.assertIn('ns1.example.test', worker._LAST_INFO[domain]['nameservers'])
 
     async def test_https_fallback_still_reads_a_future_renewal_if_port_43_fails(self):
-        self.body = '<pre>Domain: vivaiomares.it\nExpire Date: 2027-09-30\n</pre>'
+        self.body = '<pre>Domain: vivaioesempio.it\nExpire Date: 2027-09-30\n</pre>'
         with patch.object(worker, '_whois_query', AsyncMock(side_effect=RuntimeError('TCP/43 blocked'))):
-            domain, date = await worker._domain_expiry(self.client, 'vivaiomares.it')
+            domain, date = await worker._domain_expiry(self.client, 'vivaioesempio.it')
         self.assertEqual(date.year, 2027)
         self.assertNotIn('check_warning', worker._LAST_INFO[domain])
         self.assertEqual(worker._LAST_INFO[domain]["source_summary"]["selected"], "whois.com")
@@ -68,7 +68,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_expired_secondary_date_is_unverified_when_registry_is_unreachable(self):
         with patch.object(worker, '_whois_query', AsyncMock(side_effect=RuntimeError('DNS failed'))):
-            domain, date = await worker._domain_expiry(self.client, 'vivaiomares.it')
+            domain, date = await worker._domain_expiry(self.client, 'vivaioesempio.it')
         self.assertLess(date, NOW)
         self.assertIn('va verificata', worker._LAST_INFO[domain]['check_warning'])
         self.assertIn('DNS failed', worker._LAST_INFO[domain]['check_warning'])
@@ -77,7 +77,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         self.body = '<div id="security">Security Check CAPTCHA</div>'
         with patch.object(worker, '_whois_query', AsyncMock(side_effect=RuntimeError('TCP/43 blocked'))):
             with self.assertRaisesRegex(RuntimeError, 'TCP/43 blocked.*CAPTCHA'):
-                await worker._domain_expiry(self.client, 'vivaiomares.it')
+                await worker._domain_expiry(self.client, 'vivaioesempio.it')
 
     async def test_gtld_rdap_still_has_priority_and_parses_utc(self):
         self.body = json.dumps({'ldhName':'example.com','events':[{'eventAction':'expiration','eventDate':'2027-10-01T00:00:00Z'}]})
@@ -122,14 +122,14 @@ class ScanTests(unittest.IsolatedAsyncioTestCase):
         await fixtures.SchedulerTests.asyncTearDown(self)
 
     async def add_domain(self, **kwargs):
-        return await self.add_site(**({'name':'Vivaio Mares','url':'https://vivaiomares.it','status':'ok',
-            'domain_name':'vivaiomares.it','domain_expires_at':OLD,'domain_checked_at':NOW-timedelta(days=1),
+        return await self.add_site(**({'name':'Vivaio Mares','url':'https://vivaioesempio.it','status':'ok',
+            'domain_name':'vivaioesempio.it','domain_expires_at':OLD,'domain_checked_at':NOW-timedelta(days=1),
             'domain_check_error':'old lookup error','domain_alert_state':'old cycle','domain_renew':'yes',
             'domain_renew_note':'Client renewal decision'} | kwargs))
 
     async def test_renewal_updates_all_subdomains_clears_error_and_preserves_decision(self):
-        ids = [await self.add_domain(), await self.add_domain(url='https://shop.vivaiomares.it')]
-        lookup = AsyncMock(return_value=('vivaiomares.it', NEW))
+        ids = [await self.add_domain(), await self.add_domain(url='https://shop.vivaioesempio.it')]
+        lookup = AsyncMock(return_value=('vivaioesempio.it', NEW))
         with patch.object(worker, '_domain_expiry', lookup):
             await worker.domain_expiry_scan({'redis':self.redis}, True, ids[0])
         lookup.assert_awaited_once()
@@ -144,7 +144,7 @@ class ScanTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('old cycle', site.domain_alert_state)
 
     async def test_comparison_evidence_is_saved_for_all_subdomains_and_returned_by_api(self):
-        ids = [await self.add_domain(), await self.add_domain(url='https://shop.vivaiomares.it')]
+        ids = [await self.add_domain(), await self.add_domain(url='https://shop.vivaioesempio.it')]
         summary = {'selected':'who.is', 'reason':'newer_record', 'sources':[
             {'source':'who.is', 'expires_at':NEW.isoformat(), 'updated_at':NOW.isoformat(), 'selected':True}]}
         async def lookup(client, domain):
@@ -175,7 +175,7 @@ class ScanTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_previous_failure_retries_next_day_even_for_far_future_expiry(self):
         sid = await self.add_domain(domain_expires_at=NEW)
-        lookup = AsyncMock(return_value=('vivaiomares.it', NEW))
+        lookup = AsyncMock(return_value=('vivaioesempio.it', NEW))
         with patch.object(worker, '_domain_expiry', lookup):
             await worker.domain_expiry_scan({'redis':self.redis})
         lookup.assert_awaited_once()
@@ -258,7 +258,7 @@ class ScanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values['domain_source_attempts'], 2)
         self.assertEqual(values['domain_parallel_lookups'], 1)
         await self.add_domain()
-        with patch.object(worker, '_domain_expiry', AsyncMock(return_value=('vivaiomares.it', NEW))):
+        with patch.object(worker, '_domain_expiry', AsyncMock(return_value=('vivaioesempio.it', NEW))):
             await worker.domain_expiry_scan({'redis':self.redis}, True)
         self.assertEqual(worker._DOMAIN_SCAN_GATE.pause, 45)
         self.assertEqual(worker._DOMAIN_ATTEMPTS, 2)
@@ -281,7 +281,7 @@ class ScanTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_older_scan_result_cannot_overwrite_a_newer_renewal(self):
         sid = await self.add_domain(domain_checked_at=NOW, domain_expires_at=NEW, domain_check_error='')
-        await worker._persist_domain_updates([{'id':sid,'domain_name':'vivaiomares.it',
+        await worker._persist_domain_updates([{'id':sid,'domain_name':'vivaioesempio.it',
             'domain_checked_at':NOW-timedelta(hours=1),'domain_expires_at':OLD,
             'domain_check_error':'','reset_alert_state':True}])
         async with self.sessions() as s:
@@ -291,7 +291,7 @@ class ScanTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_grouped_api_uses_latest_date_instead_of_first_site(self):
         await self.add_domain(domain_checked_at=NOW-timedelta(days=2))
-        await self.add_domain(url='https://shop.vivaiomares.it', domain_expires_at=NEW, domain_checked_at=NOW, domain_check_error='')
+        await self.add_domain(url='https://shop.vivaioesempio.it', domain_expires_at=NEW, domain_checked_at=NOW, domain_check_error='')
         async with self.sessions() as s:
             rows = await expiries.list_domain_expiries(s)
         self.assertEqual(len(rows), 1)

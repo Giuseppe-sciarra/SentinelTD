@@ -1,8 +1,8 @@
 # Local configuration and credentials
 .env
 .env.*
-!.env.example
-!.env.template
+
+
 *.env
 *.pem
 *.key
@@ -29,7 +29,9 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-.language-backups/
+.git
+.github
+docs
+tests
 
-# Connector builds (may contain the registration key)
-dist/
+.language-backups/

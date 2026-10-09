@@ -35,7 +35,7 @@ class SiteUrlTests(unittest.TestCase):
             self.assertEqual(agent.safe_site_url("https://esempio.it/"), "https://esempio.it")
 
     def test_internal_addresses_are_refused(self):
-        for bad in ("http://127.0.0.1:8080", "http://localhost", "http://10.1.1.219", "http://192.168.1.1/x",
+        for bad in ("http://127.0.0.1:8080", "http://localhost", "http://10.1.2.3", "http://192.168.1.1/x",
                     "http://169.254.169.254/latest", "http://[::1]/", "ftp://esempio.it", "https://user:pw@esempio.it",
                     "http://pannello.internal", "http://nas.local"):
             with self.assertRaises(HTTPException, msg=bad):

@@ -1,7 +1,7 @@
 """Connettore rimosso o disattivato su un sito che risponde: classificazione dell'errore,
 conferma dalla finestra di minuti, avviso "Connettore non risponde" e avviso di ritorno.
 
-Caso reale (Alpaflor, 9 ottobre 2026): i plugin del sito spenti e il connettore cancellato.
+Caso reale (9 ottobre 2026): i plugin del sito spenti e il connettore cancellato.
 Il ciclo orario degli aggiornamenti prendeva 404 rest_no_route, scriveva l'errore e usciva;
 il controllo normale (l'unico che conferma e avvisa) non partiva mai perche' il ciclo
 aggiorna last_checked ogni ora: sito rosso nel pannello per due ore, nessun avviso.
@@ -56,7 +56,7 @@ class FetchClassificationTests(unittest.IsolatedAsyncioTestCase):
     """Risposte HTTP vere (MockTransport): cosa solleva fetch_status."""
 
     async def asyncSetUp(self):
-        self.site = SimpleNamespace(id=71, name="Alpaflor", cms="wp", url="https://example.test", token="t")
+        self.site = SimpleNamespace(id=71, name="Sito di prova", cms="wp", url="https://example.test", token="t")
         self.responses = []
         self.requests = []
 
@@ -144,7 +144,7 @@ class ConnectorDownFlowTests(unittest.IsolatedAsyncioTestCase):
         return [(j.function, j.args, j.job_id) for j in await self.redis.queued_jobs()]
 
     async def test_cycle_hands_over_and_alert_arrives_after_the_window(self):
-        """Il caso Alpaflor dall'inizio alla fine."""
+        """Il caso reale dall'inizio alla fine."""
         sid = await self.add_site(status="ok", auto_update=True, last_checked=T0 - timedelta(hours=1))
         gone = AsyncMock(side_effect=http_error(404, REST_NO_ROUTE))
         with patch.object(connectors, "fetch_status", gone):
