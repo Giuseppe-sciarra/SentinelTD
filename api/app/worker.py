@@ -1829,7 +1829,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 log.warning("UPDATE FALLITO '%s' (id=%s): %s  %s -> %s  | motivo: %s",
                             site.name, site.id, name, current, res["new"] or "?", res.get("error") or "")
                 await evlog(s, "updates", "error", f"Aggiornamento fallito: {name} {current or '?'} → {res['new'] or '?'}: {(res.get('error') or '')[:200]}",
-                            site=site, details={"type": etype, "slug": sl, "from": current, "to": res["new"], "error": res.get("error") or ""})
+                            site=site, details={"type": etype, "slug": slug, "from": current, "to": res["new"], "error": res.get("error") or ""})
                 failures.append({"name": name, "from": current or "",
                                  "to": res["new"] or (ext.new_version if ext is not None else "")
                                        or (site.core_latest if etype == "core" else "") or "",
@@ -1838,7 +1838,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 log.info("UPDATE OK '%s' (id=%s): %s  %s -> %s",
                          site.name, site.id, name, current, res["new"])
                 await evlog(s, "updates", "ok", f"Aggiornato {name} {current or '?'} → {res['new']}", site=site,
-                            details={"type": etype, "slug": sl, "from": current, "to": res["new"], "backup": res.get("backup") or ""})
+                            details={"type": etype, "slug": slug, "from": current, "to": res["new"], "backup": res.get("backup") or ""})
             await asyncio.sleep(item_pause)
 
         for (e, _t, sl, nm, cur) in held:
@@ -2301,7 +2301,10 @@ async def _roll_monthly(s, site, etype: str, name: str, slug: str, res: dict, fr
         },
     )
     try:
-        await s.execute(stmt)
+        # savepoint: su Postgres un errore qui invaliderebbe tutta la transazione, e con lei la
+        # riga dello storico gia' aggiunta e lo stato di cooldown dell'estensione
+        async with s.begin_nested():
+            await s.execute(stmt)
     except Exception as ex:  # noqa: BLE001
         log.warning("rollup mensile fallito (%s/%s): %s", site.name, slug, ex)
 

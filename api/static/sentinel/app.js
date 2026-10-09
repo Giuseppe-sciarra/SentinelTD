@@ -19,6 +19,7 @@ function sentinel() {
     sites: [], loading: false, checkAllBusy: false, busy: {}, toast: '', toastTimer: null,
     detail: null, detailTab: 'overview', history: [], histSummary: null, siteHistory: [], 
     sec: { summary: null, items: [], loading: false, sev: '' },
+    checkingOpen: false,
     conn: { list: [], regKey: '', hubUrl: '', hubSaved: '', msg: '', err: '', busy: false, rollout: null, rolling: '', rolloutKind: '', rolloutOpen: false, keptOpen: '' },
     pkg: { list: [], msg: '', err: '', busy: false, q: '', cands: [], searching: false, hbusy: '' }, servers: [], serversLoading: false, srvOpen: {},
     brand: { logo_url: '/static/logo.png', favicon_url: '/static/favicon.png', custom_logo: false, custom_favicon: false, busy: false },
@@ -494,6 +495,8 @@ function sentinel() {
     },
     get noFolder() { return this.sites.filter(s => this.siteTags(s).length === 0); },
     _stats(arr) { return { count: arr.length, upd: arr.filter(s => this.hasUpd(s)).length, off: arr.filter(s => this.isOff(s)).length, dns: arr.filter(s => this.isDnsIssue(s)).length, checking: arr.filter(s => this.isCheckPending(s)).length, slow: arr.filter(s => this.isSlow(s)).length }; },
+    // siti con la verifica da confermare (banner in alto): elenco aperto con un click
+    get checkingSites() { return this.sites.filter(s => this.isCheckPending(s)).sort((a, b) => (a.name || '').localeCompare(b.name || '')); },
     get totStats() { return { ...this._stats(this.sites), auto: this.sites.filter(s => s.auto_update).length, wp: this.sites.filter(s => s.cms === 'wp').length, joomla: this.sites.filter(s => s.cms === 'joomla').length }; },
     folderSites(tag) {
       if (tag === '__none') return this.noFolder;
@@ -1120,7 +1123,7 @@ function sentinel() {
                           'domain_decision_days', 'domain_alert_norenew', 'status_check_attempts', 'status_check_retry_seconds', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
-                       server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, pre_update_backup: this.prefs.pre_update_backup !== false, server_labels: this.prefs.server_labels || {}, server_panels: this.prefs.server_panels || {}, server_split: this.prefs.server_split || [],
+                       server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, pre_update_backup: this.prefs.pre_update_backup !== false, wp_block_auto_updates: this.prefs.wp_block_auto_updates !== false, connector_auto_update: this.prefs.connector_auto_update !== false, server_labels: this.prefs.server_labels || {}, server_panels: this.prefs.server_panels || {}, server_split: this.prefs.server_split || [],
                        visual_after_delay: this.prefs.visual_after_delay, visual_retry: this.prefs.visual_retry !== false, visual_noise: this.prefs.visual_noise !== false };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);

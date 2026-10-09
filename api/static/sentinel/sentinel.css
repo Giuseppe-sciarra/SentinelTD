@@ -237,6 +237,18 @@ table.tbl { width: 100%; min-width: 760px; border-collapse: collapse; }
 /* ---------- misc ---------- */
 .msg { padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; margin: 10px 0; }
 .msg.ok { background: var(--ok-bg); color: var(--ok); } .msg.warn { background: var(--warn-bg); color: var(--warn); } .msg.err { background: var(--err-bg); color: var(--err); } .msg.info { background: var(--acc-bg); color: #cfe0ff; }
+
+/* banner con elenco a tendina (es. verifiche da confermare) */
+.msg-drop { padding: 0; }
+.msg-toggle { display: block; width: 100%; padding: 10px 12px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.msg-toggle:hover { filter: brightness(1.15); }
+.msg-caret { margin-left: 6px; }
+.msg-list { padding: 0 12px 10px; max-height: 280px; overflow: auto; }
+.msg-row { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent); color: inherit; text-decoration: none; }
+.msg-row:hover b { text-decoration: underline; }
+.msg-row b { color: var(--txt); }
+.msg-why { flex: 1 1 260px; opacity: .9; }
+.msg-when { opacity: .7; font-size: 12px; white-space: nowrap; }
 .mono { font-family: var(--mono); }
 .mut { color: var(--mut); }
 .small { font-size: 12px; }

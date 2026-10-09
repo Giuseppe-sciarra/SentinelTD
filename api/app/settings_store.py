@@ -33,6 +33,7 @@ DEFAULTS = {
     "connector_auto_update": True,  # ogni notte installa il connettore nuovo sui siti che ne hanno uno vecchio
     "auto_rollback": True,          # se la home si rompe dopo un aggiornamento, rimette le copie e blocca
     "pre_update_backup": True,      # copia zip di plugin/tema prima di aggiornarlo (serve al ripristino; pesa sull'hosting)
+    "wp_block_auto_updates": True,  # il connettore WordPress spegne gli aggiornamenti automatici di WordPress (li fa Sentinel)
     "visual_after_delay": 30,       # secondi di attesa prima della foto "dopo": su hosting lenti la pagina si assesta
     "visual_retry": True,           # se la home risulta cambiata, seconda foto dopo la stessa attesa: vale la migliore
     "visual_noise": True,           # due foto "prima": la differenza tra loro (video, slider) e' rumore e si sottrae
@@ -88,6 +89,7 @@ def normalize(data: dict | None) -> dict:
     out["connector_auto_update"] = bool(src.get("connector_auto_update", out["connector_auto_update"]))
     out["auto_rollback"] = bool(src.get("auto_rollback", out["auto_rollback"]))
     out["pre_update_backup"] = bool(src.get("pre_update_backup", out["pre_update_backup"]))
+    out["wp_block_auto_updates"] = bool(src.get("wp_block_auto_updates", out["wp_block_auto_updates"]))
     try:
         out["visual_after_delay"] = max(0, min(180, int(src.get("visual_after_delay", out["visual_after_delay"]))))
     except (TypeError, ValueError):

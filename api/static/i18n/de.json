@@ -2523,5 +2523,9 @@
   "Nel pannello c'è la {0}": "Das Panel liefert {0}",
   "{0} vulnerabilità critiche, {1} sfruttate attivamente": "{0} kritische Schwachstellen, {1} aktiv ausgenutzt",
   "attive": "aktiv",
-  "silenziate": "stummgeschaltet"
+  "silenziate": "stummgeschaltet",
+  "Spegni gli aggiornamenti automatici di WordPress sui siti: li fa solo Sentinel": "Automatische WordPress-Updates auf den Websites ausschalten: nur Sentinel aktualisiert",
+  "Il connettore WordPress (2.38 o più recente) spegne l'aggiornatore automatico di WordPress (core, plugin, temi, traduzioni) e toglie da Salute del sito l'avviso sugli aggiornamenti in background. Spenta, WordPress torna ad aggiornare da solo, tranne dove gli aggiornamenti sono spenti in wp-config.php. La scelta arriva a ogni sito al suo controllo successivo.": "Der WordPress-Connector (2.38 oder neuer) schaltet die automatischen Updates von WordPress aus (Core, Plugins, Themes, Übersetzungen) und entfernt die Warnung zu Hintergrund-Updates aus dem Website-Zustand. Ausgeschaltet aktualisiert sich WordPress wieder selbst, außer wo die Updates in wp-config.php abgeschaltet sind. Die Einstellung erreicht jede Website bei ihrer nächsten Prüfung.",
+  "Verifiche da confermare": "Prüfungen zu bestätigen",
+  "ricontrollo automatico programmato": "automatische Nachprüfung geplant"
 }

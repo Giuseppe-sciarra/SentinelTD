@@ -2523,5 +2523,9 @@
   "Nel pannello c'è la {0}": "Nel pannello c'è la {0}",
   "{0} vulnerabilità critiche, {1} sfruttate attivamente": "{0} vulnerabilità critiche, {1} sfruttate attivamente",
   "attive": "attive",
-  "silenziate": "silenziate"
+  "silenziate": "silenziate",
+  "Spegni gli aggiornamenti automatici di WordPress sui siti: li fa solo Sentinel": "Spegni gli aggiornamenti automatici di WordPress sui siti: li fa solo Sentinel",
+  "Il connettore WordPress (2.38 o più recente) spegne l'aggiornatore automatico di WordPress (core, plugin, temi, traduzioni) e toglie da Salute del sito l'avviso sugli aggiornamenti in background. Spenta, WordPress torna ad aggiornare da solo, tranne dove gli aggiornamenti sono spenti in wp-config.php. La scelta arriva a ogni sito al suo controllo successivo.": "Il connettore WordPress (2.38 o più recente) spegne l'aggiornatore automatico di WordPress (core, plugin, temi, traduzioni) e toglie da Salute del sito l'avviso sugli aggiornamenti in background. Spenta, WordPress torna ad aggiornare da solo, tranne dove gli aggiornamenti sono spenti in wp-config.php. La scelta arriva a ogni sito al suo controllo successivo.",
+  "Verifiche da confermare": "Verifiche da confermare",
+  "ricontrollo automatico programmato": "ricontrollo automatico programmato"
 }

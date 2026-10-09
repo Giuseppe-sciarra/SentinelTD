@@ -160,7 +160,18 @@
 
       <main class="content">
         <div class="msg warn" x-show="totStats.dns > 0"><span>Verifica DNS non riuscita</span>: <span x-text="totStats.dns"></span> <span>siti da ricontrollare. Il loro stato attuale non è verificato.</span></div>
-        <div class="msg warn" x-show="totStats.checking > 0"><span>Verifiche da confermare</span>: <span x-text="totStats.checking"></span> · <span>ricontrollo automatico programmato</span></div>
+        <div class="msg warn msg-drop" x-show="totStats.checking > 0" @click.outside="checkingOpen = false">
+          <button type="button" class="msg-toggle" @click="checkingOpen = !checkingOpen" :aria-expanded="checkingOpen ? 'true' : 'false'"><span>Verifiche da confermare</span>: <span x-text="totStats.checking"></span> · <span>ricontrollo automatico programmato</span><span class="msg-caret" x-text="checkingOpen ? '▴' : '▾'"></span></button>
+          <div class="msg-list" x-show="checkingOpen">
+            <template x-for="s in checkingSites" :key="'ck'+s.id">
+              <a class="msg-row" :href="'#/site/'+s.id" @click="checkingOpen = false">
+                <b x-text="s.name" translate="no"></b>
+                <span class="msg-why" x-text="s.error || 'Verifica da confermare'"></span>
+                <span class="msg-when"><span>ultimo controllo</span> <span x-text="ago(s.last_checked)"></span></span>
+              </a>
+            </template>
+          </div>
+        </div>
         <div class="msg warn" x-show="totStats.slow > 0"><span>Server lenti</span>: <span x-text="totStats.slow"></span> · <span>il connettore non risponde in tempo ma la home sì: non sono offline, si riprova ogni 10 minuti</span></div>
         <div class="msg info" x-show="needs2faSetup">Non hai ancora configurato la verifica in due passaggi: <a href="#/settings">configurala nelle Impostazioni</a>.</div>
 
@@ -1579,6 +1590,7 @@
                     <div class="field"><label>Tetto massimo del registro</label><div class="input-suffix"><input class="input" type="number" min="500" max="1000000" step="500" x-model.number="prefs.log_max_rows"><span>righe</span></div><div class="hint">Oltre questo numero si cancellano le righe più vecchie, anche se rientrano nei giorni. Il registro non cresce mai oltre.</div></div>
                     <div class="field"><label>Email dei report di aggiornamento</label><select class="input" x-model="prefs.email_report_mode"><option value="site" :selected="prefs.email_report_mode==='site'">Un'email per ogni sito</option><option value="cycle" :selected="prefs.email_report_mode==='cycle'">Un riepilogo unico per ciclo</option></select><div class="hint">Con il riepilogo unico arriva una sola email a fine ciclo, con tutti i siti aggiornati, invece di una per sito. Telegram non cambia.</div></div>
                     <label class="check" style="padding:4px 0 10px;grid-column:1/-1"><input type="checkbox" x-model="prefs.auto_rollback"> Ripristino automatico: se la home si rompe dopo un aggiornamento, rimetti le copie fatte prima e blocca quei componenti</label>
+                    <div style="grid-column:1/-1;padding:0 0 10px"><label class="check"><input type="checkbox" x-model="prefs.wp_block_auto_updates"> Spegni gli aggiornamenti automatici di WordPress sui siti: li fa solo Sentinel</label><div class="hint" style="margin-top:4px">Il connettore WordPress (2.38 o più recente) spegne l'aggiornatore automatico di WordPress (core, plugin, temi, traduzioni) e toglie da Salute del sito l'avviso sugli aggiornamenti in background. Spenta, WordPress torna ad aggiornare da solo, tranne dove gli aggiornamenti sono spenti in wp-config.php. La scelta arriva a ogni sito al suo controllo successivo.</div></div>
                     <div style="grid-column:1/-1;padding:0 0 10px"><label class="check"><input type="checkbox" x-model="prefs.pre_update_backup"> Copia di sicurezza prima di ogni aggiornamento: zip del plugin o tema sull'hosting, serve al ripristino</label><div class="hint" style="margin-top:4px">È l'operazione più pesante che Sentinel fa sugli hosting (fino a 300 MB per componente). Spenta, il ripristino manuale e quello automatico non hanno nulla da rimettere. Vale per WordPress con connettore 2.33 o più recente.</div></div>
                     <div class="field"><label>Controllo della home: attesa prima della foto "dopo"</label><div class="input-suffix"><input class="input" type="number" min="0" max="180" x-model.number="prefs.visual_after_delay"><span>secondi</span></div><div class="hint">Su un hosting lento la pagina si assesta solo dopo un po': fotografare subito la segnava "cambiata" per niente. 0 la disattiva.</div></div>
                     <div class="field">

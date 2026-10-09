@@ -335,6 +335,16 @@ async def fetch_status(site: Site, timeout: float = 20.0, force: bool = False) -
     raise RuntimeError("Nessun tentativo di controllo configurato")
 
 
+async def _wp_auto_updates_choice() -> str:
+    """"block" = il connettore WordPress spegne gli aggiornamenti automatici di WordPress (di
+    base: li fa Sentinel); "allow" = li lascia a WordPress. Impostazioni -> Aggiornamenti."""
+    try:
+        from .settings_store import get_operational_settings
+        return "block" if (await get_operational_settings()).get("wp_block_auto_updates", True) else "allow"
+    except Exception:  # noqa: BLE001
+        return "block"
+
+
 async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = False) -> dict:
     """GET autenticata verso il connettore. Solleva eccezione su errore.
 
@@ -350,7 +360,9 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
     # (es. NPMplus) servano risposte cachate, senza dover configurare ogni sito.
     cb = int(time.time())
     if site.cms == "wp":
-        refresh = "&refresh=1" if force else ""
+        # Impostazioni -> aggiornamenti automatici di WordPress: il connettore (2.38+) se lo
+        # segna e li spegne o li lascia accesi; i connettori piu' vecchi ignorano il parametro
+        refresh = ("&refresh=1" if force else "") + "&wp_auto_updates=" + await _wp_auto_updates_choice()
         endpoint = wp_rest_url(site, "status", f"_={cb}" + refresh)
     else:  # joomla
         task = "refresh" if force else "status"
@@ -378,7 +390,6 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
         # di DNS/connessione non dipende dal percorso e non deve raddoppiare le GET.
         cur = _WP_REST_STYLE.get(site.id, "wpjson")
         alternate = "restroute" if cur == "wpjson" else "wpjson"
-        refresh = "&refresh=1" if force else ""
         alt = wp_rest_url(site, "status", f"_={cb}" + refresh, style=alternate)
         r = await _status_get(client, alt, headers, request_timeout)
         r.raise_for_status()
