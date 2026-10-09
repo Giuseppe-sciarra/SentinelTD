@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.36.0 — Irrobustimenti prima della pubblicazione
+
+### Security
+- **Limite dei tentativi di login non aggirabile.** Il limitatore prendeva il PRIMO indirizzo di
+  `X-Forwarded-For`, che lo scrive chi chiama (il proxy accoda il proprio): bastava cambiarlo a
+  ogni tentativo. Ora conta l'ultimo della catena, quello aggiunto dal proprio proxy. Vale per
+  login, 2FA, passkey e registrazione automatica.
+- **Indirizzi dei siti solo pubblici.** La registrazione automatica e *Nuovo sito* rifiutano
+  schemi diversi da http(s), credenziali nell'URL, nomi interni e host che puntano a reti private,
+  loopback o link-local: il pannello non visita più la propria rete interna per conto di chi ha la
+  chiave di registrazione.
+- **Registrazione automatica tracciata.** Ogni sito registrato dal connettore e ogni riallineamento
+  del token finiscono nel Registro, con l'IP di provenienza.
+- **Secondo fattore tolto solo con la password.** Disattivare l'authenticator o rimuovere una
+  passkey chiede la password del pannello: un token di sessione rubato non basta.
+- **Token del sito mai mandato a un altro host.** Se l'indirizzo del connettore rimanda a un altro
+  dominio (sito dirottato o parcheggiato), la richiesta seguita non porta più `Authorization` né
+  `X-Sentinel-Token`.
+- Il connettore WordPress **2.36.1** non rimuove nessuna copia di se stesso, in qualunque cartella giri.
+- Feed CISA KEV ufficiale di default (prima un mirror su GitHub); `KEV_FEED_URL` per cambiarlo.
+
+### Fixed
+- **Giro notturno del connettore con il compose consegnato.** Il worker aveva il volume
+  `packages` in sola lettura: gli zip del giro non si potevano scrivere e la distribuzione falliva
+  in silenzio ("pacchetto non pronto"). Ora `packages` è in scrittura e il worker vede anche il
+  volume `connectors` (connettore caricato a mano).
+- **Intervallo di controllo sotto i 60 minuti ignorato**: arq teneva il risultato del controllo per
+  un'ora e rifiutava il lavoro con lo stesso id. Ora il risultato non si conserva.
+- Nomi o versioni di estensioni oltre i limiti delle colonne, o una registrazione automatica con
+  campi lunghi, facevano fallire il controllo con un errore 500: ora si troncano.
+- Il connettore Joomla **1.42.0** accetta anche `X-Sentinel-Token` (hosting che filtrano
+  `Authorization`), come quello WordPress.
+- Avvisi della dashboard ("PHP fuori supporto", "vulnerabilità critiche") e giorni della settimana
+  nei grafici nella lingua del pannello.
+
+### Changed
+- README in inglese e italiano con le schermate (`docs/screenshots/`, parco di prova), senza più
+  le funzioni ritirate (diagnostica, verifica del core, peso dei siti); `.env.example` senza le
+  variabili non più lette; anteprime delle notifiche con nomi di esempio; pagine statiche vecchie
+  (`static/index.html`, `static/security.html`) rimosse.
+
+
 ## 2.35.2
 
 ### Added

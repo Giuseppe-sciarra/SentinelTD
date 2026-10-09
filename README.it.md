@@ -6,6 +6,22 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 
 🇬🇧 [Read in English](README.md)
 
+![Dashboard](docs/screenshots/dashboard.png)
+
+---
+
+## Schermate
+
+| | |
+|---|---|
+| **Tutti i siti** — stato, CMS, PHP, connettore, dominio, aggiornamenti in sospeso, una riga per sito<br>![Tutti i siti](docs/screenshots/sites.png) | **Pagina del sito** — stato, contatori, anteprima ed eventi recenti<br>![Pagina del sito](docs/screenshots/site.png) |
+| **Estensioni** — plugin e temi con versione installata e disponibile, aggiornamento o blocco per ciascuno<br>![Estensioni](docs/screenshots/site-extensions.png) | **Centro sicurezza** — vulnerabilità note confrontate con quello che è davvero installato<br>![Sicurezza](docs/screenshots/security.png) |
+| **Storico aggiornamenti** — ogni aggiornamento con versioni, esito e ripristino<br>![Storico](docs/screenshots/history.png) | **Statistiche** — andamento mensile, classifiche, confronti tra periodi, PDF<br>![Statistiche](docs/screenshots/stats.png) |
+| **Scadenze domini** — registrar, scadenza e decisione rinnova / non rinnovare per dominio<br>![Domini](docs/screenshots/domains.png) | **Notifiche** — ogni messaggio modificabile, con anteprima dal vivo e invio di prova<br>![Notifiche](docs/screenshots/notifications.png) |
+| **Registro** — tutto quello che Sentinel fa o vede, filtrabile per categoria, livello e periodo<br>![Registro](docs/screenshots/eventlog.png) | **Impostazioni** — soglie, connettori, chiave di registrazione, indirizzo del pannello<br>![Impostazioni](docs/screenshots/settings.png) |
+
+I dati mostrati sono un parco di prova con nomi inventati (interfaccia in inglese: il pannello è in italiano, inglese, francese e tedesco).
+
 ---
 
 ## Funzionalità
@@ -23,16 +39,6 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
   Dopo un errore o un blocco antibot si ritenta all'intervallo impostato; l'ultima immagine
   riuscita conserva la propria data. L'esecuzione può slittare per l'attesa in coda
 - Cartelle (clienti), tag, filtri rapidi, ricerca ed esportazione CSV
-- **Diagnostica dei siti**: spazio scrivibile misurato scrivendo davvero sul sito — non lo spazio
-  libero del disco, che descrive il disco del server e ignora la quota dell'hosting — più cartella
-  temporanea, permessi, versione e memoria di PHP, supporto zip. Prima di un aggiornamento
-  grosso il connettore avvisa se lo spazio non basta, invece di fallire con un errore di
-  decompressione incomprensibile
-- **Verifica del core di WordPress** sulle impronte ufficiali di wordpress.org: file modificati,
-  mancanti e in più dentro `wp-admin` e `wp-includes`, con una notifica quando l'esito cambia
-- **Storico del peso dei siti**: file per categoria (media, plugin, temi, core, il resto) e
-  database, raccolti ogni notte e conservati due anni, con grafico e andamento degli ultimi 30
-  giorni
 - **Spazio e log sotto controllo**: la diagnostica notturna scrive una prova da 50 MB su ogni sito ed
   elenca i log oltre i 10 MB, dentro il sito e nella cartella dell'account accanto (dove cPanel
   tiene `~/logs`). Una notifica per sito quando lo spazio scarseggia o compare un log grande, poi
@@ -236,9 +242,7 @@ mostra e lo incolli quando aggiungi il sito nel pannello. I sorgenti stanno in `
 sono neutri — nessun indirizzo, nessuna chiave — così chiunque può costruirsi i propri;
 vedi `connectors/README.md`.
 
-Diagnostica, peso del sito e *Prendi da un sito* richiedono il **connettore 2.19 o successivo su
-WordPress e 1.30 o successivo su Joomla**. Finché un sito non ha fatto la diagnostica, il riquadro
-*Diagnostica* nella sua pagina dice quale connettore serve.
+*Prendi da un sito* richiede il **connettore 2.19 o successivo su WordPress**.
 
 ---
 
@@ -254,7 +258,6 @@ WordPress e 1.30 o successivo su Joomla**. Finché un sito non ha fatto la diagn
 | Soglie di scadenza, frequenza scansioni, anteprime, conservazione cronologia | Impostazioni |
 | Indirizzo del pannello e chiave di registrazione per i connettori | Impostazioni → Connettori |
 | Un'email per sito oppure un riepilogo per ciclo automatico | Impostazioni → Email dei report di aggiornamento |
-| Spazio scrivibile, PHP, permessi, file del core, storico del peso di un sito | pagina del sito → Diagnostica, Peso del sito |
 | Testi, HTML e canali di ogni notifica | Notifiche |
 | Report mensile: giorno e orario, destinatario, contenuto, impaginazione | Report mensile |
 | Clienti, i loro siti e indirizzi, gruppi, report automatico al cliente | Report clienti |

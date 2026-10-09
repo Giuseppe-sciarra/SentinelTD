@@ -1,0 +1,376 @@
+"""
+API del report mensile (Sentinel → Report).
+"""
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi.responses import HTMLResponse, Response
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..db import get_session
+from ..models import UpdateMonthly
+from ..auth import require_auth, verify_token
+from .. import report as rep
+
+router = APIRouter(prefix="/api/reports", tags=["reports"])
+
+
+def _strip_page_rule(html: str) -> str:
+    """Toglie la regola @page (con i suoi margin box @bottom-center) dall'HTML.
+
+    Serve solo per l'ANTEPRIMA a schermo: i browser non conoscono i margin box e
+    riempiono la console di avvisi "Prevista una dichiarazione, invece e' stato
+    rilevato @bottom-center". WeasyPrint invece li usa per numerare le pagine,
+    quindi nel PDF la regola resta al suo posto.
+    """
+    out, i = [], 0
+    while True:
+        j = html.find("@page", i)
+        if j == -1:
+            out.append(html[i:])
+            break
+        k = html.find("{", j)
+        if k == -1:
+            out.append(html[i:])
+            break
+        depth, end = 1, k + 1
+        while end < len(html) and depth:
+            if html[end] == "{":
+                depth += 1
+            elif html[end] == "}":
+                depth -= 1
+            end += 1
+        out.append(html[i:j])
+        i = end
+    return "".join(out)
+
+
+@router.get("/config", dependencies=[Depends(require_auth)])
+async def get_config():
+    return {"config": await rep.get_config(), "template": await rep.get_template(),
+            "default_template": rep.DEFAULT_TEMPLATE, "current_period": rep.current_period(),
+            "suggested_period": rep.prev_period()}
+
+
+@router.put("/config", dependencies=[Depends(require_auth)])
+async def save_config(payload: dict = Body(...)):
+    # un salvataggio VUOTO (pagina che non aveva letto le impostazioni) non diventa "valori di base"
+    if not isinstance(payload.get("config"), dict) or not payload.get("config"):
+        raise HTTPException(422, "Configurazione vuota: niente salvato. Ricarica la pagina e riprova")
+    cfg = await rep.save_config(payload.get("config") or {})
+    if "template" in payload:
+        html = (payload.get("template") or "").strip()
+        if html:
+            # valida prima di salvare: un template rotto non deve bloccare l'invio mensile
+            try:
+                rep._env.from_string(html)
+            except Exception as ex:  # noqa: BLE001
+                raise HTTPException(422, f"Template non valido: {ex}")
+            await rep.save_template(html)
+        else:
+            await rep.save_template(rep.DEFAULT_TEMPLATE)
+    return {"ok": True, "config": cfg}
+
+
+@router.get("/scopes", dependencies=[Depends(require_auth)])
+async def scopes(s: AsyncSession = Depends(get_session)):
+    """Report disponibili: quello globale + uno per ogni cartella/tag, con i siti dentro."""
+    from ..models import Site
+    sites = (await s.execute(select(Site))).scalars().all()
+    tags: dict[str, int] = {}
+    for x in sites:
+        for t in (x.tags or "").split(","):
+            t = t.strip()
+            if t:
+                tags[t] = tags.get(t, 0) + 1
+    cfg = await rep.get_config()
+    conf = {c["key"].lower(): c for c in cfg.get("scopes", [])}
+    out = [{"key": rep.GLOBAL_KEY, "label": rep.scope_label(rep.GLOBAL_KEY), "sites": len(sites),
+            "enabled": conf.get(rep.GLOBAL_KEY, {}).get("enabled", False)}]
+    for t in sorted(tags, key=str.lower):
+        out.append({"key": t, "label": t, "sites": tags[t], "enabled": conf.get(t.lower(), {}).get("enabled", False)})
+    # cartelle configurate ma non piu' esistenti: mostrale comunque, cosi' si possono togliere
+    for k, c in conf.items():
+        if k != rep.GLOBAL_KEY and not any(x["key"].lower() == k for x in out):
+            out.append({"key": c["key"], "label": c["key"] + " (cartella non più presente)", "sites": 0,
+                        "enabled": c.get("enabled", False)})
+    return out
+
+
+@router.get("/trend", dependencies=[Depends(require_auth)])
+async def trend(scope: str = Query(""), months: int = Query(12, ge=2, le=36), period: str = Query(""),
+                s: AsyncSession = Depends(get_session)):
+    """Serie mensile per il comparatore: totali per mese nel perimetro scelto."""
+    from ..models import Site
+    scope = scope or rep.GLOBAL_KEY
+    allowed = None
+    if scope != rep.GLOBAL_KEY:
+        sites = (await s.execute(select(Site))).scalars().all()
+        key = scope.strip().lower()
+        allowed = {x.id for x in sites
+                   if any(t.strip().lower() == key or t.strip().lower().startswith(key + "/")
+                          for t in (x.tags or "").split(","))}
+    end = period or rep.current_period()
+    out = []
+    for i in range(months - 1, -1, -1):
+        out.append(await rep.month_stats(s, rep.shift_period(end, -i), allowed))
+    # variazione rispetto al mese precedente della serie
+    for i, row in enumerate(out):
+        prev = out[i - 1]["updates"] if i else None
+        row["delta"] = None if prev is None else row["updates"] - prev
+        row["delta_pct"] = None if not prev else round((row["updates"] - prev) * 100 / prev)
+    return {"scope": scope, "scope_label": rep.scope_label(scope), "months": out,
+            "max": max([x["updates"] for x in out] + [1]),
+            "total": sum(x["updates"] for x in out),
+            "avg": round(sum(x["updates"] for x in out) / max(1, len(out)), 1)}
+
+
+@router.get("/periods", dependencies=[Depends(require_auth)])
+async def periods(s: AsyncSession = Depends(get_session)):
+    """Mesi con dati, dal piu' recente."""
+    rows = (await s.execute(
+        select(UpdateMonthly.period, func.sum(UpdateMonthly.ok_count), func.count(func.distinct(UpdateMonthly.site_id)))
+        .group_by(UpdateMonthly.period).order_by(UpdateMonthly.period.desc()).limit(36)
+    )).all()
+    out = [{"period": p, "label": rep.period_label(p), "updates": int(u or 0), "sites": int(n or 0)} for p, u, n in rows]
+    cur = rep.current_period()
+    if not any(x["period"] == cur for x in out):
+        out.insert(0, {"period": cur, "label": rep.period_label(cur), "updates": 0, "sites": 0})
+    return out
+
+
+@router.post("/preview", dependencies=[Depends(require_auth)])
+async def preview(payload: dict = Body(default={})):
+    """HTML del report con la configurazione passata (non ancora salvata)."""
+    period = payload.get("period") or rep.prev_period()
+    scope = payload.get("scope") or rep.GLOBAL_KEY
+    cfg = rep.normalize(payload.get("config")) if payload.get("config") else await rep.get_config()
+    tpl = payload.get("template") if payload.get("template") else None
+    try:
+        html = await rep.render_html(period, template=tpl, cfg=cfg, scope=scope)
+    except Exception as ex:  # noqa: BLE001
+        raise HTTPException(422, f"Errore nel template: {ex}")
+    # Solo a schermo: mostra il documento come un foglio A4 con i suoi margini.
+    # media="screen" -> WeasyPrint (che stampa) lo ignora: il PDF resta identico.
+    screen_css = (
+        '<style media="screen">html{background:#e9edf2;padding:18px 0}'
+        'body{max-width:210mm;margin:0 auto;padding:16mm 14mm;background:#fff;'
+        'box-shadow:0 2px 14px rgba(0,0,0,.14);border-radius:2px}</style>'
+    )
+    html = _strip_page_rule(html)
+    html = html.replace("</head>", screen_css + "</head>", 1) if "</head>" in html else screen_css + html
+    return HTMLResponse(html)
+
+
+@router.get("/pdf")
+async def pdf(period: str = Query(...), k: str = Query(""), scope: str = Query("")):
+    """Download del PDF (token in query: il browser scarica con un link diretto)."""
+    if not verify_token(k):
+        raise HTTPException(401, "Invalid token")
+    html, blob, filename = await rep.build(period, scope or rep.GLOBAL_KEY)
+    if blob is None:
+        return HTMLResponse(html, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    return Response(blob, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.post("/send", dependencies=[Depends(require_auth)])
+async def send_now(payload: dict = Body(default={})):
+    """Invia un report. scope indicato = solo quello; scope assente = tutti quelli attivi."""
+    period = payload.get("period") or rep.prev_period()
+    scope = payload.get("scope")
+    if scope:
+        res = await send_report_for(period, scope)
+        if not res["sent"]:
+            raise HTTPException(400, res.get("error") or "Invio non riuscito: controlla SMTP e destinatari")
+        return res
+    results = await send_all(period)
+    if not results:
+        raise HTTPException(400, "Nessun report attivo da inviare: spunta almeno una voce")
+    if not any(x["sent"] for x in results):
+        raise HTTPException(400, results[0].get("error") or "Invio non riuscito")
+    return {"sent": True, "results": results,
+            "message": f"{sum(1 for x in results if x['sent'])} report inviati su {len(results)}"}
+
+
+async def send_all(period: str, only_pending: bool = False, already: list[str] | None = None) -> list[dict]:
+    """Invia tutti i report attivi. Con only_pending salta quelli gia' inviati (lista `already`)."""
+    cfg = await rep.get_config()
+    done = {x.lower() for x in (already or [])}
+    out = []
+    for sc in cfg.get("scopes", []):
+        if not sc.get("enabled"):
+            continue
+        if only_pending and sc["key"].lower() in done:
+            continue
+        out.append(await send_report_for(period, sc["key"]))
+    return out
+
+
+async def send_report_for(period: str, scope: str = "") -> dict:
+    """Genera e invia UN report (globale o di una cartella). Usata da API e cron mensile."""
+    from ..notify import get_config as notif_config, render as notif_render
+    from ..email import send_report as smtp_send
+
+    scope = scope or rep.GLOBAL_KEY
+    if rep.is_client_scope(scope):
+        return await send_client_report(period, scope)
+    cfg = await rep.get_config()
+    html, blob, filename = await rep.build(period, scope)
+    data = await rep.gather(period, cfg, scope)
+    top_lines = ", ".join(f"{t['name']} ({t['count']})" for t in data["top_items"][:5])
+    ctx = {
+        "period_label": data["period_label"], "company": cfg.get("company", ""),
+        "total_updates": data["total_updates"], "total_failed": data["total_failed"],
+        "sites_touched": data["sites_touched"], "sites_total": data["sites_total"],
+        "distinct_items": data["distinct_items"],
+        "top_lines": f"Più aggiornati: {top_lines}" if top_lines else "",
+        "attachment": filename, "scope_label": data["scope_label"],
+    }
+    ncfg = await notif_config("monthly_report")
+    r = notif_render("monthly_report", ncfg, ctx)
+    if r["error"]:
+        r = notif_render("monthly_report", (await notif_config("monthly_report")), ctx)
+    mime = "application/pdf" if filename.endswith(".pdf") else "text/html"
+    try:
+        await smtp_send(r["subject"], r["body_email"], attachments=[(filename, mime, blob or html.encode("utf-8"))],
+                        to=rep.report_recipients(cfg))
+    except Exception as ex:  # noqa: BLE001
+        return {"sent": False, "error": str(ex)[:200], "period": period, "scope": scope,
+                "scope_label": data["scope_label"]}
+    # notifica anche su Telegram se l'evento lo prevede (senza allegato)
+    try:
+        if ncfg.get("telegram"):
+            from ..telegram import send_telegram
+            await send_telegram(r["body_telegram"])
+    except Exception:  # noqa: BLE001
+        pass
+    return {"sent": True, "period": period, "scope": scope, "scope_label": data["scope_label"],
+            "filename": filename, "pdf": blob is not None,
+            "updates": data["total_updates"], "sites": data["sites_touched"]}
+
+
+@router.post("/detail", dependencies=[Depends(require_auth)])
+async def detail_report(payload: dict = Body(...), s: AsyncSession = Depends(get_session)):
+    """Report dettagliato su richiesta: uno, alcuni o tutti i siti, su un intervallo di mesi.
+    Scaricato via fetch con l'header Authorization (niente token in query string)."""
+    from .. import report_detail as rd
+    from ..models import Site
+
+    p_from = str(payload.get("from") or rep.current_period())
+    p_to = str(payload.get("to") or rep.current_period())
+    if not (rd.valid_period(p_from) and rd.valid_period(p_to)):
+        raise HTTPException(422, "Periodo non valido (formato AAAA-MM)")
+    if p_from > p_to:
+        p_from, p_to = p_to, p_from
+
+    sites = (await s.execute(select(Site))).scalars().all()
+    folder = str(payload.get("folder") or "").strip()
+    ids = [int(x) for x in (payload.get("site_ids") or []) if str(x).isdigit()]
+    if folder:
+        key = folder.lower()
+        ids = [x.id for x in sites if any(t.strip().lower() == key or t.strip().lower().startswith(key + "/")
+                                           for t in (x.tags or "").split(","))]
+        scope_label = folder
+    elif ids:
+        chosen = [x for x in sites if x.id in set(ids)]
+        from ..i18n import t as _t
+        scope_label = chosen[0].name if len(chosen) == 1 else f"{len(chosen)} {_t('siti selezionati')}"
+    else:
+        from ..i18n import t as _t
+        scope_label = _t("Tutti i siti")
+    if (folder or payload.get("site_ids")) and not ids:
+        raise HTTPException(422, "Nessun sito corrisponde alla scelta")
+
+    data = await rd.gather(p_from, p_to, ids or None,
+                           include_history=bool(payload.get("history", True)),
+                           include_failed=bool(payload.get("failed", True)))
+    slug = rep.scope_slug(folder) if folder else ("sito-" + str(ids[0]) if len(ids) == 1 else
+                                                   (f"{len(ids)}-siti" if ids else "tutti"))
+    base = f"report-dettagliato-{p_from}" + ("" if p_from == p_to else f"_{p_to}") + f"-{slug}"
+
+    if str(payload.get("format", "pdf")).lower() == "csv":
+        return Response(rd.render_csv(data), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{base}.csv"'})
+    pdf, html = await rd.render_pdf(data, scope_label)
+    if pdf is None:
+        return Response(html.encode("utf-8"), media_type="text/html; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{base}.html"'})
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{base}.pdf"'})
+
+
+# --------------------------------------------------------------------------
+# REPORT PER CLIENTE
+# --------------------------------------------------------------------------
+def client_emails(raw: str) -> list[str]:
+    import re
+    out = []
+    for x in re.split(r"[,;\s]+", raw or ""):
+        x = x.strip()
+        if x and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", x) and x.lower() not in [o.lower() for o in out]:
+            out.append(x)
+    return out
+
+
+async def send_client_report(period: str, scope: str) -> dict:
+    """Report del mese di UN cliente, inviato ai suoi indirizzi con l'email "Report mensile al
+    cliente" (modificabile in Notifiche). Mai su Telegram, mai all'indirizzo dell'agenzia."""
+    from ..db import SessionLocal
+    from ..email import send_report as smtp_send
+    from ..models import Client, ClientSite, Site
+    from ..notify import default_config as notif_default, get_config as notif_config, render as notif_render
+
+    cid = rep.client_id_of(scope)
+    async with SessionLocal() as s:
+        cl = await s.get(Client, cid)
+        site_rows = (await s.execute(select(Site).join(ClientSite, ClientSite.site_id == Site.id)
+                                     .where(ClientSite.client_id == cid).order_by(Site.name))).scalars().all() if cl else []
+    base = {"period": period, "scope": scope, "scope_label": cl.name if cl else f"cliente {cid}", "client_id": cid}
+    if not cl:
+        return {**base, "sent": False, "error": "cliente non trovato"}
+    emails = client_emails(cl.emails)
+    # senza indirizzi la funzione di invio userebbe REPORT_TO (l'agenzia): ci si ferma prima
+    if not emails:
+        return {**base, "sent": False, "error": "il cliente non ha indirizzi email"}
+    if not site_rows:
+        return {**base, "sent": False, "error": "il cliente non ha siti associati"}
+    ncfg = await notif_config("client_report")
+    if not ncfg.get("enabled", True):
+        return {**base, "sent": False, "error": "l'email al cliente è disattivata in Notifiche"}
+
+    cfg = await rep.get_client_config()
+    html, blob, filename = await rep.build(period, scope)
+    data = await rep.gather(period, cfg, scope)
+    names = ", ".join((x.url or "").replace("https://", "").replace("http://", "").rstrip("/") for x in site_rows)
+    ctx = {"client_name": cl.name, "period_label": data["period_label"], "company": cfg.get("company", ""),
+           "sites_total": len(site_rows), "sites_names": names, "total_updates": data["total_updates"],
+           "sites_touched": data["sites_touched"], "attachment": filename}
+    r = notif_render("client_report", ncfg, ctx)
+    if r["error"]:
+        r = notif_render("client_report", notif_default("client_report"), ctx)
+    mime = "application/pdf" if filename.endswith(".pdf") else "text/html"
+    try:
+        await smtp_send(r["subject"], r["body_email"], attachments=[(filename, mime, blob or html.encode("utf-8"))],
+                        to=", ".join(emails))
+    except Exception as ex:  # noqa: BLE001
+        return {**base, "sent": False, "error": str(ex)[:200]}
+    return {**base, "sent": True, "to": emails, "filename": filename, "pdf": blob is not None,
+            "updates": data["total_updates"], "sites": data["sites_touched"]}
+
+
+async def send_clients(period: str, only_pending: bool = False, already: list[str] | None = None) -> list[dict]:
+    """Report di tutti i clienti con l'invio automatico attivo."""
+    from ..db import SessionLocal
+    from ..models import Client
+    done = {x.lower() for x in (already or [])}
+    async with SessionLocal() as s:
+        clients = (await s.execute(select(Client).where(Client.enabled == True).order_by(Client.name))).scalars().all()  # noqa: E712
+    out = []
+    for cl in clients:
+        key = f"{rep.CLIENT_PREFIX}{cl.id}"
+        if only_pending and key.lower() in done:
+            continue
+        out.append(await send_client_report(period, key))
+    return out

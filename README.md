@@ -6,6 +6,22 @@ Your server, your data, your branding.
 
 🇮🇹 [Leggi in italiano](README.it.md)
 
+![Dashboard](docs/screenshots/dashboard.png)
+
+---
+
+## Screenshots
+
+| | |
+|---|---|
+| **All sites** — status, CMS, PHP, connector, domain, pending updates, one row per site<br>![All sites](docs/screenshots/sites.png) | **Site page** — status, counters, preview and recent events<br>![Site page](docs/screenshots/site.png) |
+| **Extensions** — plugins and themes with installed/available versions, update or lock each one<br>![Extensions](docs/screenshots/site-extensions.png) | **Security center** — known vulnerabilities matched against what is really installed<br>![Security](docs/screenshots/security.png) |
+| **Update history** — every update with versions, outcome and restore button<br>![History](docs/screenshots/history.png) | **Statistics** — monthly trends, rankings and period comparisons, PDF export<br>![Statistics](docs/screenshots/stats.png) |
+| **Domain expiries** — registrar, expiry and the renew / do-not-renew decision per domain<br>![Domains](docs/screenshots/domains.png) | **Notifications** — every message editable, with live preview and test send<br>![Notifications](docs/screenshots/notifications.png) |
+| **Log** — everything Sentinel does or sees, filterable by category, level and time<br>![Log](docs/screenshots/eventlog.png) | **Settings** — thresholds, connectors, registration key, panel address<br>![Settings](docs/screenshots/settings.png) |
+
+The data shown is a demo fleet with made-up names.
+
 ---
 
 ## Features
@@ -23,9 +39,6 @@ Your server, your data, your branding.
   attempts retry after the configured interval; the last good image retains its real date.
   Actual execution may be delayed by the queue
 - Folders (clients), tags, quick filters, search and CSV export
-
-- **WordPress core check** against the official wordpress.org checksums: modified, missing and
-  extra files in `wp-admin` and `wp-includes`, with a notification when the result changes
 
 
 
@@ -230,7 +243,6 @@ WordPress package export (*Take from a site*) needs connector 2.19 or later. Add
 | Expiry thresholds, scan frequency, preview refresh, history retention | Settings |
 | Panel address and registration key for the connectors | Settings → Connectors |
 | One email per site or one summary per automatic cycle | Settings → Update report emails |
-| Writable space, PHP, permissions, core files, size history of a site | site page → Diagnostics, Site size |
 | Text, HTML and channels of every notification | Notifications |
 | Monthly report: day and time, recipient, content, layout | Monthly report |
 | Clients, their sites and addresses, automatic report to the client | Client reports |
@@ -265,7 +277,7 @@ docker compose up -d --build api worker
 Back up together:
 
 - the PostgreSQL data (`pg_data`)
-- the `branding`, `connectors` and `screenshots` volumes
+- the `branding`, `connectors`, `packages` (uploaded licensed zips) and `screenshots` volumes
 - your private `.env`
 
 ```bash

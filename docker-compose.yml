@@ -60,7 +60,9 @@ services:
     command: [arq, app.worker.WorkerSettings]
     env_file: .env
     environment: *app-environment
-    volumes: [branding:/data/branding:ro, screenshots:/data/screenshots:ro, packages:/data/packages:ro]   # istantanee prima/dopo per i report
+    # packages in scrittura: gli zip delle installazioni in blocco e del giro del connettore stanno li';
+    # connectors in lettura: il giro usa il connettore caricato a mano, se c'e'
+    volumes: [branding:/data/branding:ro, screenshots:/data/screenshots:ro, packages:/data/packages, connectors:/data/connectors:ro]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
