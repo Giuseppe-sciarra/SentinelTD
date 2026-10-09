@@ -11,7 +11,7 @@
 # Runtime data and backups
 data/
 uploads/
-screenshots/
+/screenshots/
 backups/
 *.db
 *.db-*
