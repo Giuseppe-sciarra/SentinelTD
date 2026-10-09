@@ -31,7 +31,9 @@ class RemovalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_saved_old_resource_settings_are_not_exposed_or_reactivated(self):
         p=await settings_store.save_operational_settings({'server_metrics_enabled':True,'server_metrics_minutes':1,'server_split':['203.0.113.1'], 'server_limited':['203.0.113.1']})
-        for key in ['server_metrics_enabled','server_metrics_minutes','server_split']:self.assertNotIn(key,p)
+        for key in ['server_metrics_enabled','server_metrics_minutes']:self.assertNotIn(key,p)
+        # 2.30.0: server_split e' tornato per Gestione server (solo il nome macchina, nessun campionamento)
+        self.assertEqual(p['server_split'],['203.0.113.1'])
         self.assertEqual(p['server_limited'],['203.0.113.1'])
         self.assertEqual(p,await settings_store.get_operational_settings())
 

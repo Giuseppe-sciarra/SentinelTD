@@ -262,18 +262,68 @@ class CheckStateTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(site.updates_count, 7)
                 self.assertNotIn("offline", [p["kind"] for p in site_problems(site)])
                 site.offline_since = fixtures.NOW - timedelta(minutes=5)
-                await connectors.apply_status(session, site, force=True)
+                with patch.object(connectors, "probe_home", AsyncMock(return_value=None)):
+                    await connectors.apply_status(session, site, force=True)
                 self.assertEqual(site.status, "error")
+                self.assertTrue(getattr(site, "_availability_observed", True))
 
     async def test_zero_window_preserves_immediate_offline_setting(self):
         from app import settings_store
         await settings_store.save_operational_settings({"offline_alert_minutes":0})
         sid = await self.add_site(status="ok")
-        with patch.object(connectors, "fetch_status", AsyncMock(side_effect=httpx.ConnectTimeout("Connection timed out"))):
+        with patch.object(connectors, "fetch_status", AsyncMock(side_effect=httpx.ConnectTimeout("Connection timed out"))), \
+             patch.object(connectors, "probe_home", AsyncMock(return_value=None)):
             async with self.sessions() as session:
                 site = await session.get(Site, sid)
                 await connectors.apply_status(session, site)
                 self.assertEqual(site.status, "error")
+
+    async def test_slow_server_with_live_home_is_never_offline(self):
+        """Finestra scaduta ma la home risponde: errore 'Lento', niente episodio, niente avviso, ricontrollo fra 10 min."""
+        from datetime import timedelta
+        from app.models import OfflineEpisode
+        from sqlalchemy import select
+        sid = await self.add_site(status="ok", offline_since=fixtures.NOW - timedelta(minutes=9), offline_notified=True)
+        notify = AsyncMock()
+        with patch.object(connectors, "fetch_status", AsyncMock(side_effect=httpx.ReadTimeout("ReadTimeout"))), \
+             patch.object(connectors, "probe_home", AsyncMock(return_value=(200, 12.3))), \
+             patch.object(worker, "notify_dispatch", notify):
+            await worker.poll_site({"redis": self.redis}, sid)
+        notify.assert_not_awaited()
+        async with self.sessions() as session:
+            site = await session.get(Site, sid)
+            self.assertEqual(site.status, "slow")
+            self.assertTrue(site.error.startswith(connectors.SLOW_PREFIX))
+            self.assertEqual([p["kind"] for p in site_problems(site)], ["slow"])
+            self.assertIsNone(site.offline_since)
+            self.assertNotIn("offline", [p["kind"] for p in site_problems(site)])
+            self.assertEqual((await session.execute(select(OfflineEpisode))).scalars().all(), [])
+        jobs = await self.redis.queued_jobs()
+        self.assertEqual(jobs[0].args, (sid,))
+        self.assertTrue(jobs[0].job_id.startswith("slow-recheck:"))
+
+    async def test_stale_notified_flag_no_longer_confirms_offline_at_first_timeout(self):
+        sid = await self.add_site(status="ok", offline_notified=True)
+        with patch.object(connectors, "fetch_status", AsyncMock(side_effect=httpx.ReadTimeout("ReadTimeout"))):
+            async with self.sessions() as session:
+                site = await session.get(Site, sid)
+                await connectors.apply_status(session, site)
+                self.assertEqual(site.status, "check_pending")
+
+    async def test_forced_refresh_timeout_falls_back_to_passive_check(self):
+        sid = await self.add_site(status="ok", updates_count=3)
+        calls = []
+        async def fake(site, timeout, force):
+            calls.append((timeout, force))
+            if force:
+                raise httpx.ReadTimeout("ReadTimeout")
+            return {"core": {}, "extensions": []}
+        with patch.object(connectors, "fetch_status", fake):
+            async with self.sessions() as session:
+                site = await session.get(Site, sid)
+                await connectors.apply_status(session, site, force=True)
+                self.assertEqual(site.status, "ok")
+        self.assertEqual([c[1] for c in calls], [True, False])
 
     async def test_gate_deferral_never_starts_an_offline_episode(self):
         sid = await self.add_site(status="ok")

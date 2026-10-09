@@ -14,6 +14,8 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 - Controlli di raggiungibilità con **conferma prima di gridare al lupo**: un sito risulta
   offline solo se non risponde per tutti i minuti che decidi tu (5 di base), così un server
   lento non ti sveglia di notte
+- **Avviso "Connettore non risponde"** quando il sito è online ma il connettore no (rimosso,
+  disattivato, token rifiutato): stessa finestra di conferma, avviso di ritorno quando risponde di nuovo
 - Versioni di core, plugin, temi e traduzioni per ogni sito, tramite i connettori inclusi
 - **Anteprima visiva di ogni sito**, rigenerata a intervalli, con le miniature nell'elenco
   (timer autonomo verificato ogni minuto; frequenza da Impostazioni, anche se la pagina non cambia).
@@ -149,7 +151,9 @@ successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 - Pacchetti dei connettori generati dal pannello stesso, già col tuo indirizzo e la tua chiave
 - **Connettore aggiornato da solo**: ogni notte il pannello installa il connettore che consegna sui
   siti che ne hanno uno più vecchio (un sito alla volta sui server col freno), e *Impostazioni →
-  Connettori* mostra quali siti sono indietro, con *Aggiorna sui siti* per farlo subito
+  Connettori* mostra quali siti sono indietro, con *Aggiorna sui siti* per farlo subito.
+  Si aggiornano solo le copie del connettore già presenti, nella loro cartella e senza attivarle:
+  mai una copia nuova, mai il connettore installato come mu-plugin, nessun messaggio sul sito
 
 ---
 

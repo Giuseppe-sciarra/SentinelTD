@@ -1,5 +1,159 @@
 # Changelog
 
+## 2.35.2
+
+### Added
+- **Versione del connettore in vista.** Nell'elenco dei siti (tutti i siti e cartelle) la colonna
+  **Connettore**, ordinabile, con la versione che gira sul sito: in arancione se nel pannello ce n'è
+  una più nuova, con il badge **mu** se è installato come mu-plugin. Nella pagina del sito, scheda
+  *Stato*, la riga **Connettore**: versione, dove gira (*plugin · td-panopticon*, *mu-plugin*,
+  *fuori dai plugin*, *plugin di sistema* per Joomla), *disponibile X* se è vecchio e, per il
+  mu-plugin, come aggiornarlo.
+- API: `connector_version` e `connector_mode` anche nell'elenco dei siti; `/api/version` riporta le
+  versioni dei connettori consegnati (`connectors.wp`, `connectors.joomla`).
+
+
+## 2.35.1
+
+### Fixed
+- *Impostazioni → Connettori*: **"N siti esclusi dal giro"** ora è cliccabile e apre l'elenco dei
+  siti, ognuno con versione, motivo (mu-plugin, già installato, fuori dai plugin, da ricontrollare,
+  non ancora controllato) e cosa fare. Prima l'elenco stava solo nel suggerimento al passaggio del
+  mouse, che non compariva. L'API dà anche `hint` per ogni sito escluso.
+
+
+## 2.35.0 — Giro notturno senza copie in più, connettore in errore 500
+
+### Fixed
+- **Il giro notturno del connettore creava una seconda copia.** Su un sito col connettore WordPress
+  installato come mu-plugin, o in una cartella diversa da `td-panopticon` (es. `sentinel-td`), il giro
+  installava lo zip in `plugins/td-panopticon`: una seconda copia che mostrava in amministrazione
+  "un'altra copia del connettore è già attiva" (visibile a chi gestisce il sito), mentre il pannello
+  continuava a vedere la versione vecchia e riprovava ogni notte. Ora:
+  - si aggiornano **solo le copie del connettore già presenti nei plugin**, ognuna con uno zip che ha
+    la **sua cartella**, e **senza attivarle** (la copia attiva resta attiva, quelle spente restano
+    spente): mai una copia nuova;
+  - il connettore **mu-plugin non si tocca**; una copia vecchia rimasta nei plugin accanto al mu
+    diventa la versione nuova, che quando trova un'altra copia già caricata esce **in silenzio**;
+  - **una sola installazione per versione** consegnata per sito (`sites.connector_hold`): se dopo il
+    sito dichiara ancora una versione vecchia (gira un'altra copia), il giro non riprova ogni notte.
+    Un'installazione fallita invece si ritenta la notte dopo, come prima.
+  - si toccano solo siti **controllati con successo nelle ultime 26 ore** (elenco dei plugin
+    affidabile: niente copie cancellate nel frattempo ricreate), e mai con uno zip senza cartella;
+  - *Impostazioni → Connettori* mostra quanti siti sono **esclusi dal giro**, con il motivo nel
+    suggerimento (mu-plugin, già installato, fuori dai plugin, da ricontrollare, non ancora controllato).
+- **Connettore che risponde 500 con il sito che funziona: "server lento" per sempre, nessun
+  avviso.** Un 500 non è lentezza: se dura tutta la finestra di conferma e la home risponde, è
+  *Connettore non risponde* (con il messaggio di WordPress o del plugin Joomla, es. "Uncaught Error:
+  …"). Con la home giù resta "non raggiungibile"; 502/503/504 e i timeout restano come prima
+  (server lento se la home risponde). Un episodio del connettore già confermato non rifà né finestra
+  né controprova.
+- Registro: la riga "Connettore installato" riporta la versione installata (prima diceva sempre
+  "versione sconosciuta").
+
+### Connettore WordPress 2.36.0
+- Nessun avviso in amministrazione quando trova un'altra copia già caricata: esce in silenzio.
+- Lo stato dichiara dove gira la copia in uso (`mode`: `mu` / `plugin` / `other`, e `folder`).
+- L'installazione rifiuta un pacchetto che è il connettore stesso se creerebbe una copia **nuova**
+  (cartella che non c'è, o zip senza cartella): può solo sostituire copie esistenti.
+
+### Changed
+- Campi `sites.connector_mode` (dove gira il connettore WP: dichiarato dal 2.36.0, ricavato
+  dall'elenco dei plugin per i connettori prima) e `sites.connector_hold`, migrazione automatica.
+- Installazione in blocco: pacchetti propri per sito (una o più varianti, installate una dopo
+  l'altra). Gli zip dei lavori più vecchi di due giorni si cancellano col giro notturno.
+
+### Note
+- I siti col connettore mu-plugin restano alla loro versione: per aggiornarli si riscarica il file
+  dal pannello (*Connettore mu-plugin* nella pagina del sito) e lo si sostituisce in `mu-plugins/`.
+
+
+## 2.34.0 — Avviso "Connettore non risponde"
+
+### Fixed
+- **Connettore tolto o disattivato: nessun avviso.** Caso reale: plugin del sito spenti, connettore
+  cancellato, sito rosso nel pannello per due ore e nessun messaggio. Il ciclo orario degli
+  aggiornamenti prendeva l'errore (HTTP 404 `rest_no_route`), lo scriveva e usciva; l'avviso lo dà
+  solo il controllo normale, che sui siti con l'aggiornamento automatico non partiva mai, perché il
+  ciclo aggiorna `last_checked` ogni ora e il sito non risultava mai "da controllare". In più gli
+  errori 4xx non entravano proprio nella finestra di conferma.
+  Ora ogni errore visto fuori dal controllo normale (ciclo degli aggiornamenti, ricontrollo dopo gli
+  aggiornamenti, **Check ora**) entra nella stessa conferma: nel pannello il sito resta com'era,
+  ricontrollo ogni minuto, avviso quando passano i minuti impostati. Con 0 minuti l'avviso parte
+  subito dal ciclo, senza ricontrolli.
+- **Avviso di ritorno perso.** Se il ritorno lo vedeva il ciclo degli aggiornamenti o il Check ora,
+  il flag dell'avviso restava acceso e l'episodio successivo non veniva più segnalato. Ora il ritorno
+  lo gestiscono anche il ciclo e il giro dello scheduler (senza chiedere niente al sito).
+- Rete di sicurezza nel giro dello scheduler: un sito in errore mai confermato passa dalla conferma
+  anche se non è "da controllare" (una volta, un controllo).
+
+### Added
+- **Nuovi eventi di notifica** (Notifiche, modificabili come gli altri, Telegram acceso di base):
+  - *Connettore non risponde* — il sito risponde ma il connettore no: rimosso, disattivato, token
+    rifiutato o bloccato da un firewall. Con il motivo (`reason`), i controlli e i minuti.
+  - *Connettore di nuovo raggiungibile*.
+- Classificazione dell'errore del connettore, testo leggibile nel pannello (prefisso `Connettore:`):
+  - JSON del CMS (WordPress `rest_no_route` / `rest_forbidden`, Joomla com_ajax vuota o 401 del
+    plugin) = connettore, subito;
+  - pagina HTML con 4xx, o 200 senza JSON = può essere anche un hosting sospeso o un sito
+    cancellato: dentro la finestra si aspetta, alla fine **una** GET alla home decide (home < 400 =
+    connettore, altrimenti sito non raggiungibile con episodio offline).
+- Registro: "Connettore non risponde: …" alla conferma e "Il connettore risponde di nuovo" al ritorno.
+  Per il connettore nessun episodio offline nel registro della disponibilità (il sito è su); se il
+  sito era giù e risponde senza connettore, l'episodio offline si chiude.
+- Campo `sites.offline_kind` (`site` / `connector`, migrazione automatica): tipo dell'episodio
+  confermato. Decide l'avviso e l'avviso di ritorno giusti; se l'episodio cambia tipo (connettore →
+  sito giù davvero) parte l'avviso del nuovo tipo, dopo la sua finestra.
+
+### Changed
+- Gli avvisi si prenotano con un UPDATE condizionato: con due lavori sullo stesso sito parte un solo
+  messaggio. Se nessun canale lo consegna si ritenta al passaggio dopo con il risultato già letto.
+- Siti silenziati o con l'avviso non consegnato: nessuna finestra e nessun ricontrollo in più ogni
+  ora dopo la prima conferma.
+
+### Note
+- Dopo il deploy: i siti già in errore e mai avvisati vengono confermati entro una decina di minuti
+  e ricevono l'avviso; un sito già tornato a posto con il vecchio flag acceso riceve un "di nuovo
+  raggiungibile" in ritardo.
+
+## 2.33.0 — Nuovo sito via mu-plugin (token coniato dal pannello)
+
+### Added
+- Nel dialog **Nuovo sito** (solo WordPress) la spunta **"Connettore mu-plugin (genera il token
+  e scaricalo)"**: al salvataggio Sentinel **conia il token**, crea il sito con quello, e scarica
+  subito l'unico `.php` headless con lo stesso token già dentro, da mettere in
+  `wp-content/mu-plugins/`. Niente token da copiare dal sito: la sorgente è una sola, quindi i
+  due combaciano e il connettore si collega da solo appena lo droppi. Il campo "Token del
+  connettore" resta per il flusso classico (incolli un token esistente).
+- API: `SiteIn.gen_token` (bool). Con `gen_token` e token vuoto, `create_site` genera un token
+  (`secrets.token_hex(24)`). Comportamento invariato quando passi un token esplicito.
+
+### Note
+- Se il connettore headless ha anche hub/chiave (li inietta Sentinel), l'auto-registrazione fa
+  match per URL e, trovando il sito già creato con lo stesso token, è un no-op: nessun doppione,
+  nessun token riscritto.
+
+## 2.32.0 — Connettore mu-plugin headless
+
+### Added
+- **Connettore WordPress come mu-plugin headless, generato da Sentinel per singolo sito.**
+  Nel dettaglio del sito (solo WP) il pulsante **"Connettore mu-plugin"** scarica un unico
+  `.php` da mettere in `wp-content/mu-plugins/`, con il **token di quel sito già cablato**
+  (costante `TDPANOP_TOKEN`), hub e chiave compilati, e **senza la voce di menù**
+  Impostazioni → Sentinel TD. Essendo un must-use plugin non ha il pulsante *Disattiva*;
+  resta **visibile nella tab Must-Use** con la sua intestazione (nessun occultamento dalle
+  liste). Endpoint `GET /api/sites/{id}/connector-mu` (richiede il JWT pieno: il file contiene
+  chiave e token). Se il connettore caricato è precedente alla 2.35.0, il download viene
+  rifiutato con un messaggio chiaro invece di consegnare un file che non autentica.
+
+### Connettore WordPress 2.35.0
+- Nuova costante `TDPANOP_TOKEN`: se valorizzata ha la precedenza sull'option del token
+  (serve alla build headless). Vuota nel sorgente e nelle build normali: lì il token resta
+  quello salvato nell'option, come prima. Nessun'altra differenza di comportamento.
+- Fix: la scrittura delle costanti (hub/chiave/token) usa una repl a funzione, così un valore
+  con backslash non viene re-interpretato da `re.sub` (i token veri sono alfanumerici, ma ora
+  è corretto in ogni caso).
+
 ## 2.31.3 — Emoji su Firefox
 
 ### Fixed

@@ -77,7 +77,8 @@ test('saving preferences retains update brakes and omits removed resource settin
  a.api=async(url,opts)=>{sent=JSON.parse(opts.body);return {ok:true,json:async()=>sent}};
  await a.savePrefs();assert.deepEqual(sent.server_limited,['203.0.113.1']);
  assert.equal(sent.status_check_attempts,2);assert.equal(sent.status_check_retry_seconds,7);
- for(const key of ['server_metrics_enabled','server_metrics_minutes','server_split'])assert(!(key in sent));
+ for(const key of ['server_metrics_enabled','server_metrics_minutes'])assert(!(key in sent));
+ assert('server_split' in sent); // 2.30.0: Gestione server divide le macchine dietro uno stesso IP
 });
 test('#/servers opens the lightweight Servers page (no server status, no sampling)',()=>{
  const {a,context}=app();context.location={hash:'#/servers'};a._readHash();assert.equal(a.route.page,'servers');

@@ -14,6 +14,8 @@ Your server, your data, your branding.
 - Availability checks with **confirmation before crying wolf**: an outage is announced
   only when the site stays unreachable for the minutes you choose (5 by default), so a slow
   server does not wake you up
+- **"Connector not responding" alert** when the site is online but its connector is not (removed,
+  deactivated, token rejected): same confirmation window, plus a notice when it answers again
 - Core, plugin, theme and translation versions for every site, through the included connectors
 - Visual **preview of each site**, refreshed on a schedule, with thumbnails in the list
   (independent timer checked every minute; frequency from Settings, even for unchanged pages).
@@ -129,7 +131,9 @@ Your server, your data, your branding.
 - Connector packages built by the panel itself, already carrying your address and key
 - **Connector kept up to date by itself**: every night the panel installs the connector it ships on
   the sites that run an older one (one site at a time on braked servers), and *Settings →
-  Connectors* shows which sites are behind, with *Update on the sites* for right now
+  Connectors* shows which sites are behind, with *Update on the sites* for right now.
+  Only connector copies already on the site are updated, in their own folder and without
+  activating them: never a new copy, never a connector installed as a mu-plugin, no notice on the site
 
 ---
 
