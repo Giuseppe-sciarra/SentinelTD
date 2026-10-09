@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.36.1
+ * Version: 2.38.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -188,6 +188,79 @@ function tdpanop_translations()
             'Collega questo sito a Sentinel TD' => 'Diese Website mit Sentinel TD verbinden',
         ],
     ];
+}
+
+/* ---------------------------------------------------------------------------
+ * Aggiornamenti automatici di WordPress spenti (di base): gli aggiornamenti li fa Sentinel (copia
+ * prima, controllo della home, storico, notifiche). Stesso effetto di
+ * define('AUTOMATIC_UPDATER_DISABLED', true) in wp-config.php e del mu-plugin
+ * "TD Site Health Tweaks", che toglie da Salute del sito il test "aggiornamenti in
+ * background" (con gli aggiornamenti spenti apposta segnerebbe un problema critico falso).
+ * Dove queste due cose ci sono gia', il connettore non fa niente.
+ * Si accende e si spegne dal pannello (Impostazioni -> Aggiornamenti): la scelta arriva con
+ * ogni controllo del sito e il connettore se la segna (option tdpanop_wp_autoupdates).
+ * Finche' il pannello non dice niente (connettore appena installato) gli aggiornamenti
+ * automatici di WordPress restano spenti.
+ * ------------------------------------------------------------------------- */
+define('TDPANOP_AUTOUPD_OPT', 'tdpanop_wp_autoupdates');   // 'off' = spenti (di base), 'on' = lasciati a WordPress
+
+function tdpanop_auto_updates_already_off(): bool
+{
+    return defined('AUTOMATIC_UPDATER_DISABLED') && AUTOMATIC_UPDATER_DISABLED;
+}
+
+function tdpanop_block_auto_updates(): bool
+{
+    return (string) get_option(TDPANOP_AUTOUPD_OPT, 'off') !== 'on';
+}
+
+/** Scelta del pannello arrivata con il controllo: "block" o "allow". Si scrive solo se cambia. */
+function tdpanop_apply_auto_updates_choice($choice): void
+{
+    $choice = (string) $choice;
+    if ($choice !== 'block' && $choice !== 'allow') {
+        return;     // pannello vecchio o parametro assente: resta com'era
+    }
+    $want = $choice === 'allow' ? 'on' : 'off';
+    if ((string) get_option(TDPANOP_AUTOUPD_OPT, 'off') !== $want) {
+        update_option(TDPANOP_AUTOUPD_OPT, $want, true);
+    }
+}
+
+/** Stato per il pannello: "wp-config" (costante gia' a true), "blocked" o "allowed". */
+function tdpanop_auto_updates_state(): string
+{
+    if (tdpanop_auto_updates_already_off()) {
+        return 'wp-config';
+    }
+    return tdpanop_block_auto_updates() ? 'blocked' : 'allowed';
+}
+
+function tdpanop_health_tweaks_present(): bool
+{
+    return defined('WPMU_PLUGIN_DIR') && is_file(rtrim(WPMU_PLUGIN_DIR, '/\\') . '/td-site-health-tweaks.php');
+}
+
+function tdpanop_hide_background_updates_test($tests)
+{
+    // il test vive sotto "async", non "direct": si toglie da entrambi, come il mu-plugin
+    if (is_array($tests)) {
+        unset($tests['async']['background_updates'], $tests['direct']['background_updates']);
+    }
+    return $tests;
+}
+
+// I filtri leggono la scelta quando WordPress li chiama (molto dopo il caricamento dei plugin):
+// una scelta arrivata con il controllo vale subito, senza aspettare la richiesta dopo.
+if (!tdpanop_auto_updates_already_off()) {
+    add_filter('automatic_updater_disabled', function ($disabled) {
+        return tdpanop_block_auto_updates() ? true : $disabled;
+    }, 999);
+}
+if (!tdpanop_health_tweaks_present()) {
+    add_filter('site_status_tests', function ($tests) {
+        return tdpanop_block_auto_updates() ? tdpanop_hide_background_updates_test($tests) : $tests;
+    });
 }
 
 // descrizione nella lista plugin, nella lingua dell'utente
@@ -805,6 +878,8 @@ function tdpanop_status($req = null)
     $forceRefresh = false;
     if ($req instanceof WP_REST_Request) {
         $forceRefresh = (string) $req->get_param('refresh') === '1';
+        // aggiornamenti automatici di WordPress: la scelta del pannello (Impostazioni)
+        tdpanop_apply_auto_updates_choice($req->get_param('wp_auto_updates'));
     }
     if ($forceRefresh) {
         // Con un object cache persistente il transient di update e' instabile (sfrattato
@@ -996,6 +1071,9 @@ function tdpanop_status($req = null)
         // non verificati, il pannello tiene quelli dell'ultimo controllo riuscito
         'updates_known' => ['plugin' => $plugins_known, 'theme' => $themes_known, 'core' => $core_known],
         'refreshed' => $forceRefresh,
+        // aggiornamenti automatici di WordPress: "wp-config" (spenti in wp-config.php),
+        // "blocked" (spenti dal connettore) o "allowed" (lasciati a WordPress)
+        'wp_auto_updates' => tdpanop_auto_updates_state(),
     ], 200);
 }
 
