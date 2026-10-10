@@ -4,6 +4,8 @@
 controlla i siti, applica gli aggiornamenti, tiene d'occhio le scadenze e ti racconta cos'è
 successo. Sul tuo server, coi tuoi dati, col tuo marchio.
 
+🌐 Sito: [tastieredigitali.tech/casi-studio/sentineltd](https://tastieredigitali.tech/casi-studio/sentineltd/)
+
 🇬🇧 [Read in English](README.md)
 
 ![Dashboard](docs/screenshots/dashboard.png)
