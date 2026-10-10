@@ -4,6 +4,8 @@
 that checks your sites, applies updates, watches renewals and tells you what happened.
 Your server, your data, your branding.
 
+🌐 Website (in Italian): [tastieredigitali.tech/casi-studio/sentineltd](https://tastieredigitali.tech/casi-studio/sentineltd/)
+
 🇮🇹 [Leggi in italiano](README.it.md)
 
 ![Dashboard](docs/screenshots/dashboard.png)
