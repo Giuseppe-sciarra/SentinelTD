@@ -98,6 +98,7 @@ class RolloutTests(unittest.IsolatedAsyncioTestCase):
         from app import db
         self.tmp = tempfile.TemporaryDirectory()
         self.extra = [patch.object(worker, "datetime", MovingClock), patch.object(connectors, "datetime", MovingClock),
+                      patch.object(rconn, "datetime", MovingClock),   # "controllato nelle ultime 26 ore": orologio del test, non quello vero
                       patch.object(db, "SessionLocal", self.sessions), patch.object(rconn, "shipped_version", lambda kind: TARGET),
                       patch.object(rpackages, "PACKAGES_DIR", self.tmp.name)]
         for p in self.extra:

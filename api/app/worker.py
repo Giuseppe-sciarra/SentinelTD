@@ -1229,6 +1229,29 @@ async def record_rollback(s, site: Site, ext_type: str, name: str, slug: str, re
         site.locked_items = _json.dumps(sorted(items))
 
 
+def _translations_done_with_updates(site: Site, etype: str, ext, res: dict, done: dict) -> dict:
+    """Traduzioni WordPress gia' installate insieme agli aggiornamenti di questo giro.
+
+    Quando WordPress aggiorna un plugin, un tema o il core installa subito anche le traduzioni
+    in sospeso (Language_Pack_Upgrader::async_upgrade). La voce "Traduzioni (N)", che arriva
+    sempre per ultima, trova allora la coda vuota e il connettore risponde "nessuna traduzione
+    da aggiornare", anche se le N traduzioni sono state appena installate. Se in questo giro
+    qualcosa e' gia' stato aggiornato, il risultato si scrive come quando le traduzioni le
+    installa la voce stessa: "traduzioni aggiornate (N/N)". Senza aggiornamenti prima resta
+    com'e': in quel caso la voce era davvero gia' a posto."""
+    if site.cms != "wp" or etype != "language" or not done or not res.get("ok"):
+        return res
+    if not str(res.get("new") or "").startswith("nessuna traduzione"):
+        return res
+    n = str(getattr(ext, "new_version", "") or "").strip() if ext is not None else ""
+    if not n.isdigit():
+        m = re.search(r"\((\d+)\)", getattr(ext, "name", "") or "") if ext is not None else None
+        n = m.group(1) if m else ""
+    if not n or n == "0":
+        return res
+    return {**res, "new": f"traduzioni aggiornate ({n}/{n})"}
+
+
 async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
     """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}."""
     headers = {
@@ -1724,6 +1747,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # vendorupdate diceva "gia' all'ultima" senza installare, la riga restava in
             # #__updates, e il pending (con notifica) rinasceva a ogni ciclo.
             res = await _update_one(site, etype, slug, expected=(ext.new_version if ext is not None else ""))
+            res = _translations_done_with_updates(site, etype, ext, res, done)
 
             # PRODOTTO A LICENZA che non si aggiorna da remoto (es. Elementor Pro senza
             # pacchetto scaricabile): non e' un guasto, va fatto dal backend del sito.

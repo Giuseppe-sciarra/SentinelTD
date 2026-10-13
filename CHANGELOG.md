@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.38.2 — Traduzioni contate giuste quando arrivano con un plugin
+
+### Fixed
+- **"Traduzioni (N) → nessuna traduzione da aggiornare" anche se erano appena state installate.**
+  Quando WordPress aggiorna un plugin, un tema o il core installa subito anche le traduzioni in
+  sospeso; la voce "Traduzioni (N)", che arriva sempre per ultima, trovava la coda già vuota e il
+  report la segnava come "nessuna traduzione da aggiornare". Ora, se nello stesso giro qualcosa è
+  già stato aggiornato, la voce risulta **"traduzioni aggiornate (N/N)"**, come quando le installa
+  da sola: nel report, nello storico e nelle statistiche. Senza altri aggiornamenti prima resta
+  com'è, perché in quel caso le traduzioni erano davvero già a posto.
+
+### Tests
+- `tests/test_update_cycle_history.py`: traduzioni insieme a un plugin aggiornato (contate),
+  traduzioni da sole già a posto (invariate), plugin fallito (invariate).
+- `tests/test_connector_rollout.py`: tre test del giro notturno dipendevano dall'orologio vero
+  ("controllato nelle ultime 26 ore") e fallivano dal giorno dopo la loro data; ora usano l'orologio
+  del test.
+
 ## 2.38.1 — Quali siti hanno la verifica da confermare
 
 ### Changed

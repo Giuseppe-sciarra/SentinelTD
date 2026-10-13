@@ -26,6 +26,20 @@ def payload(updated: bool):
             ]}
 
 
+def wp_payload(with_plugin: bool):
+    """Come lo manda il connettore WordPress: le traduzioni sono una voce sola, "language", per ultima."""
+    def build(updated: bool):
+        exts = []
+        if with_plugin:
+            exts.append({"type": "plugin", "name": "Elementor", "slug": "elementor",
+                         "current": "4.3.5" if updated else "4.3.4", "new": "" if updated else "4.3.5",
+                         "update": not updated})
+        exts.append({"type": "language", "name": "Traduzioni (2)", "slug": "wp-translations",
+                     "current": "", "new": "" if updated else "2", "update": not updated})
+        return {"cms": "wp", "core": {"current": "6.8.3", "latest": "6.8.3", "update": False}, "extensions": exts}
+    return build
+
+
 class UpdateCycleHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await fixtures.SchedulerTests.asyncSetUp(self)
@@ -33,13 +47,13 @@ class UpdateCycleHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await fixtures.SchedulerTests.asyncTearDown(self)
 
-    async def run_cycle(self, update_results):
+    async def run_cycle(self, update_results, build=payload):
         sid = await fixtures.SchedulerTests.add_site(self, status="ok", auto_update=True, cms="wp")
         calls = {"n": 0}
 
         async def fetch(site, force=False, **kw):
             calls["n"] += 1
-            return payload(updated=calls["n"] > 1)
+            return build(updated=calls["n"] > 1)
 
         notify = AsyncMock(return_value={"email": True, "telegram": True})
         with patch.object(connectors, "fetch_status", fetch), \
@@ -73,6 +87,28 @@ class UpdateCycleHistoryTests(unittest.IsolatedAsyncioTestCase):
         events = [c.args[0] for c in notify.await_args_list]
         self.assertIn("update_failed", events)
         self.assertIn("site_report", events)
+
+
+    # Traduzioni installate da WordPress insieme al plugin aggiornato nello stesso giro: la voce
+    # "Traduzioni (N)" trova la coda vuota, ma nel report vanno contate come aggiornate.
+    NO_LANG = {"ok": True, "error": "", "new": "nessuna traduzione da aggiornare", "noop": False, "message": "", "manual": False}
+
+    async def test_translations_installed_with_a_plugin_count_as_updated(self):
+        ok = {"ok": True, "error": "", "new": "4.3.5", "noop": False, "message": "", "manual": False, "backup": ""}
+        outcome, hist, log, notify = await self.run_cycle([ok, self.NO_LANG], build=wp_payload(with_plugin=True))
+        self.assertEqual([(h.ext_name, h.to_version) for h in hist],
+                         [("Elementor", "4.3.5"), ("Traduzioni (2)", "traduzioni aggiornate (2/2)")])
+        report = next(c.args[1] for c in notify.await_args_list if c.args[0] == "site_report")
+        self.assertEqual([r["to"] for r in report["results"]], ["4.3.5", "traduzioni aggiornate (2/2)"])
+
+    async def test_translations_alone_with_nothing_to_install_stay_as_they_are(self):
+        outcome, hist, log, notify = await self.run_cycle([self.NO_LANG], build=wp_payload(with_plugin=False))
+        self.assertEqual([h.to_version for h in hist], ["nessuna traduzione da aggiornare"])
+
+    async def test_failed_plugin_does_not_turn_translations_into_updated(self):
+        bad = {"ok": False, "error": "download fallito", "new": "", "noop": False, "message": "", "manual": False}
+        outcome, hist, log, notify = await self.run_cycle([bad, self.NO_LANG], build=wp_payload(with_plugin=True))
+        self.assertEqual([h.to_version for h in hist], ["", "nessuna traduzione da aggiornare"])
 
 
 if __name__ == "__main__":

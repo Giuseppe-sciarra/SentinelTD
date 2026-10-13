@@ -17,6 +17,7 @@ import os
 import re
 import time
 import zipfile
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
@@ -379,7 +380,6 @@ async def _rollout_split(kind: str, s) -> tuple[list, list]:
     Il mu-plugin non si tocca. Un sito riceve una sola installazione per versione consegnata
     (connector_hold): se dopo la versione non cambia, non si riprova ogni notte.
     Sul sito, ogni copia da aggiornare finisce in x._rollout_folders (la copia in uso per prima)."""
-    from datetime import datetime, timedelta, timezone
     from sqlalchemy import select as _select
     from ..models import Site
     from .packages import version_gt
