@@ -50,7 +50,7 @@ function sentinel() {
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
            open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
     cust: { tab: 'list', q: '', edit: null, err: '' },
-    fromSites: { list: [], sel: [], busy: false, err: '' },
+    fromSites: { list: [], sel: [], target: {}, busy: false, err: '' },
     // Gestione domini: scheda del cliente (domini, posta, DNS, rinnovi), provider, controllo DNS
     card: { id: null, data: null, loading: false, err: '', q: '', filter: '', host: '', open: {}, howto: {}, menu: false, showInactive: false, edit: null, editErr: '',
             busy: false, notes: '', notesDirty: false, dnsRunning: false, impFile: null, imp: null, impBusy: false, impErr: '', impSubs: true },
@@ -2113,18 +2113,21 @@ function sentinel() {
     },
     // domini dei siti di Sentinel: una voce per cartella
     async openFromSites() {
-      Object.assign(this.fromSites, { list: [], sel: [], err: '', busy: false });
+      Object.assign(this.fromSites, { list: [], sel: [], target: {}, err: '', busy: false });
       this.drawer = 'cfromsites';
       const r = await this.api('/api/clients/site-folders');
       if (!r.ok) { this.fromSites.err = 'Cartelle non disponibili'; return; }
       this.fromSites.list = await r.json();
       this.fromSites.sel = this.fromSites.list.filter(f => f.new).map(f => f.folder);
     },
+    // voci esistenti dove mettere i siti di una cartella: i clienti principali non collegati a una cartella
+    fromSitesTargets(f) { return this.custList.filter(c => !c.folder); },
     get fromSitesNew() { return this.fromSites.list.filter(f => this.fromSites.sel.includes(f.folder)).reduce((n, f) => n + f.new, 0); },
     async addFromSites() {
       this.fromSites.busy = true; this.fromSites.err = '';
       try {
-        const r = await this.api('/api/clients/from-folders', { method: 'POST', body: JSON.stringify({ folders: this.fromSites.sel }) });
+        const targets = Object.fromEntries(Object.entries(this.fromSites.target).filter(([k, v]) => v && this.fromSites.sel.includes(k)).map(([k, v]) => [k, parseInt(v)]));
+        const r = await this.api('/api/clients/from-folders', { method: 'POST', body: JSON.stringify({ folders: this.fromSites.sel, targets }) });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) { this.fromSites.err = d.detail || 'Non riuscito'; return; }
         this.drawer = null; await this.loadClients();

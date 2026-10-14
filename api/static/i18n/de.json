@@ -2719,5 +2719,9 @@
   "domini aggiunti": "Domains hinzugefügt",
   "Scegli almeno una cartella": "Wähle mindestens einen Ordner",
   "DNS cambiati (Gestione domini)": "Geändertes DNS (Domainverwaltung)",
-  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "Die tägliche DNS-Prüfung der Domains in der Domainverwaltung hat andere MX, NS oder Website-Adressen als vorher gefunden. Eine Nachricht pro Kunde."
+  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "Die tägliche DNS-Prüfung der Domains in der Domainverwaltung hat andere MX, NS oder Website-Adressen als vorher gefunden. Eine Nachricht pro Kunde.",
+  "Metti in": "Einfügen in",
+  "voce nuova (cartella)": "neuer Eintrag (Ordner)",
+  "{0} (sottoclienti)": "{0} (Unterkunden)",
+  "Voce di destinazione non valida": "Ungültiger Zieleintrag"
 }

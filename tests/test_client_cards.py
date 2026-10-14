@@ -394,6 +394,31 @@ class CardApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Clienti diretti", listing)
                 self.assertEqual(listing["Agenzia"]["folder"], "Clienti diretti/Agenzia")
 
+    async def test_folder_into_existing_entry_as_sub_clients(self):
+        async with self.sessions() as s:
+            s.add_all([Site(name="Gia", url="https://gia.example", cms="wp", token="t", tags="Esterni"),
+                       Site(name="Nuovo", url="https://nuovo.example", cms="wp", token="t", tags="Esterni"),
+                       Site(name="Nuovo IT", url="https://nuovo.it", cms="wp", token="t", tags="Esterni/Sotto")])
+            sub = Client(name="gia.example", emails="", parent_id=self.cid)
+            s.add(sub)
+            await s.flush()
+            s.add(ClientDomain(client_id=sub.id, domain="gia.example", active=True))
+            await s.commit()
+        with patch.object(rcards, "_site_server_labels", AsyncMock(return_value={})):
+            async with self.client() as c:
+                res = (await c.post("/api/clients/from-folders", json={"folders": ["Esterni", "Esterni/Sotto"],
+                                                                         "targets": {"Esterni": self.cid}})).json()
+                self.assertEqual((res["entries_new"], res["subs_new"], res["domains_new"], res["already"]), (0, 1, 2, 1))
+                card = (await c.get(f"/api/clients/{self.cid}/card")).json()
+                subs = {x["name"]: x for x in card["subs"]}
+                self.assertEqual(sorted(subs), ["gia.example", "nuovo.example"])          # nuovo.it nello stesso di nuovo.example
+                self.assertEqual(subs["nuovo.example"]["active"], 2)
+                listing = {x["name"]: x for x in (await c.get("/api/clients")).json()}
+                self.assertEqual(listing["Agenzia Test"]["folder"], "")                  # non collegata: non si rinomina
+                self.assertNotIn("Esterni", listing)
+                bad = await c.post("/api/clients/from-folders", json={"folders": ["Esterni"], "targets": {"Esterni": subs["gia.example"]["id"]}})
+                self.assertEqual(bad.status_code, 422)
+
     async def test_mail_host_is_guessed_from_mx_when_empty(self):
         await self.add_domains(("ms.example", True), ("stesso.example", True), ("scritto.example", True))
         async with self.sessions() as s:

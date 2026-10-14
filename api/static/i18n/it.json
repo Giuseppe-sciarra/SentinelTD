@@ -2719,5 +2719,9 @@
   "domini aggiunti": "domini aggiunti",
   "Scegli almeno una cartella": "Scegli almeno una cartella",
   "DNS cambiati (Gestione domini)": "DNS cambiati (Gestione domini)",
-  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente."
+  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.",
+  "Metti in": "Metti in",
+  "voce nuova (cartella)": "voce nuova (cartella)",
+  "{0} (sottoclienti)": "{0} (sottoclienti)",
+  "Voce di destinazione non valida": "Voce di destinazione non valida"
 }

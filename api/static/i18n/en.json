@@ -2719,5 +2719,9 @@
   "domini aggiunti": "domains added",
   "Scegli almeno una cartella": "Choose at least one folder",
   "DNS cambiati (Gestione domini)": "Changed DNS (domain management)",
-  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "The daily DNS check of the domains in domain management found MX, NS or site addresses different from before. One message per client."
+  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "The daily DNS check of the domains in domain management found MX, NS or site addresses different from before. One message per client.",
+  "Metti in": "Put into",
+  "voce nuova (cartella)": "new entry (folder)",
+  "{0} (sottoclienti)": "{0} (sub-clients)",
+  "Voce di destinazione non valida": "Invalid target entry"
 }

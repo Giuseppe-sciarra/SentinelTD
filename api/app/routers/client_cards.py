@@ -491,6 +491,33 @@ async def _folder_entry(s: AsyncSession, path: str, cache: dict, stats: dict) ->
     return cl.id
 
 
+async def _sites_into(s: AsyncSession, dest: Client, sites, labels: dict, providers, have: set, stats: dict) -> None:
+    """Domini dei siti dentro una voce esistente: un sottocliente per sito (i domini con lo stesso
+    nome vanno nello stesso sottocliente, anche uno che c'e' gia')."""
+    children = await _children(s, dest.id)
+    by_name = {cc.norm(c.name): c.id for c in children}
+    by_base: dict[str, int] = {}
+    for d in (await s.execute(select(ClientDomain).where(ClientDomain.client_id.in_([c.id for c in children] or [0])))).scalars().all():
+        by_base.setdefault(cc.base_name(d.domain), d.client_id)
+    for site in sites:
+        dom = cc.site_host(site.url)
+        if dom in have:
+            stats["already"] += 1
+            continue
+        have.add(dom)
+        sub_id = by_base.get(cc.base_name(dom)) or by_name.get(cc.norm(dom))
+        if not sub_id:
+            sub = Client(name=dom[:190], emails="", enabled=False, notes="", parent_id=dest.id)
+            s.add(sub)
+            await s.flush()
+            sub_id = by_name[cc.norm(dom)] = by_base[cc.base_name(dom)] = sub.id
+            stats["subs_new"] += 1
+        d = ClientDomain(client_id=sub_id, domain=dom, active=True, site_host=(labels.get(site.id) or "")[:190])
+        d.provider_id = cc.match_provider(d.mail_host, providers)
+        s.add(d)
+        stats["domains_new"] += 1
+
+
 @router.post("/from-folders")
 async def domains_from_folders(payload: dict = Body(...), s: AsyncSession = Depends(get_session)):
     """Aggiunge a Gestione domini i domini dei siti di Sentinel, una voce per cartella.
@@ -498,6 +525,17 @@ async def domains_from_folders(payload: dict = Body(...), s: AsyncSession = Depe
     wanted = {str(x).strip().strip("/").lower() for x in (payload.get("folders") or []) if str(x).strip()}
     if not wanted:
         raise HTTPException(422, "Scegli almeno una cartella")
+    # "Metti in": una cartella (con le sue sottocartelle) puo' finire in una voce gia' esistente,
+    # per esempio un cliente creato a mano: un sottocliente per sito, e la voce non si collega
+    # alla cartella (non cambia nome se la cartella si rinomina)
+    targets: dict[str, Client] = {}
+    for path, cid in (payload.get("targets") or {}).items():
+        if cid in (None, "", 0, "0"):
+            continue
+        cl = await s.get(Client, int(cid))
+        if not cl or cl.parent_id:
+            raise HTTPException(422, "Voce di destinazione non valida")
+        targets[str(path).strip().strip("/").lower()] = cl
     folders = await _sites_by_folder(s)
     chosen = [p for p in folders if p.lower() in wanted]
     sites = [x for p in chosen for x in folders[p]]
@@ -506,7 +544,12 @@ async def domains_from_folders(payload: dict = Body(...), s: AsyncSession = Depe
     have = set((await s.execute(select(ClientDomain.domain))).scalars().all())
     stats = {"entries_new": 0, "domains_new": 0, "already": 0}
     cache: dict[str, int] = {}
+    stats["subs_new"] = 0
     for path in sorted(chosen, key=str.lower):
+        dest = targets.get(path.lower()) or targets.get(path.split("/")[0].lower())
+        if dest is not None:
+            await _sites_into(s, dest, folders[path], labels, providers, have, stats)
+            continue
         target = await _folder_entry(s, path, cache, stats)
         for site in folders[path]:
             dom = cc.site_host(site.url)

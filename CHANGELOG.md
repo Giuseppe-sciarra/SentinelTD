@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.41.0 — Aggiungi dai siti: "Metti in" una voce esistente
+
+### Added
+- In **Aggiungi dai siti**, per ogni cartella c'è il menu **"Metti in"**: "voce nuova (cartella)",
+  come prima, oppure una voce già esistente (per esempio un cliente creato a mano come un'agenzia).
+  Scegliendo una voce esistente, i siti della cartella (e delle sue sottocartelle) entrano come
+  **sottoclienti**, uno per sito; i domini con lo stesso nome vanno nello stesso sottocliente,
+  anche in uno che c'è già. I domini già presenti non si toccano. La voce **non** si collega alla
+  cartella, quindi non cambia nome se la cartella si rinomina.
+
+### Tests
+- `tests/test_client_cards.py`: cartella dentro una voce esistente (sottoclienti nuovi e già
+  presenti, sottocartelle, niente collegamento alla cartella, destinazione non valida).
+
 ## 2.40.0 — Gestione domini, domini dai siti, aggiornamenti senza "type non valido"
 
 ### Changed

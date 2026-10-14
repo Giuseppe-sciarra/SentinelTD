@@ -2719,5 +2719,9 @@
   "domini aggiunti": "domaines ajoutés",
   "Scegli almeno una cartella": "Choisissez au moins un dossier",
   "DNS cambiati (Gestione domini)": "DNS modifié (gestion des domaines)",
-  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "La vérification DNS quotidienne des domaines de la gestion des domaines a trouvé des MX, NS ou adresses du site différents. Un message par client."
+  "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.": "La vérification DNS quotidienne des domaines de la gestion des domaines a trouvé des MX, NS ou adresses du site différents. Un message par client.",
+  "Metti in": "Mettre dans",
+  "voce nuova (cartella)": "nouvelle entrée (dossier)",
+  "{0} (sottoclienti)": "{0} (sous-clients)",
+  "Voce di destinazione non valida": "Entrée de destination non valide"
 }

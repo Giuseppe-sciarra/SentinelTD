@@ -2142,7 +2142,14 @@
           <label class="cli-pick-row" :class="fromSites.sel.includes(f.folder) ? 'on' : ''" style="grid-template-columns:auto minmax(0,1fr)">
             <input type="checkbox" :checked="fromSites.sel.includes(f.folder)" @change="fromSites.sel = fromSites.sel.includes(f.folder) ? fromSites.sel.filter(x => x !== f.folder) : [...fromSites.sel, f.folder]">
             <span style="min-width:0"><b x-text="f.name" translate="no"></b>
-              <span class="small mut" style="display:block"><span x-text="f.sites + ' ' + pl(f.sites, 'sito', 'siti')"></span> · <span x-show="f.new" x-text="f.new + ' ' + pl(f.new, 'dominio da aggiungere', 'domini da aggiungere')"></span><span x-show="!f.new">già tutti dentro</span></span></span>
+              <span class="small mut" style="display:block"><span x-text="f.sites + ' ' + pl(f.sites, 'sito', 'siti')"></span> · <span x-show="f.new" x-text="f.new + ' ' + pl(f.new, 'dominio da aggiungere', 'domini da aggiungere')"></span><span x-show="!f.new">già tutti dentro</span></span>
+              <span class="row" style="gap:6px;margin-top:6px" x-show="fromSitesTargets(f).length" @click.prevent.stop>
+                <span class="small mut">Metti in</span>
+                <select class="input" style="width:auto;padding:4px 8px;font-size:12.5px" @change="fromSites.target = { ...fromSites.target, [f.folder]: $event.target.value }">
+                  <option value="" :selected="!fromSites.target[f.folder]">voce nuova (cartella)</option>
+                  <template x-for="c in fromSitesTargets(f)" :key="'tg'+f.folder+c.id"><option :value="String(c.id)" :selected="String(c.id)===fromSites.target[f.folder]" x-text="c.name + ' (sottoclienti)'"></option></template>
+                </select>
+              </span></span>
           </label>
         </template>
         <div class="empty" x-show="!fromSites.list.length">Nessun sito in Sentinel.</div>
