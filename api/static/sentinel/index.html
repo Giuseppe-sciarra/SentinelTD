@@ -1490,7 +1490,7 @@
                 <template x-for="c in custShown" :key="'cu'+c.id">
                   <a class="cust-row" :href="'#/domains/' + c.id">
                     <div style="min-width:0">
-                      <div class="cli-name"><span x-text="c.name" translate="no"></span><span class="badge" x-show="c.folder" title="Voce collegata alla cartella di Sentinel: se rinomini la cartella si rinomina anche questa">📁 cartella</span><span class="badge acc" x-show="c.subs" x-text="c.subs + ' ' + pl(c.subs, 'sottocliente', 'sottoclienti')"></span><span class="badge acc" x-show="c.domains" x-text="c.domains + ' ' + pl(c.domains, 'dominio', 'domini')"></span><span class="badge warn" x-show="c.dns_changes"><span>DNS cambiati:</span> <span x-text="c.dns_changes"></span></span></div>
+                      <div class="cli-name"><span x-text="c.name" translate="no"></span><span class="badge acc" x-show="c.subs" x-text="c.subs + ' ' + pl(c.subs, 'sottocliente', 'sottoclienti')"></span><span class="badge acc" x-show="c.domains" x-text="c.domains + ' ' + pl(c.domains, 'dominio', 'domini')"></span><span class="badge warn" x-show="c.dns_changes"><span>DNS cambiati:</span> <span x-text="c.dns_changes"></span></span></div>
                       <div class="small mut" x-show="c.notes" x-text="(c.notes || '').split('\n')[0]" translate="no"></div>
                     </div>
                     <span class="btn sm">Scheda</span>

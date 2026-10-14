@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.42.1 — Gestione domini: niente etichetta "cartella" in elenco
+
+### Changed
+- Nell'elenco di Gestione domini le voci nate da una cartella di Sentinel non mostrano più
+  l'etichetta "📁 cartella". Il collegamento resta (rinominando la cartella si rinomina la voce)
+  e si vede solo nella finestra "Modifica cliente" della voce.
+
 ## 2.42.0 — Gestione server: accessi del pannello e FTP
 
 ### Added

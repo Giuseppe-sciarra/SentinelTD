@@ -2701,8 +2701,6 @@
   "Gestione domini": "Domain management",
   "I domini dei clienti: dove sta la posta e come ci si arriva, DNS, rinnovi e istruzioni dei provider.": "Your clients' domains: where the mail is and how to reach it, DNS, renewals and the providers' how-tos.",
   "Aggiungi dai siti": "Add from sites",
-  "📁 cartella": "📁 folder",
-  "Voce collegata alla cartella di Sentinel: se rinomini la cartella si rinomina anche questa": "Linked to the Sentinel folder: renaming the folder renames this too",
   "Ancora vuota. Aggiungi i domini dei tuoi siti con": "Still empty. Add your sites' domains with",
   "(una voce per cartella), oppure crea un cliente con": "(one entry per folder), or create a client with",
   "e importa i suoi domini dall'Excel.": "and import its domains from Excel.",
