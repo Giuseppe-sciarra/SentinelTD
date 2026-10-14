@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.42.0 — Gestione server: accessi del pannello e FTP
+
+### Added
+- **Accessi di ogni server** in Gestione server (matita ✏️ della riga), accanto al link al pannello
+  e all'appunto:
+  - **pannello dell'hosting**: utente e password;
+  - **FTP**: tipo (FTP, FTPS, SFTP), indirizzo, porta, utente e password.
+- Nella riga aperta compaiono indirizzi e utenti, ognuno col pulsante per copiarlo. Le password
+  restano nascoste (••••••••) finché non premi **Mostra**, oppure le copi direttamente. Un 🔐
+  accanto alla matita indica i server con accessi salvati.
+- Le **password sono cifrate** nel database, con una chiave ricavata da `JWT_SECRET`, e non escono
+  mai nell'elenco: si leggono una alla volta, e ogni lettura finisce nel **Registro**. Lasciando
+  vuoto il campo resta la password di prima; "togli la password salvata" la cancella. Se cambi
+  `JWT_SECRET`, le password salvate prima non si leggono più e vanno riscritte.
+
+### Tests
+- `tests/test_server_credentials.py`: password cifrate e assenti dall'elenco, lettura su
+  richiesta registrata, password tenuta o tolta, porta non valida, segreto cambiato, voce vuota
+  eliminata.
+
 ## 2.41.0 — Aggiungi dai siti: "Metti in" una voce esistente
 
 ### Added

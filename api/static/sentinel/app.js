@@ -43,7 +43,8 @@ function sentinel() {
     drep: { from: '', to: '', range: 'q3', mode: 'all', folder: '', ids: [], filter: '', history: true, failed: true, format: 'pdf', busy: false, oldest: '' },
     rep: { cfg: null, template: '', defaultTemplate: '', periods: [], period: '', scopes: [], scope: '__all__', trend: null, trendMonths: 12, html: '', busy: false, msg: '', err: '', advanced: false, dirty: false, savedAt: '' },
     plug: { data: null, q: '', filter: 'watch', open: {}, busy: false, groupBy: 'plugin' },
-    srvpg: { list: [], q: '', open: {}, editing: '', busy: false },
+    srvpg: { list: [], q: '', open: {}, editing: '', busy: false, cred: {} },
+    srvCreds: {}, srvReveal: {},
     evl: { items: [], total: 0, counts: {}, q: '', category: '', level: '', range: '7', since: '', until: '', open: {}, busy: false },   // Registro   // pagina Server: dove sta ogni sito
     tsort: { srvpg: { k: 'name', d: 1 } }, histQ: '', histType: '', problems: [],   // Gestione server: di base per nome server
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
@@ -1988,13 +1989,46 @@ function sentinel() {
       return out;
     },
     // ---------- pagina Server ----------
-    async saveServersPage() { await this.savePrefs(); this.srvpg.editing = ''; await this.loadServersPage(); },
+    async saveServersPage() {
+      const key = this.srvpg.editing;
+      await this.savePrefs();
+      if (this.prefs.err) return;
+      if (key) {
+        const r = await this.api('/api/server-credentials/save', { method: 'POST', body: JSON.stringify({ key, ...this.srvpg.cred }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); this.say(d.detail || 'Accessi non salvati', 5000); return; }
+        this.srvReveal = Object.fromEntries(Object.entries(this.srvReveal).filter(([k]) => !k.startsWith(key + '|')));
+      }
+      this.srvpg.editing = ''; await this.loadServersPage();
+    },
     async loadServersPage() {
       this.srvpg.busy = true;
       try {
-        const r = await this.api('/api/preferences/servers?by=machine');
+        const [r, c] = await Promise.all([this.api('/api/preferences/servers?by=machine'), this.api('/api/server-credentials')]);
         if (r.ok) this.srvpg.list = await r.json();
+        if (c.ok) this.srvCreds = await c.json();
       } finally { this.srvpg.busy = false; }
+    },
+    // accessi del server: utenti e indirizzo in chiaro, password solo su richiesta
+    srvCred(key) { return this.srvCreds[key] || {}; },
+    srvCredAny(key) { const c = this.srvCreds[key]; return !!(c && (c.panel_user || c.panel_password || c.ftp_host || c.ftp_user || c.ftp_password)); },
+    async fetchPassword(key, field) {
+      const r = await this.api('/api/server-credentials/reveal', { method: 'POST', body: JSON.stringify({ key, field }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.say(d.detail || 'Password non disponibile', 6000); return null; }
+      return d.password;
+    },
+    async toggleReveal(key, field) {
+      const k = key + '|' + field;
+      if (this.srvReveal[k]) { const x = { ...this.srvReveal }; delete x[k]; this.srvReveal = x; return; }
+      const p = await this.fetchPassword(key, field);
+      if (p !== null) this.srvReveal = { ...this.srvReveal, [k]: p };
+    },
+    async copyPassword(key, field) {
+      const p = this.srvReveal[key + '|' + field] || await this.fetchPassword(key, field);
+      if (p !== null && p !== undefined) await this.copyText(p, 'Password copiata');
+    },
+    async copyText(t, msg = 'Copiato') {
+      try { await navigator.clipboard.writeText(String(t || '')); this.say(msg); } catch (e) { this.say('Copia non riuscita: il browser la blocca'); }
     },
     isSplit(ip) { return (this.prefs.server_split || []).includes(ip); },
     toggleSplit(ip) { const cur = this.prefs.server_split || []; this.prefs.server_split = cur.includes(ip) ? cur.filter(x => x !== ip) : [...cur, ip]; },
@@ -2007,7 +2041,12 @@ function sentinel() {
       if (where === 'settings') await this.loadServers(); else await this.loadServersPage();
       this.say(this.isSplit(ip) ? 'Server diviso per macchina' : 'Macchine di nuovo insieme');
     },
-    srvpgEdit(ip) { this.srvpg.editing = this.srvpg.editing === ip ? '' : ip; this.srvpg.open = { ...this.srvpg.open, [ip]: true }; },
+    srvpgEdit(ip) {
+      this.srvpg.editing = this.srvpg.editing === ip ? '' : ip; this.srvpg.open = { ...this.srvpg.open, [ip]: true };
+      const c = this.srvCred(ip);
+      this.srvpg.cred = { panel_user: c.panel_user || '', panel_password: '', clear_panel_password: false, ftp_proto: c.ftp_proto || 'ftp',
+                          ftp_host: c.ftp_host || '', ftp_port: c.ftp_port ? String(c.ftp_port) : '', ftp_user: c.ftp_user || '', ftp_password: '', clear_ftp_password: false };
+    },
     srvPanel(ip) { return ((this.prefs && this.prefs.server_panels) || {})[ip] || { url: '', note: '' }; },
     setSrvPanel(ip, k, v) {
       const all = { ...((this.prefs && this.prefs.server_panels) || {}) };

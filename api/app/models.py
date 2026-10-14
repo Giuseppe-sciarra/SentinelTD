@@ -417,6 +417,23 @@ class ClientSite(Base):
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), primary_key=True, index=True)
 
 
+class ServerCredential(Base):
+    """Accessi di un server di Gestione server (chiave = quella della riga: IP o "IP|macchina").
+
+    Le password sono cifrate (Fernet, chiave ricavata da JWT_SECRET) e non escono mai
+    nell'elenco: si leggono solo una alla volta col pulsante "Mostra"."""
+    __tablename__ = "server_credentials"
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    panel_user: Mapped[str] = mapped_column(String(190), default="")
+    panel_password: Mapped[str] = mapped_column(Text, default="")     # cifrata
+    ftp_proto: Mapped[str] = mapped_column(String(8), default="ftp")   # ftp | ftps | sftp
+    ftp_host: Mapped[str] = mapped_column(String(255), default="")
+    ftp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ftp_user: Mapped[str] = mapped_column(String(190), default="")
+    ftp_password: Mapped[str] = mapped_column(Text, default="")       # cifrata
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ClientProvider(Base):
     """Provider di posta/hosting con le istruzioni "come fare" (comuni a tutti i clienti).
 

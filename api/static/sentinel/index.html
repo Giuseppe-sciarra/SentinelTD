@@ -1021,18 +1021,48 @@
                     <div><b x-text="g.sites"></b> <span class="small mut" x-text="(w => (j => w && j ? w + ' WordPress · ' + j + ' Joomla' : (j ? 'Joomla' : 'WordPress'))(g.items.filter(s => s.cms !== 'wp').length))(g.items.filter(s => s.cms === 'wp').length)"></span></div>
                     <div><a class="btn primary sm" x-show="srvPanel(g.server).url" :href="srvPanel(g.server).url" target="_blank" rel="noopener" @click.stop>🔑 Apri il pannello</a><span class="small mut" x-show="!srvPanel(g.server).url">—</span></div>
                     <div class="small mut srvpg-note" x-text="srvPanel(g.server).note || '—'" translate="no"></div>
-                    <div style="text-align:right"><button class="btn sm" @click.stop="srvpgEdit(g.server)" title="Nome, link al pannello, appunto">✏️</button></div>
+                    <div style="text-align:right;white-space:nowrap"><span x-show="srvCredAny(g.server)" title="Accessi salvati">🔐</span> <button class="btn sm" @click.stop="srvpgEdit(g.server)" title="Nome, link al pannello, appunto, accessi">✏️</button></div>
                   </div>
                   <div class="srvx-body" x-show="srvpg.open[g.server] || srvpgHit(g)">
                     <template x-if="srvpg.editing === g.server">
                       <div class="srvpg-editbox">
                         <div class="field"><label>Nome del server</label><input class="input" :value="srvLabel(g.server)" @change="setSrvLabel(g.server, $event.target.value)" placeholder="es. SiteGround cliente X"></div>
                         <div class="field"><label>Link al pannello dell'hosting</label><input class="input" :value="srvPanel(g.server).url" @change="setSrvPanel(g.server, 'url', $event.target.value)" placeholder="cPanel, Plesk, aaPanel, SiteGround…"></div>
-                        <div class="field"><label>Appunto</label><input class="input" :value="srvPanel(g.server).note" @change="setSrvPanel(g.server, 'note', $event.target.value)" placeholder="provider, nome utente, chi ha le credenziali… (mai password)"></div>
+                        <div class="field"><label>Appunto</label><input class="input" :value="srvPanel(g.server).note" @change="setSrvPanel(g.server, 'note', $event.target.value)" placeholder="provider, chi gestisce il server…"></div>
+                        <div class="srvpg-credsec" style="grid-column:1/-1">Accesso al pannello</div>
+                        <div class="field"><label>Utente</label><input class="input" x-model="srvpg.cred.panel_user" autocomplete="off"></div>
+                        <div class="field"><label>Password</label><input class="input" type="password" x-model="srvpg.cred.panel_password" autocomplete="new-password" :placeholder="srvCred(g.server).panel_password ? '•••••••• salvata: scrivi per cambiarla' : ''">
+                          <label class="check small" x-show="srvCred(g.server).panel_password" style="margin-top:4px"><input type="checkbox" x-model="srvpg.cred.clear_panel_password"> togli la password salvata</label></div>
+                        <div class="srvpg-credsec" style="grid-column:1/-1">FTP</div>
+                        <div class="field"><label>Tipo</label><select class="input" x-model="srvpg.cred.ftp_proto"><option value="ftp">FTP</option><option value="ftps">FTPS (FTP con TLS)</option><option value="sftp">SFTP</option></select></div>
+                        <div class="field"><label>Indirizzo</label><input class="input" x-model="srvpg.cred.ftp_host" placeholder="ftp.esempio.it o IP" autocomplete="off"></div>
+                        <div class="field"><label>Porta</label><input class="input" x-model="srvpg.cred.ftp_port" inputmode="numeric" :placeholder="srvpg.cred.ftp_proto === 'sftp' ? '22' : '21'"></div>
+                        <div class="field"><label>Utente</label><input class="input" x-model="srvpg.cred.ftp_user" autocomplete="off"></div>
+                        <div class="field"><label>Password</label><input class="input" type="password" x-model="srvpg.cred.ftp_password" autocomplete="new-password" :placeholder="srvCred(g.server).ftp_password ? '•••••••• salvata: scrivi per cambiarla' : ''">
+                          <label class="check small" x-show="srvCred(g.server).ftp_password" style="margin-top:4px"><input type="checkbox" x-model="srvpg.cred.clear_ftp_password"> togli la password salvata</label></div>
+                        <div class="small mut" style="grid-column:1/-1">Le password si salvano cifrate e non compaiono mai nelle pagine: si leggono solo col pulsante "Mostra", e ogni lettura finisce nel Registro.</div>
                         <div class="row" style="gap:8px"><button class="btn primary" @click="saveServersPage()" :disabled="!!(prefs && prefs.busy)">Salva</button><button class="btn" @click="srvpg.editing = ''">Annulla</button></div>
                         <div class="small mut" x-show="(g.machines || []).length > 1" style="grid-column:1/-1"><span>Dietro questo IP ci sono</span> <b x-text="g.machines.length"></b> <span>macchine diverse:</span> <span translate="no" x-text="g.machines.map(m => m.hostname + ' (' + m.sites + ')').join(' · ')"></span>. <span>Si dividono da</span> <a href="#/settings">Impostazioni → Server dei siti</a>.</div>
                       </div>
                     </template>
+                    <div class="srv-creds" x-show="srvpg.editing !== g.server && srvCredAny(g.server)">
+                      <div x-show="srvCred(g.server).panel_user || srvCred(g.server).panel_password">
+                        <span class="cd-k">Pannello</span>
+                        <span x-show="srvPanel(g.server).url"><a class="mono" :href="srvPanel(g.server).url" target="_blank" rel="noopener" x-text="srvPanel(g.server).url" translate="no"></a> <button class="srv-cbtn" @click="copyText(srvPanel(g.server).url)" title="Copia indirizzo">⧉</button></span>
+                        <span x-show="srvCred(g.server).panel_user"><span class="mono" x-text="srvCred(g.server).panel_user" translate="no"></span> <button class="srv-cbtn" @click="copyText(srvCred(g.server).panel_user)" title="Copia utente">⧉</button></span>
+                        <span x-show="srvCred(g.server).panel_password"><span class="mono" x-text="srvReveal[g.server + '|panel'] || '••••••••'" translate="no"></span>
+                          <button class="srv-cbtn" @click="toggleReveal(g.server, 'panel')" x-text="srvReveal[g.server + '|panel'] ? 'Nascondi' : 'Mostra'"></button>
+                          <button class="srv-cbtn" @click="copyPassword(g.server, 'panel')" title="Copia password">⧉</button></span>
+                      </div>
+                      <div x-show="srvCred(g.server).ftp_host || srvCred(g.server).ftp_user || srvCred(g.server).ftp_password">
+                        <span class="cd-k" x-text="(srvCred(g.server).ftp_proto || 'ftp').toUpperCase()"></span>
+                        <span x-show="srvCred(g.server).ftp_host"><span class="mono" x-text="srvCred(g.server).ftp_host + (srvCred(g.server).ftp_port ? ':' + srvCred(g.server).ftp_port : '')" translate="no"></span> <button class="srv-cbtn" @click="copyText(srvCred(g.server).ftp_host)" title="Copia indirizzo">⧉</button></span>
+                        <span x-show="srvCred(g.server).ftp_user"><span class="mono" x-text="srvCred(g.server).ftp_user" translate="no"></span> <button class="srv-cbtn" @click="copyText(srvCred(g.server).ftp_user)" title="Copia utente">⧉</button></span>
+                        <span x-show="srvCred(g.server).ftp_password"><span class="mono" x-text="srvReveal[g.server + '|ftp'] || '••••••••'" translate="no"></span>
+                          <button class="srv-cbtn" @click="toggleReveal(g.server, 'ftp')" x-text="srvReveal[g.server + '|ftp'] ? 'Nascondi' : 'Mostra'"></button>
+                          <button class="srv-cbtn" @click="copyPassword(g.server, 'ftp')" title="Copia password">⧉</button></span>
+                      </div>
+                    </div>
                     <div class="srvpg-sites">
                       <template x-for="s in g.items" :key="'sps'+s.id">
                         <div class="srvpg-site" :class="srvpgMatch(s) ? 'match' : ''">

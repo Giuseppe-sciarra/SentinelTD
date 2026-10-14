@@ -1227,7 +1227,7 @@ th.sortable:hover { color: var(--txt); }
 .srvx-name { min-width: 0; } .srvx-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srvpg-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .srvx-body { padding: 6px 16px 14px 52px; background: var(--panel-2); }
-.srvpg-editbox { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; padding: 10px 12px 12px; margin-bottom: 10px; background: var(--panel); border: 1px dashed var(--bd); border-radius: 10px; }
+.srvpg-editbox { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: end; padding: 10px 12px 12px; margin-bottom: 10px; background: var(--panel); border: 1px dashed var(--bd); border-radius: 10px; }
 .srvpg-editbox .field { margin: 0; }
 .srvpg-sites { display: flex; flex-direction: column; gap: 2px; }
 .srvpg-site { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; min-width: 0; }
@@ -1325,3 +1325,12 @@ th.sortable:hover { color: var(--txt); }
 /* righe e pulsanti che sono link: niente sottolineato al passaggio del mouse */
 .cust-row, .cust-row:hover, a.btn:hover { text-decoration: none; }
 .cust-row:hover .cli-name > span:first-child { color: var(--acc); }
+
+/* Gestione server: accessi del pannello e FTP */
+.srvpg-editbox > .row { grid-column: 1 / -1; }
+.srvpg-credsec { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--mut); padding-top: 8px; border-top: 1px solid var(--bd); }
+.srv-creds { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin-bottom: 10px; border: 1px solid var(--bd); border-radius: 10px; background: var(--bg-2); font-size: 13px; }
+.srv-creds > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.srv-creds .mono { overflow-wrap: anywhere; }
+.srv-cbtn { background: none; border: 1px solid var(--bd); color: var(--txt-2); border-radius: 6px; padding: 1px 7px; font-size: 12px; cursor: pointer; margin-left: 2px; }
+.srv-cbtn:hover { border-color: var(--acc); color: var(--txt); }

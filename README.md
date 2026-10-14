@@ -268,6 +268,7 @@ WordPress package export (*Take from a site*) needs connector 2.19 or later. Add
 | Clients and sub-clients with domains, mail, DNS, renewals, Excel import | Domain management |
 | Domains of the Sentinel sites, one entry per folder | Domain management → Add from sites |
 | Shared how-tos of mail and hosting providers | Domain management → Providers |
+| Server access: hosting panel (user and password) and FTP (address, port, user, password), encrypted | Server management → ✏️ |
 | Daily DNS check of the client domains | Domain management → Settings |
 | Text of the email sent to clients with their report | Notifications → Monthly report to the client |
 | Brake on weak servers (sites at a time, rests, pause between updates) | Settings → Site servers |

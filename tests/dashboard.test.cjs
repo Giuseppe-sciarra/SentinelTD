@@ -85,8 +85,8 @@ test('#/servers opens the lightweight Servers page (no server status, no samplin
  // la vecchia pagina Stato server con CPU/RAM resta rimossa: niente funzioni di campionamento
  assert.equal(a.loadServerStatus,undefined);
  assert.equal(typeof a.loadServersPage,'function');
- // la pagina vive solo di dati gia' noti: un'unica lettura dell'elenco server, nessun'altra richiesta
- assert.deepEqual(Object.keys(a.srvpg),['list','q','open','editing','busy']);
+ // la pagina vive solo di dati gia' noti: l'elenco server e (2.42.0) gli accessi salvati, niente campionamenti
+ assert.deepEqual(Object.keys(a.srvpg),['list','q','open','editing','busy','cred']);
 });
 test('offline log reads history without launching checks and preserves data on failure',async()=>{
  const {a}=app();a.route.page='stats';a.statsTab='offline';

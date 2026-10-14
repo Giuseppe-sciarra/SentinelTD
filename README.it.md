@@ -285,6 +285,7 @@ vedi `connectors/README.md`.
 | Clienti e sottoclienti con domini, posta, DNS, rinnovi, import da Excel | Gestione domini |
 | Domini dei siti di Sentinel, una voce per cartella | Gestione domini → Aggiungi dai siti |
 | Istruzioni comuni dei provider di posta e hosting | Gestione domini → Provider |
+| Accessi di un server: pannello (utente e password) e FTP (indirizzo, porta, utente, password), cifrati | Gestione server → ✏️ |
 | Controllo DNS giornaliero dei domini dei clienti | Gestione domini → Impostazioni |
 | Testo dell'email che accompagna il report al cliente | Notifiche → Report mensile al cliente |
 | Freno sui server deboli (siti alla volta, riposo, pausa tra gli aggiornamenti) | Impostazioni → Server dei siti |
