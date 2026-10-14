@@ -159,6 +159,7 @@ async def run_migrations(conn) -> None:
     await conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS parent_id INTEGER NULL REFERENCES clients(id) ON DELETE SET NULL"))
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_clients_parent_id ON clients (parent_id)"))
+    await conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS folder VARCHAR(255) NOT NULL DEFAULT ''"))
 
     # admin_auth: 2FA / passkey
     await conn.execute(text("ALTER TABLE admin_auth ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64) NOT NULL DEFAULT ''"))

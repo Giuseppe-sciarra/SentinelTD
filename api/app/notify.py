@@ -244,8 +244,8 @@ EVENTS: dict[str, dict[str, Any]] = {
         "telegram": "⏳ <b>{{ item }}</b>\n{{ kind }}{% if platform %} · {{ platform }}{% endif %}\n📅 <b>{{ expires_on }}</b> — tra <b>{{ days }} giorni</b>{% if site_name %}\n🌐 {{ site_name }}{% endif %}{% if provider %}\n🏢 {{ provider }}{% endif %}{% if notes %}\n<i>{{ notes }}</i>{% endif %}",
     },
     "client_dns_changed": {
-        "label": "DNS cambiati (clienti)",
-        "desc": "Il controllo DNS giornaliero dei domini nelle schede clienti ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.",
+        "label": "DNS cambiati (Gestione domini)",
+        "desc": "Il controllo DNS giornaliero dei domini in Gestione domini ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.",
         "channels": {"email": False, "telegram": True},
         "vars": {"client_name": "Nome del cliente", "changes_head": "Riga di sintesi (es. 2 domini con DNS cambiati)",
                  "changes_count": "Quanti domini", "changes_lines": "Elenco per Telegram: un cambio per riga",

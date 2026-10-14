@@ -1252,6 +1252,12 @@ def _translations_done_with_updates(site: Site, etype: str, ext, res: dict, done
     return {**res, "new": f"traduzioni aggiornate ({n}/{n})"}
 
 
+def _params_lost(resp: dict) -> bool:
+    """Il connettore ha ricevuto la richiesta senza i dati (tipo e slug vuoti): non e' l'esito
+    dell'aggiornamento, e' una richiesta arrivata vuota (redirect, proxy, hosting)."""
+    return not resp.get("ok") and str(resp.get("error") or "").startswith("type non valido")
+
+
 async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
     """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}."""
     headers = {
@@ -1280,15 +1286,19 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                 #    il percorso REST di sempre.
                 d = None
                 try:
+                    # senza seguire i redirect: un 301/302 trasforma il POST in GET e i dati si
+                    # perdono per strada; il connettore rispondeva "type non valido" e l'aggiornamento
+                    # risultava fallito senza esserci mai stato. Redirect = si passa al percorso REST.
                     ra = await client.post(
                         f"{site.url.rstrip('/')}/wp-admin/admin-ajax.php",
                         params={"action": "tdpanop_update", "_": cb},
                         headers=headers,
                         data={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag},
+                        follow_redirects=False,
                     )
                     if ra.status_code == 200:
                         ja = ra.json()
-                        if isinstance(ja, dict) and "ok" in ja:
+                        if isinstance(ja, dict) and "ok" in ja and not _params_lost(ja):
                             d = ja
                 except Exception:  # noqa: BLE001
                     d = None

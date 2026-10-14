@@ -50,7 +50,8 @@ function sentinel() {
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
            open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
     cust: { tab: 'list', q: '', edit: null, err: '' },
-    // Gestione clienti: scheda del cliente (domini, posta, DNS, rinnovi), provider, controllo DNS
+    fromSites: { list: [], sel: [], busy: false, err: '' },
+    // Gestione domini: scheda del cliente (domini, posta, DNS, rinnovi), provider, controllo DNS
     card: { id: null, data: null, loading: false, err: '', q: '', filter: '', host: '', open: {}, howto: {}, menu: false, showInactive: false, edit: null, editErr: '',
             busy: false, notes: '', notesDirty: false, dnsRunning: false, impFile: null, imp: null, impBusy: false, impErr: '', impSubs: true },
     prov: { list: [], edit: null, err: '' },
@@ -287,7 +288,7 @@ function sentinel() {
       else if (p[0] === 'folder') { r.page = 'sites'; r.folder = decodeURIComponent(p[1] || ''); }
       else if (p[0] === 'site') { r.page = 'site'; r.siteId = parseInt(p[1]); r.tab = ['overview','ext','history'].includes(p[2]) ? p[2] : 'overview'; }
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
-      else if (p[0] === 'customers') { r.page = 'customers'; r.clientId = /^\d+$/.test(p[1] || '') ? parseInt(p[1]) : null; }
+      else if (p[0] === 'domains' || p[0] === 'customers') { r.page = 'domains'; r.clientId = /^\d+$/.test(p[1] || '') ? parseInt(p[1]) : null; }
       else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers', 'eventlog'].includes(p[0])) r.page = p[0];
       this.route = r; this.sideOpen = false;
     },
@@ -305,7 +306,7 @@ function sentinel() {
       if (this.route.page === 'notifications') { await this.loadNotif(); }
       if (this.route.page === 'reports') { await this.loadReports(); }
       if (this.route.page === 'clients') { await this.loadClients(); }
-      if (this.route.page === 'customers') {
+      if (this.route.page === 'domains') {
         await this.loadClients();
         if (this.route.clientId) await this.loadCard(this.route.clientId);
         else if (this.cust.tab === 'providers') this.loadProviders();
@@ -326,8 +327,8 @@ function sentinel() {
       try {
         const r = await this.api('/api/sites');
         if (r.ok) this.sites = await r.json();
-        // numero dei domini con DNS cambiati accanto a "Gestione clienti" nel menu
-        if (!silent && !['clients', 'customers'].includes(this.route.page)) this.api('/api/clients').then(x => x.ok ? x.json() : null).then(d => { if (d) this.cli.list = d; }).catch(() => {});
+        // numero dei domini con DNS cambiati accanto a "Gestione domini" nel menu
+        if (!silent && !['clients', 'domains'].includes(this.route.page)) this.api('/api/clients').then(x => x.ok ? x.json() : null).then(d => { if (d) this.cli.list = d; }).catch(() => {});
         if (!silent) await this._onRoute();
         else if (this.route.page === 'dashboard') await this.loadDashboard();
       } catch (e) { /* logout gestito in api() */ }
@@ -2092,10 +2093,10 @@ function sentinel() {
       if (p.ok) { this.cli.periods = await p.json(); if (!this.cli.periods.some(x => x.period === this.cli.period) && this.cli.periods.length) this.cli.period = this.cli.periods[0].period; }
     },
     // Report clienti: i clienti del report (con siti o indirizzi); non i sottoclienti ne' i clienti
-    // che hanno solo la scheda (Gestione clienti), come un'agenzia con i suoi domini
-    get cliReport() { return this.cli.list.filter(c => !c.parent_id && (c.sites.length || c.emails || !(c.card_domains || c.subs || c.notes))); },
-    // Gestione clienti: i clienti principali con una scheda (o senza siti); i sottoclienti stanno dentro
-    get custList() { return this.cli.list.filter(c => !c.parent_id && (c.card_domains || c.subs || c.notes || (!c.sites.length && !c.emails))); },
+    // che hanno solo la scheda (Gestione domini), come un'agenzia con i suoi domini
+    get cliReport() { return this.cli.list.filter(c => !c.parent_id && (c.sites.length || c.emails || !(c.card_domains || c.subs || c.notes || c.folder))); },
+    // Gestione domini: le voci principali con una scheda (o senza siti); i sottoclienti stanno dentro
+    get custList() { return this.cli.list.filter(c => !c.parent_id && (c.card_domains || c.subs || c.notes || c.folder || (!c.sites.length && !c.emails))); },
     get custShown() {
       const q = (this.cust.q || '').trim().toLowerCase();
       if (!q) return this.custList;
@@ -2106,9 +2107,29 @@ function sentinel() {
     get custParentChoices() { const id = this.cust.edit && this.cust.edit.id; return this.custList.filter(c => c.id !== id); },
     get custHasSubs() { const id = this.cust.edit && this.cust.edit.id; return !!id && this.cli.list.some(c => c.parent_id === id); },
     openCustClient(c = null, parentId = null) {
-      this.cust.edit = c ? { id: c.id, name: c.name, notes: c.notes || '', parent_id: c.parent_id ? String(c.parent_id) : '' }
-                         : { id: null, name: '', notes: '', parent_id: parentId ? String(parentId) : '' };
+      this.cust.edit = c ? { id: c.id, name: c.name, notes: c.notes || '', parent_id: c.parent_id ? String(c.parent_id) : '', folder: c.folder || '' }
+                         : { id: null, name: '', notes: '', parent_id: parentId ? String(parentId) : '', folder: '' };
       this.cust.err = ''; this.drawer = 'cclient';
+    },
+    // domini dei siti di Sentinel: una voce per cartella
+    async openFromSites() {
+      Object.assign(this.fromSites, { list: [], sel: [], err: '', busy: false });
+      this.drawer = 'cfromsites';
+      const r = await this.api('/api/clients/site-folders');
+      if (!r.ok) { this.fromSites.err = 'Cartelle non disponibili'; return; }
+      this.fromSites.list = await r.json();
+      this.fromSites.sel = this.fromSites.list.filter(f => f.new).map(f => f.folder);
+    },
+    get fromSitesNew() { return this.fromSites.list.filter(f => this.fromSites.sel.includes(f.folder)).reduce((n, f) => n + f.new, 0); },
+    async addFromSites() {
+      this.fromSites.busy = true; this.fromSites.err = '';
+      try {
+        const r = await this.api('/api/clients/from-folders', { method: 'POST', body: JSON.stringify({ folders: this.fromSites.sel }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.fromSites.err = d.detail || 'Non riuscito'; return; }
+        this.drawer = null; await this.loadClients();
+        this.say(`${d.domains_new} ${this.pl(d.domains_new, 'dominio aggiunto', 'domini aggiunti')}`, 5000);
+      } finally { this.fromSites.busy = false; }
     },
     async saveCustClient() {
       const e = this.cust.edit; this.cust.err = '';
@@ -2117,7 +2138,7 @@ function sentinel() {
       if (!e.id) {
         // stesso nome di un cliente che c'e' gia' (anche del Report clienti): niente doppione, si apre la sua scheda
         const same = this.cli.list.find(c => c.name.trim().toLowerCase() === name.toLowerCase());
-        if (same) { this.drawer = null; this.say(`${same.name} esiste già: apro la sua scheda`, 4000); this.go('customers/' + same.id); return; }
+        if (same) { this.drawer = null; this.say(`${same.name} esiste già: apro la sua scheda`, 4000); this.go('domains/' + same.id); return; }
       }
       const body = { name, notes: e.notes || '' };
       if (!this.custHasSubs) body.parent_id = e.parent_id ? parseInt(e.parent_id) : null;
@@ -2125,8 +2146,8 @@ function sentinel() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { this.cust.err = d.detail || 'Salvataggio non riuscito'; return; }
       this.drawer = null; await this.loadClients();
-      if (!e.id && !d.parent_id) { this.go('customers/' + d.id); return; }
-      if (this.route.page === 'customers' && this.route.clientId) await this.loadCard(this.route.clientId, true);
+      if (!e.id && !d.parent_id) { this.go('domains/' + d.id); return; }
+      if (this.route.page === 'domains' && this.route.clientId) await this.loadCard(this.route.clientId, true);
       this.say(`${d.name} salvato`);
     },
     async deleteCustClient() {
@@ -2138,7 +2159,7 @@ function sentinel() {
       const r = await this.api('/api/clients/' + e.id, { method: 'DELETE' });
       if (!r.ok) { this.cust.err = 'Eliminazione non riuscita'; return; }
       this.drawer = null; await this.loadClients();
-      if (this.route.clientId === e.id) this.go('customers' + (e.parent_id ? '/' + e.parent_id : ''));
+      if (this.route.clientId === e.id) this.go('domains' + (e.parent_id ? '/' + e.parent_id : ''));
       else if (this.route.clientId) await this.loadCard(this.route.clientId, true);
     },
     // ---------- gestione clienti: scheda del cliente ----------
@@ -2292,7 +2313,7 @@ function sentinel() {
       this.card.dnsRunning = true;
       await this._waitDns(async () => {
         this.card.dnsRunning = false;
-        if (this.route.page === 'customers' && this.route.clientId === id) await this.loadCard(id, true);
+        if (this.route.page === 'domains' && this.route.clientId === id) await this.loadCard(id, true);
         this.loadClients(); this.say('Controllo DNS finito');
       });
       this.card.dnsRunning = false;

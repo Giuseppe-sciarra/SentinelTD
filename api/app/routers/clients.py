@@ -29,6 +29,7 @@ def _out(cl: Client, sites: list[Site], counts: dict | None = None) -> dict:
         # scheda cliente: domini attivi e cambi DNS non ancora visti (per un cliente con
         # sottoclienti contano anche quelli dei sottoclienti), quanti sottoclienti ha
         "parent_id": cl.parent_id, "subs": int(c.get("subs", 0)), "card_domains": int(c.get("card_domains", 0)),
+        "folder": cl.folder or "",
         "domains": int(c.get("domains", 0)), "dns_changes": int(c.get("dns_changes", 0)),
     }
 

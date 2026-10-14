@@ -149,6 +149,38 @@ async def save_config(data: dict) -> dict:
     return cfg
 
 
+# dove sta la posta, dal nome del server MX (la prima parola che compare vince)
+MAIL_HOSTS = [
+    ("protection.outlook.com", "Microsoft 365"), ("outlook.com", "Microsoft 365"),
+    ("google.com", "Google Workspace"), ("googlemail.com", "Google Workspace"),
+    ("aruba.it", "Aruba"), ("zoho.", "Zoho Mail"), ("register.it", "Register.it"),
+    ("netsons", "Netsons"), ("serverplan", "Serverplan"), ("ovh.net", "OVH"), ("ovh.", "OVH"),
+    ("ionos", "IONOS"), ("1and1", "IONOS"), ("kundenserver.de", "IONOS"), ("siteground", "SiteGround"),
+    ("secureserver.net", "GoDaddy"), ("hostinger", "Hostinger"), ("tophost", "Tophost"),
+    ("qboxmail", "Qboxmail"), ("libero.it", "Libero"), ("icloud.com", "iCloud"),
+]
+
+
+async def guess_mail_host(cur: dict, resolver=None) -> str:
+    """Dove sta la posta di un dominio, dai suoi MX: un provider noto, lo stesso server del sito
+    (l'MX punta all'indirizzo del sito), altrimenti il nome del server MX."""
+    hosts = [m.split(" ", 1)[-1] for m in sorted(cur.get("mx") or [], key=lambda x: int(x.split(" ", 1)[0]) if x.split(" ", 1)[0].isdigit() else 99)]
+    hosts = [h for h in hosts if h and h != "."]
+    if not hosts:
+        return ""
+    for h in hosts:
+        for key, name in MAIL_HOSTS:
+            if key in h:
+                return name
+    try:
+        a, _ = await _query(resolver or _resolver(), hosts[0], "A")
+    except Exception:  # noqa: BLE001
+        a = None
+    if a and set(a) & set(cur.get("a") or []):
+        return "Stesso server del sito"
+    return hosts[0]
+
+
 async def check_domains(session, domains, resolver=None, sleep=asyncio.sleep) -> dict:
     """Legge il DNS dei domini dati (stessa sessione, chi chiama fa il commit).
     Ritorna {client_id: [(dominio, cambio), ...]} con i soli cambi nuovi dei domini attivi."""
@@ -184,6 +216,20 @@ async def check_domains(session, domains, resolver=None, sleep=asyncio.sleep) ->
             d.dns_changed_at = now if merged else None
             if d.active:
                 changed.setdefault(d.client_id, []).append((d.domain, ch))
+        if not (d.mail_host or "").strip() and cur.get("mx"):
+            # dominio aggiunto dai siti (o a mano senza "Email ospitate su"): si ricava dagli MX
+            try:
+                guess = await guess_mail_host(cur, res)
+                if guess == "Stesso server del sito" and (d.site_host or "").strip():
+                    guess += f" ({d.site_host.strip()})"
+                d.mail_host = guess[:190]
+            except Exception:  # noqa: BLE001
+                pass
+            if d.mail_host and not d.provider_id:
+                from .client_cards import match_provider
+                from .models import ClientProvider
+                from sqlalchemy import select
+                d.provider_id = match_provider(d.mail_host, (await session.execute(select(ClientProvider))).scalars().all())
         d.dns_mx, d.dns_ns, d.dns_a = (json.dumps(cur[k]) for k in ("mx", "ns", "a"))
         d.dns_nx = bool(cur["nx"])
         d.dns_error = ""
@@ -237,7 +283,7 @@ async def _notify(changed: dict, names: dict) -> None:
         ctx = {"client_name": names.get(cid, ""),
                "changes": [{"domain": dom, "kind": k, "from": v.get("from"), "to": v.get("to")}
                            for dom, ch in items for k, v in ch.items()],
-               "panel_url": f"{base}/#/customers/{cid}" if base else ""}
+               "panel_url": f"{base}/#/domains/{cid}" if base else ""}
         try:
             await dispatch("client_dns_changed", ctx)
         except Exception as ex:  # noqa: BLE001

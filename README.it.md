@@ -148,13 +148,15 @@ I dati mostrati sono un parco di prova con nomi inventati (interfaccia in ingles
   gruppi, clienti e cartelle. I report dei clienti hanno **impostazioni proprie** — invio
   automatico, giorno e orario, sezioni, testi e layout del PDF — separate dal tuo report mensile,
   con anteprima dal vivo su qualsiasi cliente
-- **Gestione clienti**: per ogni cliente (e i suoi eventuali **sottoclienti**) i domini con dove
+- **Gestione domini**: per ogni cliente (e i suoi eventuali **sottoclienti**) i domini con dove
   sta la posta, come si gestiscono le caselle, link al pannello e alla webmail, account da usare
   (solo il riferimento, mai la password), dove si modificano DNS/MX, dove sta il sito, rinnovi e
   note. I **provider** di posta e hosting hanno le istruzioni "come fare" (dove entrare, crea
   casella, cambia password, inoltri) che compaiono su ogni dominio che ospitano. Tutto si
   **importa da un foglio Excel/CSV** (prima l'anteprima; un sottocliente per gruppo di domini;
-  reimportare aggiorna senza cancellare)
+  reimportare aggiorna senza cancellare) oppure si **aggiunge dai siti di Sentinel**, una voce per
+  cartella (rinominando la cartella si rinomina la voce); dove sta la posta, se non è scritto, lo
+  ricava dagli MX
 - **Controllo DNS giornaliero** dei domini dei clienti (MX, NS, A): un cambio vale solo se una
   seconda lettura lo conferma, resta evidenziato nella scheda finché non lo segni come visto e
   arriva come un avviso per cliente
@@ -280,9 +282,10 @@ vedi `connectors/README.md`.
 | Report mensile: giorno e orario, destinatario, contenuto, impaginazione | Report mensile |
 | Clienti, i loro siti e indirizzi, gruppi, report automatico al cliente | Report clienti |
 | Report dei clienti: invio, giorno e orario, sezioni, testi, layout del PDF (uniche per tutti i clienti) | Report clienti → Impostazioni |
-| Clienti e sottoclienti con domini, posta, DNS, rinnovi, import da Excel | Gestione clienti |
-| Istruzioni comuni dei provider di posta e hosting | Gestione clienti → Provider |
-| Controllo DNS giornaliero dei domini dei clienti | Gestione clienti → Impostazioni |
+| Clienti e sottoclienti con domini, posta, DNS, rinnovi, import da Excel | Gestione domini |
+| Domini dei siti di Sentinel, una voce per cartella | Gestione domini → Aggiungi dai siti |
+| Istruzioni comuni dei provider di posta e hosting | Gestione domini → Provider |
+| Controllo DNS giornaliero dei domini dei clienti | Gestione domini → Impostazioni |
 | Testo dell'email che accompagna il report al cliente | Notifiche → Report mensile al cliente |
 | Freno sui server deboli (siti alla volta, riposo, pausa tra gli aggiornamenti) | Impostazioni → Server dei siti |
 | Credenziali database, SMTP, Telegram, segreti, porte | `.env` |

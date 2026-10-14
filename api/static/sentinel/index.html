@@ -88,9 +88,9 @@
         <a :class="route.page==='servers'?'on':''" href="#/servers">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>
           <span class="txt">Gestione server</span></a>
-        <a :class="route.page==='customers'?'on':''" href="#/customers">
+        <a :class="route.page==='domains'?'on':''" href="#/domains">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2.5"/><path d="M5.5 16.5a3.5 3.5 0 0 1 7 0M15 9h3M15 13h3"/></svg>
-          <span class="txt">Gestione clienti</span>
+          <span class="txt">Gestione domini</span>
           <span class="cnt warn" x-show="cliDnsTotal" x-text="cliDnsTotal" title="Domini con DNS cambiati"></span></a>
 
         <div class="lbl">Cartelle</div>
@@ -1277,12 +1277,12 @@
           </div>
         </template>
 
-        <template x-if="route.page==='customers'">
+        <template x-if="route.page==='domains'">
           <div>
-            <!-- ===== Scheda del cliente (#/customers/<id>) ===== -->
+            <!-- ===== Scheda del cliente (#/domains/<id>) ===== -->
             <template x-if="route.clientId">
               <div>
-                <a :href="card.data?.parent ? '#/customers/' + card.data.parent.id : '#/customers'" class="small"><span>←</span> <span x-show="!card.data?.parent">Gestione clienti</span><span x-show="card.data?.parent" x-text="card.data?.parent?.name" translate="no"></span></a>
+                <a :href="card.data?.parent ? '#/domains/' + card.data.parent.id : '#/domains'" class="small"><span>←</span> <span x-show="!card.data?.parent">Gestione domini</span><span x-show="card.data?.parent" x-text="card.data?.parent?.name" translate="no"></span></a>
                 <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px;margin-top:6px">
                   <div style="flex:1;min-width:260px">
                     <h1 class="page-title" x-text="card.data ? card.data.client.name : 'Scheda cliente'" translate="no"></h1>
@@ -1360,7 +1360,7 @@
                             <div class="cd-subbar" x-show="r.subId">
                               <span class="small mut">Sottocliente</span>
                               <span class="sp"></span>
-                              <a class="btn sm ghost" :href="'#/customers/' + r.subId">Apri scheda</a>
+                              <a class="btn sm ghost" :href="'#/domains/' + r.subId">Apri scheda</a>
                               <button class="btn sm ghost" @click="openClientById(r.subId)">Rinomina / note</button>
                               <button class="btn sm ghost" @click="openCardDomain(null, r.subId)">Aggiungi dominio</button>
                             </div>
@@ -1443,10 +1443,10 @@
             <div>
             <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
               <div style="flex:1;min-width:280px">
-                <h1 class="page-title">Gestione clienti</h1>
-                <div class="page-sub">La scheda di ogni cliente con domini, posta, DNS e rinnovi, e le istruzioni dei provider.</div>
+                <h1 class="page-title">Gestione domini</h1>
+                <div class="page-sub">I domini dei clienti: dove sta la posta e come ci si arriva, DNS, rinnovi e istruzioni dei provider.</div>
               </div>
-              <div class="row" x-show="cust.tab==='list'"><button class="btn primary" @click="openCustClient()">Nuovo cliente</button></div>
+              <div class="row" x-show="cust.tab==='list'"><button class="btn" @click="openFromSites()">Aggiungi dai siti</button><button class="btn primary" @click="openCustClient()">Nuovo cliente</button></div>
               <div class="row" x-show="cust.tab==='providers'"><button class="btn primary" @click="openProvider()">Nuovo provider</button></div>
             </div>
             <div class="seg" style="margin-top:14px">
@@ -1458,15 +1458,15 @@
               <div class="row" style="margin-top:16px" x-show="custList.length > 6"><input class="input" style="max-width:340px" x-model="cust.q" placeholder="Cerca cliente o sottocliente"></div>
               <div class="cli-list">
                 <template x-for="c in custShown" :key="'cu'+c.id">
-                  <a class="cust-row" :href="'#/customers/' + c.id">
+                  <a class="cust-row" :href="'#/domains/' + c.id">
                     <div style="min-width:0">
-                      <div class="cli-name"><span x-text="c.name" translate="no"></span><span class="badge acc" x-show="c.subs" x-text="c.subs + ' ' + pl(c.subs, 'sottocliente', 'sottoclienti')"></span><span class="badge acc" x-show="c.domains" x-text="c.domains + ' ' + pl(c.domains, 'dominio', 'domini')"></span><span class="badge warn" x-show="c.dns_changes"><span>DNS cambiati:</span> <span x-text="c.dns_changes"></span></span></div>
+                      <div class="cli-name"><span x-text="c.name" translate="no"></span><span class="badge" x-show="c.folder" title="Voce collegata alla cartella di Sentinel: se rinomini la cartella si rinomina anche questa">📁 cartella</span><span class="badge acc" x-show="c.subs" x-text="c.subs + ' ' + pl(c.subs, 'sottocliente', 'sottoclienti')"></span><span class="badge acc" x-show="c.domains" x-text="c.domains + ' ' + pl(c.domains, 'dominio', 'domini')"></span><span class="badge warn" x-show="c.dns_changes"><span>DNS cambiati:</span> <span x-text="c.dns_changes"></span></span></div>
                       <div class="small mut" x-show="c.notes" x-text="(c.notes || '').split('\n')[0]" translate="no"></div>
                     </div>
                     <span class="btn sm">Scheda</span>
                   </a>
                 </template>
-                <div class="card empty" x-show="!custList.length" style="padding:40px 20px">Nessun cliente con scheda. Crea il cliente con <b>Nuovo cliente</b>, poi aggiungi i domini o importali dall'Excel.</div>
+                <div class="card empty" x-show="!custList.length" style="padding:40px 20px">Ancora vuota. Aggiungi i domini dei tuoi siti con <b>Aggiungi dai siti</b> (una voce per cartella), oppure crea un cliente con <b>Nuovo cliente</b> e importa i suoi domini dall'Excel.</div>
               </div>
             </div>
             <div x-show="cust.tab==='providers'">
@@ -2119,13 +2119,37 @@
   <div class="drawer" @keydown.escape.window="drawer=null">
     <div class="head"><h2 x-text="cust.edit.id ? 'Modifica cliente' : (cust.edit.parent_id ? 'Nuovo sottocliente' : 'Nuovo cliente')"></h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
     <div class="body">
-      <div class="field"><label>Nome</label><input class="input" x-model="cust.edit.name"></div>
+      <div class="field"><label>Nome</label><input class="input" x-model="cust.edit.name"><div class="hint" x-show="cust.edit.folder"><span>Collegata alla cartella</span> <b x-text="cust.edit.folder" translate="no"></b>: <span>se rinomini la cartella, il nome cambia di conseguenza.</span></div></div>
       <div class="field" x-show="custParentChoices.length && !custHasSubs"><label>Sottocliente di</label>
         <select class="input" x-model="cust.edit.parent_id"><option value="">Nessuno: è un cliente principale</option><template x-for="p in custParentChoices" :key="'cp'+p.id"><option :value="String(p.id)" :selected="String(p.id)===cust.edit.parent_id" x-text="p.name"></option></template></select></div>
       <div class="field"><label>Note</label><textarea class="input" rows="5" x-model="cust.edit.notes" placeholder="Accordi, contatti, cose da ricordare. Niente password: solo dove trovarle."></textarea></div>
       <div class="msg err" x-show="cust.err" x-text="cust.err"></div>
     </div>
     <div class="foot"><button class="btn danger" x-show="cust.edit.id" @click="deleteCustClient()">Elimina</button><div class="sp"></div><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" @click="saveCustClient()">Salva</button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: DOMINI DAI SITI (una voce per cartella) ===================== -->
+<template x-if="token&&drawer==='cfromsites'">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer" @keydown.escape.window="drawer=null">
+    <div class="head"><h2>Aggiungi dai siti</h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="hint" style="margin-bottom:12px">Una voce per cartella di Sentinel (le sottocartelle diventano i suoi sottoclienti), con dentro i domini dei siti. Se rinomini la cartella si rinomina anche la voce. I domini già presenti non si toccano. Dove sta la posta lo ricava dai DNS al primo controllo.</div>
+      <div class="row" style="gap:8px;margin-bottom:8px"><button class="btn sm" @click="fromSites.sel = fromSites.list.map(f => f.folder)">Tutte</button><button class="btn sm ghost" @click="fromSites.sel = []">Nessuna</button></div>
+      <div class="cli-pick">
+        <template x-for="f in fromSites.list" :key="'fs'+f.folder">
+          <label class="cli-pick-row" :class="fromSites.sel.includes(f.folder) ? 'on' : ''" style="grid-template-columns:auto minmax(0,1fr)">
+            <input type="checkbox" :checked="fromSites.sel.includes(f.folder)" @change="fromSites.sel = fromSites.sel.includes(f.folder) ? fromSites.sel.filter(x => x !== f.folder) : [...fromSites.sel, f.folder]">
+            <span style="min-width:0"><b x-text="f.name" translate="no"></b>
+              <span class="small mut" style="display:block"><span x-text="f.sites + ' ' + pl(f.sites, 'sito', 'siti')"></span> · <span x-show="f.new" x-text="f.new + ' ' + pl(f.new, 'dominio da aggiungere', 'domini da aggiungere')"></span><span x-show="!f.new">già tutti dentro</span></span></span>
+          </label>
+        </template>
+        <div class="empty" x-show="!fromSites.list.length">Nessun sito in Sentinel.</div>
+      </div>
+      <div class="msg err" x-show="fromSites.err" x-text="fromSites.err"></div>
+    </div>
+    <div class="foot"><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" :disabled="!!(fromSites.busy || !fromSitesNew)" @click="addFromSites()"><span class="spinner" x-show="fromSites.busy"></span> <span x-text="'Aggiungi ' + fromSitesNew + ' ' + pl(fromSitesNew, 'dominio', 'domini')"></span></button></div>
   </div></div>
 </template>
 

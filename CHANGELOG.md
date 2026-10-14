@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.40.0 — Gestione domini, domini dai siti, aggiornamenti senza "type non valido"
+
+### Changed
+- **"Gestione clienti" diventa "Gestione domini"** (stesso posto nel menu, indirizzo `#/domains`;
+  i vecchi link `#/customers` funzionano ancora). Il nome non si confonde più con i clienti del
+  Report clienti.
+
+### Added
+- **Aggiungi dai siti**: i domini dei siti di Sentinel entrano in Gestione domini con **una voce
+  per cartella**. Le sottocartelle diventano i sottoclienti della voce, e i siti senza cartella
+  vanno in "Siti senza cartella". Scegli le cartelle; i domini già presenti, anche in altre voci,
+  non si toccano, e si può rilanciare quando aggiungi siti.
+  - Se esiste già una voce col nome della cartella, si usa quella.
+  - **Rinominando la cartella in Sentinel si rinomina anche la voce.**
+  - "Sito su" prende il nome del server dato in Gestione server, altrimenti l'IP.
+- **"Email ospitate su" dai DNS**: se il campo è vuoto (per esempio nei domini aggiunti dai
+  siti), il controllo DNS lo ricava dagli MX: un provider noto (Microsoft 365, Google Workspace,
+  Aruba, Register.it, Netsons, Serverplan, OVH, IONOS…), "Stesso server del sito" quando gli MX
+  puntano all'indirizzo del sito, altrimenti il nome del server di posta. Un valore già scritto
+  non si tocca.
+
+### Fixed
+- **Aggiornamento WordPress fallito con "type non valido"** (visto su un sito durante un rebuild
+  di Sentinel, riuscito al secondo tentativo). Il primo tentativo passa da admin-ajax.php con un
+  POST. Se il sito o un proxy rispondeva con un redirect (301/302), Sentinel lo seguiva come GET
+  e i dati si perdevano: il connettore riceveva una richiesta vuota e rispondeva "type non
+  valido", e l'aggiornamento risultava fallito senza essere mai partito. Ora il redirect non si
+  segue e, come per una risposta "type non valido", si passa subito al percorso REST.
+
+### Tests
+- `tests/test_update_redirect.py`: redirect su admin-ajax, richiesta arrivata vuota, risposta
+  normale.
+- `tests/test_client_cards.py`: domini dalle cartelle (voci, sottocartelle, siti senza cartella,
+  niente doppioni), rinomina della cartella che rinomina le voci, "Email ospitate su" ricavata
+  dagli MX.
+
 ## 2.39.1 — Gestione clienti: niente sottolineato sulle righe
 
 ### Fixed

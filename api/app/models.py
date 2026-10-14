@@ -405,6 +405,9 @@ class Client(Base):
     notes: Mapped[str] = mapped_column(Text, default="")             # note generali della scheda cliente
     # sottocliente: il cliente "padre" (es. un'agenzia) a cui appartiene; un livello solo
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Gestione domini: cartella di Sentinel da cui viene la voce ("Clienti" o "Clienti/Agenzia");
+    # rinominando la cartella si rinomina anche la voce
+    folder: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

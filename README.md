@@ -139,12 +139,14 @@ The data shown is a demo fleet with made-up names.
   folders. The client reports have **their own settings** — automatic sending, day and time,
   sections, texts and PDF layout — separate from your monthly report, with a live preview on
   any client
-- **Client management**: for each client (and its optional **sub-clients**) the domains with where
+- **Domain management**: for each client (and its optional **sub-clients**) the domains with where
   the mail is hosted, how to manage the mailboxes, panel and webmail links, the account to use (a
   reference, never a password), where DNS/MX are edited, where the site runs, renewals and notes.
   Mail and hosting **providers** keep shared how-tos (log in, create a mailbox, change a password,
   forwarding) shown on every domain they host. Everything can be **imported from an Excel/CSV
-  sheet** (preview first; one sub-client per domain group; re-import updates without erasing)
+  sheet** (preview first; one sub-client per domain group; re-import updates without erasing) or
+  **added from the Sentinel sites**, one entry per folder (renaming the folder renames the entry);
+  where the mail is hosted is read from the MX records when not filled in
 - **Daily DNS check** of the client domains (MX, NS, A): a change is confirmed by a second read,
   highlighted on the client details until marked as seen and sent as one alert per client
 - **Detailed reports on demand** (PDF or CSV) for one site, a selection or everything, over
@@ -263,9 +265,10 @@ WordPress package export (*Take from a site*) needs connector 2.19 or later. Add
 | Monthly report: day and time, recipient, content, layout | Monthly report |
 | Clients, their sites and addresses, automatic report to the client | Client reports |
 | Client reports: day, hour, sections, texts, PDF layout (one set for all clients) | Client reports → Settings |
-| Clients and sub-clients with domains, mail, DNS, renewals, Excel import | Client management |
-| Shared how-tos of mail and hosting providers | Client management → Providers |
-| Daily DNS check of the client domains | Client management → Settings |
+| Clients and sub-clients with domains, mail, DNS, renewals, Excel import | Domain management |
+| Domains of the Sentinel sites, one entry per folder | Domain management → Add from sites |
+| Shared how-tos of mail and hosting providers | Domain management → Providers |
+| Daily DNS check of the client domains | Domain management → Settings |
 | Text of the email sent to clients with their report | Notifications → Monthly report to the client |
 | Brake on weak servers (sites at a time, rests, pause between updates) | Settings → Site servers |
 | Database credentials, SMTP, Telegram, secrets, ports | `.env` |

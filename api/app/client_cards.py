@@ -202,9 +202,9 @@ def rewrite_refs(text: str, result: dict, sheet: str = "") -> str:
         kind, cols = result["columns"].get(target, (None, {}))
         field = cols.get(m.group(1).upper())
         if kind == "domain" and field in FIELD_LABELS:
-            return f'nel campo "{FIELD_LABELS[field]}" del dominio (Gestione clienti → scheda del cliente)'
+            return f'nel campo "{FIELD_LABELS[field]}" del dominio (Gestione domini → scheda)'
         if kind == "provider" and field in PROVIDER_LABELS:
-            return f'nel campo "{PROVIDER_LABELS[field]}" del provider (Gestione clienti → Provider)'
+            return f'nel campo "{PROVIDER_LABELS[field]}" del provider (Gestione domini → Provider)'
         return m.group(0)
     return _REF.sub(sub, text)
 
@@ -328,6 +328,13 @@ def match_provider(mail_host: str, providers) -> int | None:
         elif any(_same(h, a) for h in hosts for a in alts):
             loose = loose or p.id
     return exact or loose
+
+
+def folder_entry_name(path: str) -> str:
+    """Nome della voce per una cartella: "Clienti" -> "Clienti", "Clienti/Agenzia" -> "Agenzia",
+    "Clienti/Agenzia/Bar" -> "Agenzia / Bar" (le voci hanno un livello di sottoclienti solo)."""
+    parts = [p for p in str(path or "").split("/") if p]
+    return " / ".join(parts[1:]) if len(parts) > 1 else (parts[0] if parts else "")
 
 
 def site_host(url: str) -> str:

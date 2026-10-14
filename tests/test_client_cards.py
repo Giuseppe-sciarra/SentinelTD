@@ -1,4 +1,4 @@
-"""Gestione clienti: import del foglio dei domini, abbinamento ai provider, scheda e controllo DNS.
+"""Gestione domini: import del foglio dei domini, abbinamento ai provider, scheda e controllo DNS.
 
 I dati qui sono inventati: il foglio vero dei clienti non entra mai nel repository."""
 import io
@@ -78,9 +78,9 @@ class ParserTests(unittest.TestCase):
     def test_excel_column_references_become_panel_places(self):
         r = cc.parse_workbook(workbook(), "domini.xlsx")
         self.assertEqual(r["notes"], ['Spostare la posta su un altro provider: cambia i record MX dove sta il DNS, indicato '
-                                      'nel campo "DNS / record MX modificabili su" del dominio (Gestione clienti → scheda del cliente).'])
+                                      'nel campo "DNS / record MX modificabili su" del dominio (Gestione domini → scheda).'])
         quattro = next(d for d in r["domains"] if d["domain"] == "quattro.example")
-        self.assertEqual(quattro["notes"], 'Vedi nel campo "DNS / record MX modificabili su" del dominio (Gestione clienti → scheda del cliente).')
+        self.assertEqual(quattro["notes"], 'Vedi nel campo "DNS / record MX modificabili su" del dominio (Gestione domini → scheda).')
         self.assertEqual(cc.rewrite_refs("colonna Z", r, "email per dominio"), "colonna Z")     # non risolvibile: resta
 
     def test_domains_are_grouped_by_common_name(self):
@@ -363,6 +363,59 @@ class CardApiTests(unittest.IsolatedAsyncioTestCase):
             res = await client_dns.run_check(self.cid)            # il controllo del principale include i sottoclienti
         self.assertEqual(res["changed"], 1)
         self.assertEqual(dispatch.await_args.args[1]["client_name"], "Agenzia Test")
+
+    async def test_domains_from_sentinel_folders_and_folder_rename(self):
+        from app.routers import sites as rsites
+        async with self.sessions() as s:
+            s.add_all([Site(name="Due", url="https://due.example", cms="wp", token="t", tags="Clienti"),
+                       Site(name="Tre", url="https://www.tre.example/", cms="wp", token="t", tags="Clienti/Agenzia,Altro"),
+                       Site(name="Quattro", url="https://quattro.example", cms="joomla", token="t", tags="")])
+            await s.commit()
+        self.app.include_router(rsites.router)
+        with patch.object(rcards, "_site_server_labels", AsyncMock(return_value={})):
+            async with self.client() as c:
+                folders = {f["folder"]: f for f in (await c.get("/api/clients/site-folders")).json()}
+                self.assertEqual(sorted(folders), ["Clienti", "Clienti/Agenzia", "__none"])
+                self.assertEqual(folders["__none"]["sites"], 2)          # "Uno" del fixture e "Quattro"
+                # "Agenzia Test" (cliente del fixture, creato a mano) non c'entra; "Clienti" non esiste: si crea
+                res = (await c.post("/api/clients/from-folders", json={"folders": ["Clienti", "Clienti/Agenzia", "__none"]})).json()
+                self.assertEqual((res["entries_new"], res["domains_new"]), (3, 4))
+                again = (await c.post("/api/clients/from-folders", json={"folders": ["Clienti", "Clienti/Agenzia"]})).json()
+                self.assertEqual((again["entries_new"], again["domains_new"], again["already"]), (0, 0, 2))
+                listing = {x["name"]: x for x in (await c.get("/api/clients")).json()}
+                self.assertEqual(listing["Agenzia"]["parent_id"], listing["Clienti"]["id"])
+                self.assertEqual(listing["Agenzia"]["folder"], "Clienti/Agenzia")
+                card = (await c.get(f"/api/clients/{listing['Clienti']['id']}/card")).json()
+                self.assertEqual(sorted(d["domain"] for d in card["domains"]), ["due.example", "tre.example"])
+                # rinominare la cartella rinomina le voci collegate
+                r = await c.post("/api/sites/bulk/rename-folder", json={"from": "Clienti", "to": "Clienti diretti"})
+                self.assertEqual(r.status_code, 200, r.text)
+                listing = {x["name"]: x for x in (await c.get("/api/clients")).json()}
+                self.assertIn("Clienti diretti", listing)
+                self.assertEqual(listing["Agenzia"]["folder"], "Clienti diretti/Agenzia")
+
+    async def test_mail_host_is_guessed_from_mx_when_empty(self):
+        await self.add_domains(("ms.example", True), ("stesso.example", True), ("scritto.example", True))
+        async with self.sessions() as s:
+            d = (await s.execute(select(ClientDomain).where(ClientDomain.domain == "scritto.example"))).scalar()
+            d.mail_host = "Il mio server"
+            d = (await s.execute(select(ClientDomain).where(ClientDomain.domain == "stesso.example"))).scalar()
+            d.site_host = "server-a"
+            await s.commit()
+        answers = {"ms.example": ["0 ms-example.mail.protection.outlook.com"], "stesso.example": ["10 mail.stesso.example"],
+                   "scritto.example": ["10 mx.aruba.it"]}
+
+        async def lookup(domain, res=None):
+            return {"mx": answers[domain], "ns": [], "a": ["192.0.2.5"], "nx": False, "error": ""}
+
+        async def query(res, name, rtype):
+            return (["192.0.2.5"], "") if name == "mail.stesso.example" else ([], "")
+        with patch.object(client_dns, "lookup", lookup), patch.object(client_dns, "_query", query):
+            await client_dns.run_check(notify=False)
+        async with self.sessions() as s:
+            got = {d.domain: d.mail_host for d in (await s.execute(select(ClientDomain))).scalars().all()}
+        self.assertEqual(got, {"ms.example": "Microsoft 365", "stesso.example": "Stesso server del sito (server-a)",
+                               "scritto.example": "Il mio server"})
 
     async def test_worker_job_respects_switch_and_running_flag(self):
         from app import worker

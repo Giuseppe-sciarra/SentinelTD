@@ -1,4 +1,4 @@
-"""Gestione clienti: scheda del cliente (domini, posta, DNS, rinnovi) e provider.
+"""Gestione domini: scheda del cliente (domini, posta, DNS, rinnovi) e provider.
 
 Solo consultazione e appunti: nessuna password, solo riferimenti all'account."""
 import json
@@ -407,6 +407,119 @@ async def ack_all(cid: int, s: AsyncSession = Depends(get_session)):
 async def dns_check_client(cid: int, s: AsyncSession = Depends(get_session)):
     await _client(s, cid)
     return await _start_check(cid)
+
+
+# ------------------------------------------------------------------ domini dai siti di Sentinel
+NO_FOLDER = "__none"
+NO_FOLDER_NAME = "Siti senza cartella"
+
+
+def _site_folder(site: Site) -> str:
+    """Cartella del sito (la prima, se ne ha piu' d'una): "Clienti" o "Clienti/Agenzia"."""
+    tags = [t.strip().strip("/") for t in (site.tags or "").split(",") if t.strip().strip("/")]
+    return tags[0] if tags else NO_FOLDER
+
+
+async def _site_server_labels(sites) -> dict:
+    """Sito -> nome del server su cui gira (quello dato in Gestione server, altrimenti l'IP)."""
+    from redis.asyncio import from_url
+    from ..servers import machine_key, server_of, site_hostname
+    out = {}
+    try:
+        prefs = await get_operational_settings()
+        labels, split = prefs.get("server_labels") or {}, set(prefs.get("server_split") or [])
+        r = from_url(settings.REDIS_URL)
+        try:
+            for site in sites:
+                ip = await server_of(r, site.url)
+                key = machine_key(ip, site_hostname(site), split)
+                name = labels.get(key) or labels.get(ip) or ""
+                out[site.id] = name or ("" if ip.startswith("host:") else ip)
+        finally:
+            await r.aclose()
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+async def _sites_by_folder(s: AsyncSession) -> dict[str, list]:
+    sites = (await s.execute(select(Site).order_by(func.lower(Site.name)))).scalars().all()
+    out: dict[str, list] = {}
+    for site in sites:
+        if cc.site_host(site.url):
+            out.setdefault(_site_folder(site), []).append(site)
+    return out
+
+
+@router.get("/site-folders")
+async def site_folders(s: AsyncSession = Depends(get_session)):
+    """Cartelle di Sentinel con i loro siti: quanti domini sono gia' in Gestione domini."""
+    have = set((await s.execute(select(ClientDomain.domain))).scalars().all())
+    folders = await _sites_by_folder(s)
+    linked = {c.folder.lower(): c.name for c in (await s.execute(select(Client).where(Client.folder != ""))).scalars().all()}
+    out = []
+    for path in sorted(folders, key=lambda p: (p == NO_FOLDER, p.lower())):
+        doms = [cc.site_host(x.url) for x in folders[path]]
+        out.append({"folder": path, "name": NO_FOLDER_NAME if path == NO_FOLDER else path.replace("/", " / "),
+                    "sites": len(doms), "new": sum(1 for d in doms if d not in have), "linked": linked.get(path.lower(), "")})
+    return out
+
+
+async def _folder_entry(s: AsyncSession, path: str, cache: dict, stats: dict) -> int:
+    """Voce di Gestione domini per una cartella: la cartella principale e' un cliente, la
+    sottocartella un suo sottocliente. Si riusa la voce gia' collegata alla cartella, o quella
+    con lo stesso nome (es. un cliente creato a mano), altrimenti se ne crea una."""
+    if path.lower() in cache:
+        return cache[path.lower()]
+    parts = [p for p in path.split("/") if p] if path != NO_FOLDER else [NO_FOLDER]
+    parent_id = await _folder_entry(s, parts[0], cache, stats) if len(parts) > 1 else None
+    name = NO_FOLDER_NAME if path == NO_FOLDER else cc.folder_entry_name(path)
+    q = select(Client).where(func.lower(Client.folder) == path.lower())
+    cl = (await s.execute(q)).scalars().first()
+    if cl is None:
+        q = select(Client).where(func.lower(Client.name) == name.lower(), Client.folder == "")
+        q = q.where(Client.parent_id == parent_id) if parent_id else q.where(Client.parent_id.is_(None))
+        cl = (await s.execute(q)).scalars().first()
+        if cl is not None:
+            cl.folder = path
+    if cl is None:
+        cl = Client(name=name[:190], emails="", enabled=False, notes="", parent_id=parent_id, folder=path)
+        s.add(cl)
+        await s.flush()
+        stats["entries_new"] += 1
+    cache[path.lower()] = cl.id
+    return cl.id
+
+
+@router.post("/from-folders")
+async def domains_from_folders(payload: dict = Body(...), s: AsyncSession = Depends(get_session)):
+    """Aggiunge a Gestione domini i domini dei siti di Sentinel, una voce per cartella.
+    I domini gia' presenti (in qualsiasi voce) non si toccano."""
+    wanted = {str(x).strip().strip("/").lower() for x in (payload.get("folders") or []) if str(x).strip()}
+    if not wanted:
+        raise HTTPException(422, "Scegli almeno una cartella")
+    folders = await _sites_by_folder(s)
+    chosen = [p for p in folders if p.lower() in wanted]
+    sites = [x for p in chosen for x in folders[p]]
+    labels = await _site_server_labels(sites)
+    providers = (await s.execute(select(ClientProvider))).scalars().all()
+    have = set((await s.execute(select(ClientDomain.domain))).scalars().all())
+    stats = {"entries_new": 0, "domains_new": 0, "already": 0}
+    cache: dict[str, int] = {}
+    for path in sorted(chosen, key=str.lower):
+        target = await _folder_entry(s, path, cache, stats)
+        for site in folders[path]:
+            dom = cc.site_host(site.url)
+            if dom in have:
+                stats["already"] += 1
+                continue
+            have.add(dom)
+            d = ClientDomain(client_id=target, domain=dom, active=True, site_host=(labels.get(site.id) or "")[:190])
+            d.provider_id = cc.match_provider(d.mail_host, providers)
+            s.add(d)
+            stats["domains_new"] += 1
+    await s.commit()
+    return stats
 
 
 # ------------------------------------------------------------------ import da Excel / CSV

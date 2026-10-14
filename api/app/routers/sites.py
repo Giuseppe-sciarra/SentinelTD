@@ -177,6 +177,14 @@ async def rename_folder(payload: dict = Body(...), s: AsyncSession = Depends(get
             updated += 1
     if not updated:
         raise HTTPException(404, "Nessun sito si trova in quella cartella")
+    # Gestione domini: le voci nate da questa cartella (e dalle sue sottocartelle) la seguono
+    from ..models import Client
+    for cl in (await s.execute(select(Client).where(Client.folder != ""))).scalars().all():
+        fl = cl.folder.lower()
+        if fl == old_lc or fl.startswith(old_lc + "/"):
+            cl.folder = new + cl.folder[len(old):]
+            from ..client_cards import folder_entry_name
+            cl.name = folder_entry_name(cl.folder)[:190]
     await s.commit()
     return {"updated": updated, "from": old, "to": new}
 
