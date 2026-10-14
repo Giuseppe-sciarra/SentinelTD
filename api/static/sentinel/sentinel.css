@@ -1218,7 +1218,7 @@ th.sortable:hover { color: var(--txt); }
 @media(max-width:600px){.offline-totals{gap:8px}.offline-totals .card{padding:12px}.offline-totals .small{font-size:11px}.offline-filters .field{min-width:100%;max-width:100%}.offline-log .card{min-width:0}.offline-log .table-scroll{max-width:100%;overflow:auto}}
 /* pagina Server: una riga per server, si apre a tendina */
 .srvx-list { margin-top: 16px; border: 1px solid var(--bd); border-radius: 14px; overflow: hidden; background: var(--panel); }
-.srvx-cols, .srvx-head { display: grid; grid-template-columns: 22px minmax(220px, 1.4fr) 190px 190px minmax(160px, 1fr) 48px; gap: 14px; align-items: center; padding: 10px 16px; }
+.srvx-cols, .srvx-head { display: grid; grid-template-columns: 22px minmax(240px, 1.6fr) 210px minmax(180px, 1fr) 48px; gap: 14px; align-items: center; padding: 10px 16px; }
 .srvx-cols { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); border-bottom: 1px solid var(--bd); }
 .srvx { border-bottom: 1px solid var(--bd); } .srvx:last-child { border-bottom: 0; }
 .srvx-head { cursor: pointer; } .srvx-head:hover, .srvx.open .srvx-head { background: var(--panel-2); }
@@ -1227,8 +1227,6 @@ th.sortable:hover { color: var(--txt); }
 .srvx-name { min-width: 0; } .srvx-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .srvpg-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .srvx-body { padding: 6px 16px 14px 52px; background: var(--panel-2); }
-.srvpg-editbox { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: end; padding: 10px 12px 12px; margin-bottom: 10px; background: var(--panel); border: 1px dashed var(--bd); border-radius: 10px; }
-.srvpg-editbox .field { margin: 0; }
 .srvpg-sites { display: flex; flex-direction: column; gap: 2px; }
 .srvpg-site { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; min-width: 0; }
 .srvpg-site:hover { background: var(--panel); }
@@ -1237,7 +1235,7 @@ th.sortable:hover { color: var(--txt); }
 .srvpg-url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
 .srvpg-site .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--mut); }
 .srvpg-site .dot.ok { background: var(--ok); } .srvpg-site .dot.err { background: var(--err); } .srvpg-site .dot.warn { background: var(--warn); }
-@media (max-width: 1100px) { .srvx-cols { display: none; } .srvx-head { grid-template-columns: 22px 1fr auto; } .srvx-head > :nth-child(4), .srvx-head > :nth-child(5) { display: none; } .srvpg-editbox { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .srvx-cols { display: none; } .srvx-head { grid-template-columns: 22px 1fr auto auto; } .srvx-head > :nth-child(3) { display: none; } }
 .srv-split { grid-column: 1 / -1; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); border: 1px dashed var(--bd); display: flex; flex-direction: column; gap: 5px; }
 .srvx-sort { cursor: pointer; user-select: none; } .srvx-sort:hover { color: var(--txt); }
 .srv-machines { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
@@ -1327,10 +1325,20 @@ th.sortable:hover { color: var(--txt); }
 .cust-row:hover .cli-name > span:first-child { color: var(--acc); }
 
 /* Gestione server: accessi del pannello e FTP */
-.srvpg-editbox > .row { grid-column: 1 / -1; }
-.srvpg-credsec { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--mut); padding-top: 8px; border-top: 1px solid var(--bd); }
-.srv-creds { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin-bottom: 10px; border: 1px solid var(--bd); border-radius: 10px; background: var(--bg-2); font-size: 13px; }
-.srv-creds > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
-.srv-creds .mono { overflow-wrap: anywhere; }
 .srv-cbtn { background: none; border: 1px solid var(--bd); color: var(--txt-2); border-radius: 6px; padding: 1px 7px; font-size: 12px; cursor: pointer; margin-left: 2px; }
 .srv-cbtn:hover { border-color: var(--acc); color: var(--txt); }
+.srvx-acc { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.acc-chip { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--acc-bg); color: #cfe0ff; border: 1px solid rgba(79,140,255,.25); }
+.acc-chip.mut { background: var(--panel); color: var(--txt-2); border-color: var(--bd); }
+.acc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin: 6px 0 14px; }
+.acc-card { background: var(--panel); border: 1px solid var(--bd); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.acc-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--txt-2); min-height: 28px; }
+.acc-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; font-size: 13px; }
+.acc-k { color: var(--mut); font-size: 12px; }
+.acc-v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-note { white-space: pre-wrap; font-size: 13px; color: var(--txt); }
+.acc-empty { display: flex; align-items: center; gap: 10px; padding: 10px 2px; }
+.acc-sites-title { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--txt-2); margin: 0 0 6px; }
+.srv-form2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.srv-clear { margin: -6px 0 6px; }
+.acc-title .btn { text-transform: none; letter-spacing: 0; font-weight: 500; }

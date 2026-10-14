@@ -1989,16 +1989,32 @@ function sentinel() {
       return out;
     },
     // ---------- pagina Server ----------
-    async saveServersPage() {
-      const key = this.srvpg.editing;
+    // Gestione server: la finestra "Modifica server" salva nome e appunto (impostazioni) e gli accessi
+    openSrvEdit(g) {
+      const key = g.server, c = this.srvCred(key), p = this.srvPanel(key);
+      this.srvpg.editing = key;
+      this.srvpg.cred = { key, title: g.title || g.ip, ip: g.ip + (g.machine ? ' · ' + g.machine : ''), machines: g.machines || [],
+                          name: this.srvLabel(key), url: p.url || '', note: p.note || '',
+                          panel_user: c.panel_user || '', panel_password: '', clear_panel_password: false, ftp_proto: c.ftp_proto || 'ftp',
+                          ftp_host: c.ftp_host || '', ftp_port: c.ftp_port ? String(c.ftp_port) : '', ftp_user: c.ftp_user || '', ftp_password: '', clear_ftp_password: false };
+      this.drawer = 'srvedit';
+    },
+    async saveSrvEdit() {
+      const f = this.srvpg.cred, key = f.key;
+      if (!key) return;
+      this.setSrvLabel(key, f.name);
+      this.setSrvPanel(key, 'url', f.url);
+      this.setSrvPanel(key, 'note', f.note);
       await this.savePrefs();
-      if (this.prefs.err) return;
-      if (key) {
-        const r = await this.api('/api/server-credentials/save', { method: 'POST', body: JSON.stringify({ key, ...this.srvpg.cred }) });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); this.say(d.detail || 'Accessi non salvati', 5000); return; }
-        this.srvReveal = Object.fromEntries(Object.entries(this.srvReveal).filter(([k]) => !k.startsWith(key + '|')));
-      }
-      this.srvpg.editing = ''; await this.loadServersPage();
+      if (this.prefs.err) { this.say(this.prefs.err, 6000); return; }
+      const body = { key, panel_user: f.panel_user, panel_password: f.panel_password, clear_panel_password: f.clear_panel_password,
+                     ftp_proto: f.ftp_proto, ftp_host: f.ftp_host, ftp_port: f.ftp_port, ftp_user: f.ftp_user, ftp_password: f.ftp_password,
+                     clear_ftp_password: f.clear_ftp_password };
+      const r = await this.api('/api/server-credentials/save', { method: 'POST', body: JSON.stringify(body) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); this.say(d.detail || 'Accessi non salvati', 5000); return; }
+      this.srvReveal = Object.fromEntries(Object.entries(this.srvReveal).filter(([k]) => !k.startsWith(key + '|')));
+      this.drawer = null; this.srvpg.editing = ''; this.srvpg.open = { ...this.srvpg.open, [key]: true };
+      this.prefs.msg = ''; await this.loadServersPage(); this.say('Server salvato');
     },
     async loadServersPage() {
       this.srvpg.busy = true;
@@ -2010,7 +2026,8 @@ function sentinel() {
     },
     // accessi del server: utenti e indirizzo in chiaro, password solo su richiesta
     srvCred(key) { return this.srvCreds[key] || {}; },
-    srvCredAny(key) { const c = this.srvCreds[key]; return !!(c && (c.panel_user || c.panel_password || c.ftp_host || c.ftp_user || c.ftp_password)); },
+    srvHasPanel(key) { const c = this.srvCreds[key] || {}; return !!(this.srvPanel(key).url || c.panel_user || c.panel_password); },
+    srvHasFtp(key) { const c = this.srvCreds[key] || {}; return !!(c.ftp_host || c.ftp_user || c.ftp_password); },
     async fetchPassword(key, field) {
       const r = await this.api('/api/server-credentials/reveal', { method: 'POST', body: JSON.stringify({ key, field }) });
       const d = await r.json().catch(() => ({}));
@@ -2040,12 +2057,6 @@ function sentinel() {
       this.srvpg.editing = '';
       if (where === 'settings') await this.loadServers(); else await this.loadServersPage();
       this.say(this.isSplit(ip) ? 'Server diviso per macchina' : 'Macchine di nuovo insieme');
-    },
-    srvpgEdit(ip) {
-      this.srvpg.editing = this.srvpg.editing === ip ? '' : ip; this.srvpg.open = { ...this.srvpg.open, [ip]: true };
-      const c = this.srvCred(ip);
-      this.srvpg.cred = { panel_user: c.panel_user || '', panel_password: '', clear_panel_password: false, ftp_proto: c.ftp_proto || 'ftp',
-                          ftp_host: c.ftp_host || '', ftp_port: c.ftp_port ? String(c.ftp_port) : '', ftp_user: c.ftp_user || '', ftp_password: '', clear_ftp_password: false };
     },
     srvPanel(ip) { return ((this.prefs && this.prefs.server_panels) || {})[ip] || { url: '', note: '' }; },
     setSrvPanel(ip, k, v) {

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.43.0 — Gestione server più ordinata
+
+### Changed
+- **Riga chiusa**: nome e IP del server, siti, e nella colonna **Accessi** le etichette di
+  quello che c'è (Pannello, FTP/FTPS/SFTP, Appunto). Al posto delle colonne "Pannello hosting"
+  e "Appunto".
+- **Riga aperta**: tutto dentro, in schede affiancate.
+  - **Pannello hosting**: pulsante "Apri il pannello", indirizzo, utente e password.
+  - **FTP**: tipo, indirizzo, porta, utente e password.
+  - **Appunto**.
+  - Sotto, i siti su quel server. Ogni valore ha il pulsante per copiarlo; le password restano
+    nascoste finché non premi "Mostra".
+- **✏️ apre la finestra "Modifica server"** a lato, divisa in Server (nome, appunto), Pannello
+  hosting (indirizzo, utente, password) e FTP (tipo, porta, indirizzo, utente, password). Prima
+  era un modulo dentro la riga.
+
 ## 2.42.1 — Gestione domini: niente etichetta "cartella" in elenco
 
 ### Changed
