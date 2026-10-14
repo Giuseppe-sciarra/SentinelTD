@@ -1252,6 +1252,24 @@ def _translations_done_with_updates(site: Site, etype: str, ext, res: dict, done
     return {**res, "new": f"traduzioni aggiornate ({n}/{n})"}
 
 
+def _translations_not_applied(site: Site, etype: str, res: dict) -> dict:
+    """Connettore WordPress fino alla 2.38: "traduzioni aggiornate (0/N)" con esito riuscito.
+
+    Vuol dire che dopo l'installazione WordPress proponeva ancora le stesse N traduzioni:
+    non sono state applicate (o WordPress ripropone sempre lo stesso pacchetto). Non e' un
+    aggiornamento riuscito: risulta fallito, cosi' non riparte a ogni ciclo con email e
+    Telegram "aggiornato" e si riprova dopo l'attesa dei falliti. Dal connettore 2.39 il
+    connettore controlla i file scritti e lo dice da solo."""
+    if site.cms != "wp" or etype != "language" or not res.get("ok"):
+        return res
+    m = re.match(r"traduzioni aggiornate \(0/(\d+)\)", str(res.get("new") or ""))
+    if not m:
+        return res
+    return {**res, "ok": False, "new": "",
+            "error": f"traduzioni non applicate: dopo l'installazione WordPress propone ancora le stesse {m.group(1)} "
+                     "(il connettore 2.39, in arrivo col giro notturno, dice il motivo)"}
+
+
 def _params_lost(resp: dict) -> bool:
     """Il connettore ha ricevuto la richiesta senza i dati (tipo e slug vuoti): non e' l'esito
     dell'aggiornamento, e' una richiesta arrivata vuota (redirect, proxy, hosting)."""
@@ -1758,6 +1776,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # #__updates, e il pending (con notifica) rinasceva a ogni ciclo.
             res = await _update_one(site, etype, slug, expected=(ext.new_version if ext is not None else ""))
             res = _translations_done_with_updates(site, etype, ext, res, done)
+            res = _translations_not_applied(site, etype, res)
 
             # PRODOTTO A LICENZA che non si aggiorna da remoto (es. Elementor Pro senza
             # pacchetto scaricabile): non e' un guasto, va fatto dal backend del sito.

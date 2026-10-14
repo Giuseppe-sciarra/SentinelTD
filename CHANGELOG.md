@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.44.0 — Traduzioni WordPress: "aggiornate (0/1)" a ogni giro (connettore WP 2.39.0)
+
+### Fixed
+- **Traduzioni segnate "aggiornate (0/1)" ad ogni ciclo, con email e Telegram ogni ora**, su
+  alcuni siti. Il connettore contava le traduzioni proposte da WordPress prima e dopo
+  l'installazione, e dava "riuscito" anche quando dopo ne restava proposta la stessa quantità.
+  - **Connettore WordPress 2.39.0**: per ogni traduzione controlla se il file è stato scritto
+    davvero.
+    - Scritta → "traduzioni aggiornate (N/M)" con N quelle installate.
+    - Scritta, ma WordPress ripropone **lo stesso pacchetto** (stessa data) → il connettore se
+      lo ricorda e non la segnala più da aggiornare, finché non esce un pacchetto nuovo.
+    - Non scritta → aggiornamento **fallito**, col motivo dato dall'installatore di WordPress
+      (download non riuscito, cartella `wp-content/languages` non scrivibile…). Prima risultava
+      "riuscito".
+  - **Pannello**: con i connettori più vecchi, finché il giro notturno non installa il 2.39,
+    "traduzioni aggiornate (0/N)" conta come **fallito** e non come aggiornato. Così parte
+    l'avviso di aggiornamento non riuscito, e si riprova dopo l'attesa dei falliti invece che a
+    ogni ora.
+
+### Tests
+- `tests/connector_translations.test.php` (anche in CI): traduzione installata, installata ma
+  riproposta identica, non installata.
+- `tests/test_update_cycle_history.py`: "0/N" fallito con attesa prima di riprovare, "1/2"
+  resta riuscito.
+
 ## 2.43.0 — Gestione server più ordinata
 
 ### Changed

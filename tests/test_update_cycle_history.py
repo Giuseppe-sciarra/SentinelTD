@@ -105,6 +105,27 @@ class UpdateCycleHistoryTests(unittest.IsolatedAsyncioTestCase):
         outcome, hist, log, notify = await self.run_cycle([self.NO_LANG], build=wp_payload(with_plugin=False))
         self.assertEqual([h.to_version for h in hist], ["nessuna traduzione da aggiornare"])
 
+    async def test_translations_still_offered_after_install_are_a_failure(self):
+        same = {"ok": True, "error": "", "new": "traduzioni aggiornate (0/1)", "noop": False, "message": "", "manual": False}
+
+        def still_offered(updated):      # WordPress propone la stessa traduzione anche dopo
+            return {"cms": "wp", "core": {"current": "6.8.3", "latest": "6.8.3", "update": False},
+                    "extensions": [{"type": "language", "name": "Traduzioni (1)", "slug": "wp-translations",
+                                    "current": "", "new": "1", "update": True}]}
+        outcome, hist, log, notify = await self.run_cycle([same], build=still_offered)
+        self.assertEqual([(h.ok, h.to_version) for h in hist], [(False, "")])
+        self.assertIn("non applicate", hist[0].error)
+        self.assertIn("update_failed", [c.args[0] for c in notify.await_args_list])
+        async with self.sessions() as s:
+            from app.models import Extension
+            ext = (await s.execute(select(Extension).where(Extension.type == "language"))).scalar()
+        self.assertIsNotNone(ext.update_failed_at)                    # non riparte al ciclo dopo
+
+    async def test_partial_translations_stay_updated(self):
+        part = {"ok": True, "error": "", "new": "traduzioni aggiornate (1/2)", "noop": False, "message": "", "manual": False}
+        outcome, hist, log, notify = await self.run_cycle([part], build=wp_payload(with_plugin=False))
+        self.assertEqual([(h.ok, h.to_version) for h in hist], [(True, "traduzioni aggiornate (1/2)")])
+
     async def test_failed_plugin_does_not_turn_translations_into_updated(self):
         bad = {"ok": False, "error": "download fallito", "new": "", "noop": False, "message": "", "manual": False}
         outcome, hist, log, notify = await self.run_cycle([bad, self.NO_LANG], build=wp_payload(with_plugin=True))

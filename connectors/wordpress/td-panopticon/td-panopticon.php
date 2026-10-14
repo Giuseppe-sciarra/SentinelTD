@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.38.0
+ * Version: 2.39.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -1008,39 +1008,7 @@ function tdpanop_status($req = null)
     // (le revisioni PO non vengono riconciliate): senza questo confronto la voce
     // "Traduzioni" resterebbe update=true per sempre -> riproposta ad ogni ciclo con
     // relativa email/Telegram, anche se non c'e' nulla di nuovo da fare.
-    $installedTrans = [];
-    if (function_exists('wp_get_installed_translations')) {
-        foreach (['plugin' => 'plugins', 'theme' => 'themes', 'core' => 'default'] as $trType => $dom) {
-            foreach ((array) wp_get_installed_translations($dom) as $islug => $langs) {
-                foreach ((array) $langs as $lang => $meta) {
-                    $rev = isset($meta['PO-Revision-Date']) ? strtotime((string) $meta['PO-Revision-Date']) : 0;
-                    $installedTrans[$trType . '|' . $islug . '|' . $lang] = $rev ?: 0;
-                }
-            }
-        }
-    }
-    $trans = [];
-    foreach (['update_core', 'update_plugins', 'update_themes'] as $tname) {
-        $tr = get_site_transient($tname);
-        if ($tr && !empty($tr->translations) && is_array($tr->translations)) {
-            foreach ($tr->translations as $t) {
-                $type = isset($t['type']) ? (string) $t['type'] : '';
-                $slug = isset($t['slug']) ? (string) $t['slug'] : '';
-                $lang = isset($t['language']) ? (string) $t['language'] : '';
-                // 'default' e' lo slug del core in wp_get_installed_translations
-                $islug   = ($type === 'core') ? 'default' : $slug;
-                $availTs = isset($t['updated']) ? strtotime((string) $t['updated']) : 0;
-                $instTs  = $installedTrans[$type . '|' . $islug . '|' . $lang] ?? 0;
-                // tieni SOLO se la disponibile e' davvero piu' nuova (o se non risulta
-                // installata): le voci "fantasma" a pari data (o piu' vecchie) spariscono.
-                if ($availTs > 0 && $instTs > 0 && $availTs <= $instTs) {
-                    continue;
-                }
-                $k = $type . '|' . $slug . '|' . $lang;
-                $trans[$k] = $t;
-            }
-        }
-    }
+    $trans = tdpanop_pending_translations();
     if (!empty($trans)) {
         $n = count($trans);
         $extensions[] = [
@@ -1090,6 +1058,86 @@ function tdpanop_plugin_file_by_slug(string $slug): string
         if (dirname($file) === $slug || $file === $slug) {
             return $file;
         }
+    }
+    return '';
+}
+
+/**
+ * Traduzioni davvero da installare, chiave "tipo|slug|lingua" -> voce del transient.
+ *
+ * Solo quelle REALMENTE piu' recenti di quelle gia' installate. WP a volte continua a
+ * elencare la stessa traduzione anche DOPO averla aggiornata (le revisioni PO non vengono
+ * riconciliate): senza questo confronto la voce "Traduzioni" resterebbe da aggiornare per
+ * sempre -> riproposta ad ogni ciclo con relativa email/Telegram. Fuori anche quelle che
+ * il connettore ha gia' installato e che WordPress ripropone identiche (tdpanop_trans_ghosts).
+ */
+function tdpanop_pending_translations(): array
+{
+    $installedTrans = [];
+    if (function_exists('wp_get_installed_translations')) {
+        foreach (['plugin' => 'plugins', 'theme' => 'themes', 'core' => 'default'] as $trType => $dom) {
+            foreach ((array) wp_get_installed_translations($dom) as $islug => $langs) {
+                foreach ((array) $langs as $lang => $meta) {
+                    $rev = isset($meta['PO-Revision-Date']) ? strtotime((string) $meta['PO-Revision-Date']) : 0;
+                    $installedTrans[$trType . '|' . $islug . '|' . $lang] = $rev ?: 0;
+                }
+            }
+        }
+    }
+    $trans = [];
+    $ghosts = (array) get_option('tdpanop_trans_ghosts', []);
+    foreach (['update_core', 'update_plugins', 'update_themes'] as $tname) {
+        $tr = get_site_transient($tname);
+        if ($tr && !empty($tr->translations) && is_array($tr->translations)) {
+            foreach ($tr->translations as $t) {
+                $type = isset($t['type']) ? (string) $t['type'] : '';
+                $slug = isset($t['slug']) ? (string) $t['slug'] : '';
+                $lang = isset($t['language']) ? (string) $t['language'] : '';
+                // 'default' e' lo slug del core in wp_get_installed_translations
+                $islug   = ($type === 'core') ? 'default' : $slug;
+                $availTs = isset($t['updated']) ? strtotime((string) $t['updated']) : 0;
+                $instTs  = $installedTrans[$type . '|' . $islug . '|' . $lang] ?? 0;
+                // tieni SOLO se la disponibile e' davvero piu' nuova (o se non risulta
+                // installata): le voci "fantasma" a pari data (o piu' vecchie) spariscono.
+                if ($availTs > 0 && $instTs > 0 && $availTs <= $instTs) {
+                    continue;
+                }
+                $k = $type . '|' . $slug . '|' . $lang;
+                // gia' installata da Sentinel, ma WordPress continua a riproporre lo STESSO
+                // pacchetto (stessa data): non e' un aggiornamento da fare (vedi tdpanop_update)
+                if (isset($ghosts[$k]) && (string) $ghosts[$k] === (string) ($t['updated'] ?? '')) {
+                    continue;
+                }
+                $trans[$k] = $t;
+            }
+        }
+    }
+    return $trans;
+}
+
+/** Chiave di una traduzione: "tipo|slug|lingua" (come nello stato). */
+function tdpanop_translation_key($u): string
+{
+    $u = (object) $u;
+    return (string) ($u->type ?? '') . '|' . (string) ($u->slug ?? '') . '|' . (string) ($u->language ?? '');
+}
+
+/** File .mo che il language pack scrive: serve a capire se l'installazione c'e' stata davvero. */
+function tdpanop_translation_file($u): string
+{
+    $u = (object) $u;
+    $lang = (string) ($u->language ?? '');
+    $slug = (string) ($u->slug ?? '');
+    if ($lang === '' || !defined('WP_LANG_DIR')) {
+        return '';
+    }
+    switch ((string) ($u->type ?? '')) {
+        case 'core':
+            return WP_LANG_DIR . '/' . $lang . '.mo';
+        case 'plugin':
+            return WP_LANG_DIR . '/plugins/' . $slug . '-' . $lang . '.mo';
+        case 'theme':
+            return WP_LANG_DIR . '/themes/' . $slug . '-' . $lang . '.mo';
     }
     return '';
 }
@@ -1242,40 +1290,83 @@ function tdpanop_update(WP_REST_Request $req)
                 return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'nessuna traduzione da aggiornare'], 200);
             }
 
+            // le traduzioni da installare, una per una: dopo si controlla quali file sono stati
+            // davvero scritti. Il conteggio "prima/dopo" sui transient non bastava: WordPress a
+            // volte ripropone lo STESSO pacchetto appena installato (risultava "0/1" ad ogni giro),
+            // altre volte l'installazione fallisce in silenzio.
+            $updates = function_exists('wp_get_translation_updates') ? (array) wp_get_translation_updates() : [];
+            $files = [];
+            foreach ($updates as $i => $u) {
+                $files[$i] = tdpanop_translation_file($u);
+            }
+            clearstatcache();
+            $start = time();
             $up  = new Language_Pack_Upgrader($skin);
-            // upgrade() senza argomenti aggiorna tutte le lingue disponibili dai transient
-            $res = $up->bulk_upgrade();
+            $res = $up->bulk_upgrade($updates);
 
-            // ricalcola dopo: rinfresca i transient e riconta
+            clearstatcache();
+            $installed = [];
+            foreach ($updates as $i => $u) {
+                $f = $files[$i];
+                if ($f !== '' && file_exists($f) && @filemtime($f) >= $start - 2) {
+                    $installed[tdpanop_translation_key($u)] = (string) ($u->updated ?? '');
+                }
+            }
+
+            // ricalcola dopo: rinfresca i transient
             wp_clean_update_cache();
             wp_update_plugins();
             wp_update_themes();
             wp_version_check();
-            $countAfter = 0;
+            $still = [];
             foreach (['update_core', 'update_plugins', 'update_themes'] as $tname) {
                 $tr = get_site_transient($tname);
                 if ($tr && !empty($tr->translations)) {
-                    $countAfter += count($tr->translations);
-                }
-            }
-
-            // successo se sono state applicate (countAfter < countBefore) o nessun errore
-            $okLang = !is_wp_error($res);
-            if (is_array($res)) {
-                // bulk_upgrade torna array di risultati; ok se almeno uno non e' WP_Error/false
-                $okLang = false;
-                foreach ($res as $r) {
-                    if ($r && !is_wp_error($r)) {
-                        $okLang = true;
-                        break;
+                    foreach ((array) $tr->translations as $t) {
+                        $still[tdpanop_translation_key((object) $t)] = (string) ($t['updated'] ?? '');
                     }
                 }
             }
-            if ($okLang) {
-                return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'traduzioni aggiornate (' . max(0, $countBefore - $countAfter) . '/' . $countBefore . ')'], 200);
+            // installata ma riproposta identica: si ricorda, cosi' non torna "da aggiornare"
+            // a ogni giro. Si dimentica quando WordPress smette di proporla o ne esce una nuova.
+            $ghosts = [];
+            foreach ((array) get_option('tdpanop_trans_ghosts', []) as $k => $upd) {
+                if (isset($still[$k]) && $still[$k] === (string) $upd) {
+                    $ghosts[$k] = (string) $upd;
+                }
             }
-            $emsg = is_wp_error($res) ? $res->get_error_message() : 'aggiornamento traduzioni non riuscito';
-            return new WP_REST_Response(['ok' => false, 'error' => $emsg, 'new' => ''], 200);
+            foreach ($installed as $k => $upd) {
+                if (isset($still[$k]) && $still[$k] === $upd) {
+                    $ghosts[$k] = $upd;
+                }
+            }
+            update_option('tdpanop_trans_ghosts', $ghosts, false);
+
+            $total = count($updates);
+            $applied = count($installed);
+            if ($total > 0 && $applied > 0) {
+                return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'traduzioni aggiornate (' . $applied . '/' . $total . ')'], 200);
+            }
+            // niente scritto: si dice il perche' (messaggi dell'installatore di WordPress)
+            $msgs = [];
+            if (is_wp_error($res)) {
+                $msgs[] = $res->get_error_message();
+            }
+            if (method_exists($skin, 'get_upgrade_messages')) {
+                foreach ((array) $skin->get_upgrade_messages() as $m) {
+                    $m = trim(wp_strip_all_tags((string) $m));
+                    if ($m !== '' && !in_array($m, $msgs, true)) {
+                        $msgs[] = $m;
+                    }
+                }
+            }
+            $names = [];
+            foreach ($updates as $u) {
+                $names[] = (($u->type ?? '') === 'core' ? 'WordPress' : (string) ($u->slug ?? '?')) . ' (' . (string) ($u->language ?? '') . ')';
+            }
+            $why = $msgs ? implode(' · ', array_slice($msgs, -3)) : 'nessun file scritto in wp-content/languages (cartella non scrivibile?)';
+            return new WP_REST_Response(['ok' => false, 'new' => '',
+                'error' => 'traduzioni non installate: ' . implode(', ', array_slice($names, 0, 5)) . ' — ' . $why], 200);
         } elseif ($type === 'core') {
             require_once ABSPATH . 'wp-admin/includes/class-core-upgrader.php';
             $updates = get_core_updates();

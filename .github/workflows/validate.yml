@@ -26,3 +26,4 @@ jobs:
       - run: php tests/connector_removal.test.php
       - run: php tests/connector_mode.test.php
       - run: php tests/connector_autoupdates.test.php
+      - run: php tests/connector_translations.test.php
