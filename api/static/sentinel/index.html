@@ -88,6 +88,10 @@
         <a :class="route.page==='servers'?'on':''" href="#/servers">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg>
           <span class="txt">Gestione server</span></a>
+        <a :class="route.page==='customers'?'on':''" href="#/customers">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2.5"/><path d="M5.5 16.5a3.5 3.5 0 0 1 7 0M15 9h3M15 13h3"/></svg>
+          <span class="txt">Gestione clienti</span>
+          <span class="cnt warn" x-show="cliDnsTotal" x-text="cliDnsTotal" title="Domini con DNS cambiati"></span></a>
 
         <div class="lbl">Cartelle</div>
         <template x-for="f in folderTree" :key="f.name">
@@ -1146,7 +1150,7 @@
               </div>
             </div>
             <div class="cli-list">
-              <template x-for="c in cli.list" :key="'cl'+c.id">
+              <template x-for="c in cliReport" :key="'cl'+c.id">
                 <div class="cli-row" :class="c.enabled ? 'on' : ''">
                   <label class="srv-sw" :title="c.enabled ? 'Invio automatico attivo' : 'Invio automatico spento'"><input type="checkbox" :checked="c.enabled" @change="toggleClient(c, $event)"><span></span></label>
                   <div class="cli-main">
@@ -1187,7 +1191,7 @@
                   </div>
                 </div>
               </template>
-              <div class="card empty" x-show="!cli.list.length" style="padding:40px 20px">Nessun cliente ancora. Crea un cliente per ogni sito con <b>Crea dai siti</b>, oppure un cliente con più siti con <b>Nuovo cliente</b>.</div>
+              <div class="card empty" x-show="!cliReport.length" style="padding:40px 20px">Nessun cliente ancora. Crea un cliente per ogni sito con <b>Crea dai siti</b>, oppure un cliente con più siti con <b>Nuovo cliente</b>.</div>
             </div>
             <div class="msg err" x-show="cli.err && drawer !== 'client'" x-text="cli.err"></div>
             <div class="card" id="cli-preview" style="margin-top:16px" x-show="cli.html">
@@ -1254,14 +1258,14 @@
                 <div>
                   <div class="card">
                     <div class="row" style="flex-wrap:wrap;gap:8px"><h3 style="margin:0;flex:1">Anteprima</h3><span class="spinner" x-show="cliSet.busy"></span>
-                      <select class="input" style="max-width:240px" x-model.number="cliSet.clientId" @change="previewClientSettings()" x-show="cli.list.length">
-                        <template x-for="c in cli.list" :key="'pc'+c.id"><option :value="c.id" :selected="c.id===cliSet.clientId" x-text="c.name + (c.sites.length > 1 ? ' · ' + c.sites.length + ' siti' : '')"></option></template>
+                      <select class="input" style="max-width:240px" x-model.number="cliSet.clientId" @change="previewClientSettings()" x-show="cliReport.length">
+                        <template x-for="c in cliReport" :key="'pc'+c.id"><option :value="c.id" :selected="c.id===cliSet.clientId" x-text="c.name + (c.sites.length > 1 ? ' · ' + c.sites.length + ' siti' : '')"></option></template>
                       </select>
                       <select class="input" style="max-width:190px" x-model="cli.period" @change="previewClientSettings()">
                         <template x-for="p in cli.periods" :key="'pp'+p.period"><option :value="p.period" :selected="p.period===cli.period" x-text="p.label"></option></template>
                       </select>
                       <button class="btn sm ghost" @click="openPreviewFull(cliSet.html)" x-show="cliSet.html">⤢ A tutta pagina</button></div>
-                    <div class="small mut" style="margin-top:10px" x-show="!cli.list.length">Crea almeno un cliente per vedere l'anteprima.</div>
+                    <div class="small mut" style="margin-top:10px" x-show="!cliReport.length">Crea almeno un cliente per vedere l'anteprima.</div>
                     <div style="background:#fff;border-radius:8px;overflow:hidden;margin-top:10px" x-show="cliSet.html">
                       <iframe :srcdoc="cliSet.html" sandbox="allow-same-origin" style="width:100%;height:600px;border:0;background:#fff;display:block" @load="fitFrame($event.target, 400, 30000)"></iframe>
                     </div>
@@ -1270,6 +1274,229 @@
               </div>
               </template>
             </div>
+          </div>
+        </template>
+
+        <template x-if="route.page==='customers'">
+          <div>
+            <!-- ===== Scheda del cliente (#/customers/<id>) ===== -->
+            <template x-if="route.clientId">
+              <div>
+                <a :href="card.data?.parent ? '#/customers/' + card.data.parent.id : '#/customers'" class="small"><span>←</span> <span x-show="!card.data?.parent">Gestione clienti</span><span x-show="card.data?.parent" x-text="card.data?.parent?.name" translate="no"></span></a>
+                <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px;margin-top:6px">
+                  <div style="flex:1;min-width:260px">
+                    <h1 class="page-title" x-text="card.data ? card.data.client.name : 'Scheda cliente'" translate="no"></h1>
+                    <div class="chips" style="margin-top:6px" x-show="card.data">
+                      <span class="badge" x-show="card.data?.subs.length" x-text="(card.data?.subs.length || 0) + ' ' + pl(card.data?.subs.length || 0, 'sottocliente', 'sottoclienti')"></span>
+                      <span class="badge" x-text="(card.data?.summary.active || 0) + ' ' + pl(card.data?.summary.active || 0, 'dominio attivo', 'domini attivi')"></span>
+                      <span class="badge warn" x-show="card.data?.summary.dns_changes" x-text="(card.data?.summary.dns_changes || 0) + ' ' + pl(card.data?.summary.dns_changes || 0, 'con DNS cambiati', 'con DNS cambiati')"></span>
+                      <span class="badge warn" x-show="card.data?.summary.expiring" x-text="(card.data?.summary.expiring || 0) + ' ' + pl(card.data?.summary.expiring || 0, 'rinnovo in scadenza', 'rinnovi in scadenza')"></span>
+                    </div>
+                  </div>
+                  <div class="row" style="gap:6px">
+                    <button class="btn primary" @click="openCardDomain()">Aggiungi dominio</button>
+                    <div class="cd-menu" @click.outside="card.menu = false">
+                      <button class="btn" @click="card.menu = !card.menu" title="Altre azioni">⋯</button>
+                      <div class="cd-menu-list" x-show="card.menu">
+                        <button x-show="card.data && !card.data.parent" @click="card.menu = false; openSubClient()">Aggiungi sottocliente</button>
+                        <button @click="card.menu = false; openCardImport()">Importa da Excel</button>
+                        <button @click="card.menu = false; checkCardDns()" :disabled="!!(card.dnsRunning)">Controlla DNS ora</button>
+                        <button @click="card.menu = false; openClientFromCard()">Modifica cliente</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="small mut" style="margin-top:8px" x-show="card.dnsRunning"><span class="spinner"></span> Controllo DNS in corso…</div>
+                <div class="card empty" x-show="card.loading && !card.data"><span class="spinner"></span></div>
+                <div class="msg err" x-show="card.err" x-text="card.err"></div>
+                <template x-if="card.data">
+                  <div>
+                    <div class="msg warn cd-dnsbar" x-show="card.data.summary.dns_changes">
+                      <span x-text="card.data.summary.dns_changes + ' ' + pl(card.data.summary.dns_changes, 'dominio ha i DNS cambiati rispetto al controllo precedente.', 'domini hanno i DNS cambiati rispetto al controllo precedente.')"></span>
+                      <span class="sp"></span>
+                      <button class="btn sm" @click="card.filter='dns'">Mostra</button>
+                      <button class="btn sm" @click="ackCardDns()">Segna tutti come visti</button>
+                    </div>
+                    <div class="row cd-tools">
+                      <input class="input" style="max-width:300px" x-model="card.q" :placeholder="cardSubsMode ? 'Cerca sottocliente, dominio, note' : 'Cerca dominio, provider, note'">
+                      <select class="input" style="width:auto;max-width:260px" x-model="card.host">
+                        <option value="">Posta: tutte</option>
+                        <template x-for="h in card.data.summary.mail_hosts" :key="'mh'+h.name"><option :value="h.name" :selected="h.name===card.host" x-text="h.name + ' (' + h.count + ')'" translate="no"></option></template>
+                      </select>
+                      <select class="input" style="width:auto" x-model="card.filter">
+                        <option value="">Tutti</option>
+                        <option value="dns">Con DNS cambiati</option>
+                        <option value="expiring">Rinnovo in scadenza</option>
+                        <option value="noprov">Senza provider</option>
+                        <option value="err">Errore DNS</option>
+                      </select>
+                      <button class="btn sm ghost" x-show="card.q || card.filter || card.host" @click="card.q=''; card.filter=''; card.host=''">Azzera filtri</button>
+                      <span class="sp"></span>
+                      <span class="small mut" x-show="card.data.summary.last_check"><span>DNS controllati:</span> <span x-text="fmtDate(card.data.summary.last_check)"></span></span>
+                    </div>
+                    <div class="cd-list">
+                      <template x-for="r in cardRows" :key="r.key">
+                        <div class="cd-row" :class="{ open: card.open[r.key], chg: r.changes }">
+                          <div class="cd-head" @click="cardToggle(r.key)">
+                            <div class="cd-main">
+                              <div class="cd-name"><b x-text="r.title" translate="no"></b>
+                                <span class="badge" x-show="r.root">cliente principale</span>
+                                <span class="badge warn" x-show="r.changes">DNS cambiati</span>
+                                <span class="badge" :class="r.level==='warn' ? 'warn' : 'err'" x-show="r.level" x-text="cardExpiryText(r.days)"></span>
+                                <span class="badge err" x-show="r.nx">non risolve</span>
+                              </div>
+                              <div class="small mut cd-sub">
+                                <span x-show="r.domainsLine" x-text="r.domainsLine" translate="no"></span>
+                                <span x-show="r.hosts"><span class="cd-k">Posta</span> <span x-text="r.hosts" translate="no"></span></span>
+                                <span x-show="!r.domains.length">nessun dominio</span>
+                              </div>
+                            </div>
+                            <div class="cd-actions" @click.stop>
+                              <a class="btn sm" x-show="r.domains.length === 1 && cardWebmail(r.domains[0])" :href="r.domains.length === 1 ? cardWebmail(r.domains[0]) : ''" target="_blank" rel="noopener noreferrer">Webmail</a>
+                              <button class="btn sm ghost cd-tog" @click="cardToggle(r.key)" x-text="card.open[r.key] ? '▴' : '▾'"></button>
+                            </div>
+                          </div>
+                          <div class="cd-body" x-show="card.open[r.key]">
+                            <div class="cd-subbar" x-show="r.subId">
+                              <span class="small mut">Sottocliente</span>
+                              <span class="sp"></span>
+                              <a class="btn sm ghost" :href="'#/customers/' + r.subId">Apri scheda</a>
+                              <button class="btn sm ghost" @click="openClientById(r.subId)">Rinomina / note</button>
+                              <button class="btn sm ghost" @click="openCardDomain(null, r.subId)">Aggiungi dominio</button>
+                            </div>
+                            <div class="cd-notes small" x-show="r.notes" x-text="r.notes" translate="no"></div>
+                            <template x-for="d in r.domains" :key="'cd'+d.id">
+                              <div class="cd-dom">
+                                <div class="cd-dom-head">
+                                  <b x-show="!(r.domains.length === 1 && r.title === d.domain)" x-text="d.domain" translate="no"></b>
+                                  <span class="badge warn" x-show="Object.keys(d.dns_change).length">DNS cambiati</span>
+                                  <span class="badge" :class="d.hosting_level==='warn' ? 'warn' : 'err'" x-show="d.hosting_level" x-text="cardExpiryText(d.hosting_days)"></span>
+                                  <span class="sp"></span>
+                                  <a class="btn sm" x-show="cardWebmail(d)" :href="cardWebmail(d)" target="_blank" rel="noopener noreferrer">Webmail</a>
+                                  <a class="btn sm" x-show="cardLink(d.panel_url)" :href="cardLink(d.panel_url)" target="_blank" rel="noopener noreferrer">Pannello</a>
+                                  <button class="btn sm" @click="openCardDomain(d)">Modifica</button>
+                                </div>
+                                <div class="cd-change" x-show="Object.keys(d.dns_change).length">
+                                  <template x-for="(v, k) in d.dns_change" :key="'ch'+d.id+k">
+                                    <div><b x-text="cardDnsLabel(k)"></b>: <span class="mono mut" x-text="cardDnsVal(v.from)"></span> → <span class="mono" x-text="cardDnsVal(v.to)"></span></div>
+                                  </template>
+                                  <div class="row" style="margin-top:6px"><span class="small mut"><span>Rilevato il</span> <span x-text="fmtDate(d.dns_changed_at)"></span></span><span class="sp"></span><button class="btn sm" @click="ackCardDomain(d)">Visto</button></div>
+                                </div>
+                                <div class="cd-grid">
+                                  <div class="cd-f" x-show="d.mail_host"><label>Email ospitate su</label><div x-text="d.mail_host" translate="no"></div></div>
+                                  <div class="cd-f" x-show="d.account_ref"><label>Account da usare</label><div x-text="d.account_ref" translate="no"></div></div>
+                                  <div class="cd-f wide" x-show="d.manage_howto"><label>Come gestire le caselle</label><div x-text="d.manage_howto" translate="no"></div></div>
+                                  <div class="cd-f" x-show="d.dns_host"><label>DNS / record MX modificabili su</label><div x-text="d.dns_host" translate="no"></div></div>
+                                  <div class="cd-f" x-show="d.site_host || d.site"><label>Sito su</label><div><span x-text="d.site_host" translate="no"></span> <a x-show="d.site" :href="'#/site/' + d.site?.id" x-text="(d.site_host ? '· ' : '') + (d.site?.name || '')" translate="no"></a></div></div>
+                                  <div class="cd-f" x-show="d.renewal_payer || d.renewal_cost || d.hosting_expires"><label>Rinnovo hosting / caselle</label>
+                                    <div class="cd-renew"><span x-show="d.renewal_payer"><span class="cd-k">Paga</span> <span x-text="d.renewal_payer" translate="no"></span></span><span x-show="d.renewal_cost"><span class="cd-k">Costo</span> <span x-text="d.renewal_cost" translate="no"></span></span><span x-show="d.hosting_expires"><span class="cd-k">Scade il</span> <span x-text="fmtDay(d.hosting_expires)"></span></span></div></div>
+                                  <div class="cd-f" x-show="d.site?.domain_expires_at"><label>Scadenza dominio</label><div x-text="fmtDay(d.site?.domain_expires_at)"></div></div>
+                                  <div class="cd-f wide" x-show="d.notes"><label>Note</label><div class="cd-notes" x-text="d.notes" translate="no"></div></div>
+                                </div>
+                                <div class="cd-dnsline small mut" x-show="d.dns.checked_at || d.dns.error">
+                                  <span x-show="d.dns.nx">Il dominio non risolve.</span>
+                                  <template x-if="d.dns.checked_at && !d.dns.nx"><span class="mono"><span>MX</span> <span x-text="cardDnsVal(d.dns.mx)"></span> · <span>NS</span> <span x-text="cardDnsVal(d.dns.ns)"></span> · <span>A</span> <span x-text="cardDnsVal(d.dns.a)"></span></span></template>
+                                  <span class="warn" x-show="d.dns.error"><span>Ultima lettura non riuscita:</span> <span x-text="d.dns.error"></span></span>
+                                </div>
+                                <template x-if="cardProvider(d)">
+                                  <div class="cd-prov">
+                                    <button class="srv-more" @click="card.howto = { ...card.howto, [d.id]: !card.howto[d.id] }"><span>Come fare su</span> <span x-text="cardProvider(d).name" translate="no"></span> <span x-text="card.howto[d.id] ? '▴' : '▾'"></span></button>
+                                    <div class="cd-grid" x-show="card.howto[d.id]">
+                                      <div class="cd-f" x-show="cardProvider(d).login"><label>Dove entrare</label><div x-text="cardProvider(d).login" translate="no"></div></div>
+                                      <div class="cd-f" x-show="cardProvider(d).create_mailbox"><label>Crea / elimina casella</label><div x-text="cardProvider(d).create_mailbox" translate="no"></div></div>
+                                      <div class="cd-f" x-show="cardProvider(d).change_password"><label>Cambia password</label><div x-text="cardProvider(d).change_password" translate="no"></div></div>
+                                      <div class="cd-f" x-show="cardProvider(d).forwarding"><label>Inoltri e risposta automatica</label><div x-text="cardProvider(d).forwarding" translate="no"></div></div>
+                                      <div class="cd-f wide" x-show="cardProvider(d).notes"><label>Note</label><div class="cd-notes" x-text="cardProvider(d).notes" translate="no"></div></div>
+                                    </div>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="card empty" x-show="!cardRows.length && (card.data.domains.length || card.data.subs.length)">Nessun risultato con questi filtri.</div>
+                      <div class="card empty" x-show="!card.data.domains.length && !card.data.subs.length">Ancora vuota. Aggiungi i domini con <b>Aggiungi dominio</b>, oppure importali tutti insieme da <b>⋯ → Importa da Excel</b>.</div>
+                    </div>
+                    <div class="card cd-inactive" x-show="cardInactive.length">
+                      <button class="srv-more" @click="card.showInactive = !card.showInactive" x-text="cardInactive.length === 1 ? (card.showInactive ? 'Nascondi il dominio non attivo' : 'Mostra il dominio non attivo') : ((card.showInactive ? 'Nascondi i ' : 'Mostra i ') + cardInactive.length + ' domini non attivi')"></button>
+                      <div x-show="card.showInactive" style="margin-top:10px">
+                        <template x-for="d in cardInactive" :key="'ci'+d.id">
+                          <div class="cd-in-row">
+                            <div style="min-width:0"><b x-text="d.domain" translate="no"></b> <span class="badge warn" x-show="Object.keys(d.dns_change).length">DNS cambiati</span>
+                              <div class="small mut cd-sub"><span x-show="d.status_note" x-text="d.status_note" translate="no"></span><span x-show="cardSubName(d)"><span class="cd-k">Sottocliente</span> <span x-text="cardSubName(d)" translate="no"></span></span></div>
+                              <div class="small warn" x-show="Object.keys(d.dns_change).length" x-text="cardChangeText(d)"></div></div>
+                            <div class="row" style="gap:6px"><button class="btn sm" x-show="Object.keys(d.dns_change).length" @click="ackCardDomain(d)">Visto</button><button class="btn sm" @click="openCardDomain(d)">Modifica</button></div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                    <div class="card" style="margin-top:16px">
+                      <div class="row"><h3 style="margin:0;flex:1">Note</h3><span class="small warn" x-show="card.notesDirty">Non salvate</span><button class="btn sm primary" x-show="card.notesDirty" :disabled="!!(card.busy)" @click="saveCardNotes()">Salva note</button></div>
+                      <textarea class="input" rows="3" style="margin-top:10px" x-model="card.notes" @input="card.notesDirty = true" placeholder="Accordi, contatti, cose da ricordare. Niente password: solo dove trovarle."></textarea>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template x-if="!route.clientId">
+            <div>
+            <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+              <div style="flex:1;min-width:280px">
+                <h1 class="page-title">Gestione clienti</h1>
+                <div class="page-sub">La scheda di ogni cliente con domini, posta, DNS e rinnovi, e le istruzioni dei provider.</div>
+              </div>
+              <div class="row" x-show="cust.tab==='list'"><button class="btn primary" @click="openCustClient()">Nuovo cliente</button></div>
+              <div class="row" x-show="cust.tab==='providers'"><button class="btn primary" @click="openProvider()">Nuovo provider</button></div>
+            </div>
+            <div class="seg" style="margin-top:14px">
+              <button :class="cust.tab==='list' ? 'on' : ''" @click="cust.tab='list'">Clienti</button>
+              <button :class="cust.tab==='providers' ? 'on' : ''" @click="cust.tab='providers'; loadProviders()">Provider</button>
+              <button :class="cust.tab==='settings' ? 'on' : ''" @click="cust.tab='settings'; loadDnsCfg()">Impostazioni</button>
+            </div>
+            <div x-show="cust.tab==='list'">
+              <div class="row" style="margin-top:16px" x-show="custList.length > 6"><input class="input" style="max-width:340px" x-model="cust.q" placeholder="Cerca cliente o sottocliente"></div>
+              <div class="cli-list">
+                <template x-for="c in custShown" :key="'cu'+c.id">
+                  <a class="cust-row" :href="'#/customers/' + c.id">
+                    <div style="min-width:0">
+                      <div class="cli-name"><span x-text="c.name" translate="no"></span><span class="badge acc" x-show="c.subs" x-text="c.subs + ' ' + pl(c.subs, 'sottocliente', 'sottoclienti')"></span><span class="badge acc" x-show="c.domains" x-text="c.domains + ' ' + pl(c.domains, 'dominio', 'domini')"></span><span class="badge warn" x-show="c.dns_changes"><span>DNS cambiati:</span> <span x-text="c.dns_changes"></span></span></div>
+                      <div class="small mut" x-show="c.notes" x-text="(c.notes || '').split('\n')[0]" translate="no"></div>
+                    </div>
+                    <span class="btn sm">Scheda</span>
+                  </a>
+                </template>
+                <div class="card empty" x-show="!custList.length" style="padding:40px 20px">Nessun cliente con scheda. Crea il cliente con <b>Nuovo cliente</b>, poi aggiungi i domini o importali dall'Excel.</div>
+              </div>
+            </div>
+            <div x-show="cust.tab==='providers'">
+              <div class="page-sub" style="margin-top:14px">Istruzioni "come fare" per ogni provider di posta e hosting, comuni a tutti i clienti. Ogni dominio mostra quelle del suo provider. Solo indicazioni: niente password.</div>
+              <div class="prov-list">
+                <template x-for="p in prov.list" :key="'pv'+p.id">
+                  <div class="card prov-card">
+                    <div class="row"><b style="flex:1" x-text="p.name" translate="no"></b><span class="badge" x-text="p.domains + ' ' + pl(p.domains, 'dominio', 'domini')"></span><button class="btn sm" @click="openProvider(p)">Modifica</button><button class="btn sm ghost" @click="deleteProvider(p)" title="Elimina il provider">✕</button></div>
+                    <div class="cd-grid" style="margin-top:8px">
+                      <div class="cd-f" x-show="p.login"><label>Dove entrare</label><div x-text="p.login" translate="no"></div></div>
+                      <div class="cd-f" x-show="p.create_mailbox"><label>Crea / elimina casella</label><div x-text="p.create_mailbox" translate="no"></div></div>
+                      <div class="cd-f" x-show="p.change_password"><label>Cambia password</label><div x-text="p.change_password" translate="no"></div></div>
+                      <div class="cd-f" x-show="p.forwarding"><label>Inoltri e risposta automatica</label><div x-text="p.forwarding" translate="no"></div></div>
+                      <div class="cd-f" x-show="p.webmail"><label>Webmail</label><div class="mono" x-text="p.webmail" translate="no"></div></div>
+                      <div class="cd-f wide" x-show="p.notes"><label>Note</label><div class="cd-notes" x-text="p.notes" translate="no"></div></div>
+                    </div>
+                  </div>
+                </template>
+                <div class="card empty" x-show="!prov.list.length">Nessun provider. Aggiungili qui con <b>Nuovo provider</b>, oppure arrivano dal foglio "Come fare" quando importi l'Excel nella scheda di un cliente.</div>
+              </div>
+            </div>
+            <div x-show="cust.tab==='settings'" style="margin-top:16px">
+            <div class="card cli-bar" style="margin-top:0">
+              <label class="srv-sw" :title="dnsCfg.enabled ? 'Controllo DNS giornaliero attivo' : 'Controllo DNS giornaliero spento'"><input type="checkbox" :checked="dnsCfg.enabled" @change="toggleDnsCheck($event)"><span></span></label>
+              <div style="flex:1;min-width:260px"><b>Controllo DNS dei domini</b><div class="small mut">Ogni mattina alle 6:50 Sentinel legge MX, NS e indirizzo dei domini nelle schede e ti avvisa se cambiano (avviso "DNS cambiati" in Notifiche).</div></div>
+              <button class="btn sm" @click="checkAllDns()" :disabled="!!(dnsCfg.running)"><span class="spinner" x-show="dnsCfg.running"></span> <span x-text="dnsCfg.running ? 'In corso' : 'Controlla tutti ora'"></span></button>
+            </div>
+            </div>
+            </div>
+            </template>
           </div>
         </template>
 
@@ -1883,6 +2110,122 @@
       <div class="msg err" x-show="cli.err" x-text="cli.err"></div>
     </div>
     <div class="foot"><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" @click="saveClient()" x-text="cliNewTarget ? ('Aggiungi a ' + cliNewTarget.name) : 'Salva'"></button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: CLIENTE / SOTTOCLIENTE DELLA SCHEDA ===================== -->
+<template x-if="token&&drawer==='cclient'&&cust.edit">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer" @keydown.escape.window="drawer=null">
+    <div class="head"><h2 x-text="cust.edit.id ? 'Modifica cliente' : (cust.edit.parent_id ? 'Nuovo sottocliente' : 'Nuovo cliente')"></h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="field"><label>Nome</label><input class="input" x-model="cust.edit.name"></div>
+      <div class="field" x-show="custParentChoices.length && !custHasSubs"><label>Sottocliente di</label>
+        <select class="input" x-model="cust.edit.parent_id"><option value="">Nessuno: è un cliente principale</option><template x-for="p in custParentChoices" :key="'cp'+p.id"><option :value="String(p.id)" :selected="String(p.id)===cust.edit.parent_id" x-text="p.name"></option></template></select></div>
+      <div class="field"><label>Note</label><textarea class="input" rows="5" x-model="cust.edit.notes" placeholder="Accordi, contatti, cose da ricordare. Niente password: solo dove trovarle."></textarea></div>
+      <div class="msg err" x-show="cust.err" x-text="cust.err"></div>
+    </div>
+    <div class="foot"><button class="btn danger" x-show="cust.edit.id" @click="deleteCustClient()">Elimina</button><div class="sp"></div><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" @click="saveCustClient()">Salva</button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: DOMINIO DELLA SCHEDA CLIENTE ===================== -->
+<template x-if="token&&drawer==='cdomain'&&card.edit">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer bulk" @keydown.escape.window="drawer=null">
+    <div class="head"><h2 x-text="card.edit.id ? card.edit.domain : 'Nuovo dominio'" translate="no"></h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="row" style="gap:12px;align-items:flex-end">
+        <div class="field" style="flex:1"><label>Dominio</label><input class="input" x-model="card.edit.domain" placeholder="esempio.it"></div>
+        <label class="check" style="margin-bottom:22px"><input type="checkbox" x-model="card.edit.active"> Attivo</label>
+      </div>
+      <div class="field" x-show="card.data && card.data.targets.length > 1"><label>Cliente</label>
+        <select class="input" x-model="card.edit.client_id"><template x-for="t in (card.data ? card.data.targets : [])" :key="'tg'+t.id"><option :value="String(t.id)" :selected="String(t.id)===card.edit.client_id" x-text="t.root ? t.name + ' (cliente principale)' : t.name"></option></template></select></div>
+      <div class="field" x-show="!card.edit.active"><label>Situazione</label><input class="input" x-model="card.edit.status_note" placeholder="Non risolve, scaduto, solo sito senza email..."></div>
+      <div class="cd-form-sec">Posta</div>
+      <div class="row" style="gap:12px">
+        <div class="field" style="flex:1"><label>Email ospitate su</label><input class="input" x-model="card.edit.mail_host" list="cd-hosts" placeholder="es. Aruba, cPanel del server"></div>
+        <div class="field" style="flex:1"><label>Provider (istruzioni)</label>
+          <select class="input" x-model="card.edit.provider_id"><option value="">Scegli in automatico</option><template x-for="p in prov.list" :key="'po'+p.id"><option :value="String(p.id)" :selected="String(p.id)===card.edit.provider_id" x-text="p.name"></option></template></select></div>
+      </div>
+      <datalist id="cd-hosts"><template x-for="p in prov.list" :key="'dl'+p.id"><option :value="p.name"></option></template></datalist>
+      <div class="field"><label>Come gestire le caselle</label><textarea class="input" rows="2" x-model="card.edit.manage_howto"></textarea></div>
+      <div class="row" style="gap:12px">
+        <div class="field" style="flex:1"><label>Link pannello</label><input class="input" x-model="card.edit.panel_url" placeholder="https://"></div>
+        <div class="field" style="flex:1"><label>Webmail</label><input class="input" x-model="card.edit.webmail_url" placeholder="https://"></div>
+      </div>
+      <div class="field"><label>Account da usare</label><input class="input" x-model="card.edit.account_ref" placeholder="es. root (vedi PDF credenziali)"><div class="hint">Solo il riferimento all'account o a dove sono le credenziali. Mai la password.</div></div>
+      <div class="cd-form-sec">DNS e sito</div>
+      <div class="row" style="gap:12px">
+        <div class="field" style="flex:1"><label>DNS / record MX modificabili su</label><input class="input" x-model="card.edit.dns_host"></div>
+        <div class="field" style="flex:1"><label>Sito su</label><input class="input" x-model="card.edit.site_host"></div>
+      </div>
+      <div class="cd-form-sec">Rinnovo hosting / caselle</div>
+      <div class="row" style="gap:12px">
+        <div class="field" style="flex:1"><label>Chi paga</label><input class="input" x-model="card.edit.renewal_payer" placeholder="Cliente, noi, ..."></div>
+        <div class="field" style="flex:1"><label>Costo</label><input class="input" x-model="card.edit.renewal_cost" placeholder="es. 120 € / anno"></div>
+        <div class="field" style="flex:1"><label>Scadenza</label><input class="input" type="date" x-model="card.edit.hosting_expires"></div>
+      </div>
+      <div class="field"><label>Note</label><textarea class="input" rows="3" x-model="card.edit.notes"></textarea></div>
+      <div class="msg err" x-show="card.editErr" x-text="card.editErr"></div>
+    </div>
+    <div class="foot"><button class="btn danger" x-show="card.edit.id" @click="deleteCardDomain()">Elimina</button><div class="sp"></div><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" :disabled="!!(card.busy)" @click="saveCardDomain()">Salva</button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: IMPORTA EXCEL NELLA SCHEDA ===================== -->
+<template x-if="token&&drawer==='cimport'">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer" @keydown.escape.window="drawer=null">
+    <div class="head"><h2>Importa da Excel</h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="hint" style="margin-bottom:10px">File .xlsx o .csv, anche così com'è: i fogli si riconoscono dalle intestazioni, i riepiloghi si ignorano. I domini già presenti si aggiornano e una cella vuota non cancella niente.</div>
+      <label class="check" style="margin-bottom:12px" x-show="card.data && !card.data.parent"><input type="checkbox" x-model="card.impSubs" @change="if (card.impFile) cardImport(true)"> Un sottocliente per ogni dominio (stesso nome = stesso sottocliente)</label>
+      <details class="small mut" style="margin-bottom:12px"><summary>Quali colonne legge</summary>
+      <ul class="small mut cd-imp-help">
+        <li><b>Domini</b>: <span translate="no">Dominio, Email ospitate su, Come gestire le caselle, Link pannello, Account da usare, Webmail, DNS / record MX modificabili su, Sito su, Note</span>. <span>Facoltative:</span> <span translate="no">Chi paga, Costo, Scadenza</span>.</li>
+        <li><b>Domini non attivi</b>: <span translate="no">Dominio, Situazione</span> (<span translate="no">Sito su, DNS su</span>).</li>
+        <li><b>Provider</b>: <span translate="no">Provider, Dove entrare, Crea / elimina casella, Cambia password, Inoltri e risposta automatica, Webmail</span>.</li>
+        <li><span>Facoltativa una colonna</span> <b translate="no">Cliente</b> <span>col nome del sottocliente.</span></li>
+      </ul></details>
+      <input type="file" accept=".xlsx,.xlsm,.csv" @change="card.impFile = $event.target.files[0] || null; card.imp = null; card.impErr = ''; if (card.impFile) cardImport(true)">
+      <div class="small mut" style="margin-top:10px" x-show="card.impBusy"><span class="spinner"></span> Lettura del file…</div>
+      <template x-if="card.imp">
+        <div class="card cd-imp" style="margin-top:14px">
+          <b x-text="card.imp.dry_run ? 'Anteprima: ecco cosa entra nella scheda' : 'Importato'"></b>
+          <ul class="small" style="margin:8px 0 0;padding-left:18px">
+            <li><span x-text="card.imp.domains_new + ' ' + pl(card.imp.domains_new, 'dominio nuovo', 'domini nuovi')"></span>, <span x-text="card.imp.domains_updated + ' ' + pl(card.imp.domains_updated, 'aggiornato', 'aggiornati')"></span></li>
+            <li><span x-text="card.imp.inactive_new + ' ' + pl(card.imp.inactive_new, 'dominio non attivo nuovo', 'domini non attivi nuovi')"></span>, <span x-text="card.imp.inactive_updated + ' ' + pl(card.imp.inactive_updated, 'aggiornato', 'aggiornati')"></span></li>
+            <li><span x-text="card.imp.providers_new + ' ' + pl(card.imp.providers_new, 'provider nuovo', 'provider nuovi')"></span>, <span x-text="card.imp.providers_updated + ' ' + pl(card.imp.providers_updated, 'aggiornato', 'aggiornati')"></span></li>
+            <li x-show="card.imp.subs_new" x-text="card.imp.subs_new + ' ' + pl(card.imp.subs_new, 'sottocliente nuovo', 'sottoclienti nuovi')"></li>
+            <li x-show="card.imp.notes_added" x-text="card.imp.notes_added + ' ' + pl(card.imp.notes_added, 'nota aggiunta alle note del cliente', 'note aggiunte alle note del cliente')"></li>
+          </ul>
+          <div class="small mut" style="margin-top:8px"><span>Fogli letti:</span> <template x-for="(x, i) in card.imp.sheets" :key="'sh'+i"><span><span x-text="x.name" translate="no"></span> (<span x-text="cardSheetKind(x.kind)"></span>)<span x-show="i < card.imp.sheets.length - 1">, </span></span></template></div>
+          <div class="small warn" style="margin-top:6px" x-show="card.imp.skipped.length"><span x-text="card.imp.skipped.length + ' ' + pl(card.imp.skipped.length, 'riga saltata perché non è un dominio', 'righe saltate perché non sono domini') + ':'"></span> <span x-text="card.imp.skipped.join(' · ')" translate="no"></span></div>
+        </div>
+      </template>
+      <div class="msg err" x-show="card.impErr" x-text="card.impErr"></div>
+    </div>
+    <div class="foot"><button class="btn" @click="drawer=null" x-text="card.imp && !card.imp.dry_run ? 'Chiudi' : 'Annulla'"></button><button class="btn primary" x-show="!card.imp || card.imp.dry_run" :disabled="!!(!card.imp || card.impBusy)" @click="cardImport(false)">Importa</button></div>
+  </div></div>
+</template>
+
+<!-- ===================== DRAWER: PROVIDER ===================== -->
+<template x-if="token&&drawer==='cprovider'&&prov.edit">
+  <div><div class="overlay" @click="drawer=null"></div>
+  <div class="drawer" @keydown.escape.window="drawer=null">
+    <div class="head"><h2 x-text="prov.edit.id ? 'Modifica provider' : 'Nuovo provider'"></h2><div class="sp"></div><button class="btn icon ghost" @click="drawer=null">✕</button></div>
+    <div class="body">
+      <div class="field"><label>Nome</label><input class="input" x-model="prov.edit.name" placeholder="es. Aruba"><div class="hint">I domini con "Email ospitate su" uguale (o che inizia così) si collegano da soli. Per più provider con le stesse istruzioni separa i nomi con "/".</div></div>
+      <div class="field"><label>Dove entrare</label><textarea class="input" rows="2" x-model="prov.edit.login"></textarea></div>
+      <div class="field"><label>Crea / elimina casella</label><textarea class="input" rows="2" x-model="prov.edit.create_mailbox"></textarea></div>
+      <div class="field"><label>Cambia password</label><textarea class="input" rows="2" x-model="prov.edit.change_password"></textarea></div>
+      <div class="field"><label>Inoltri e risposta automatica</label><textarea class="input" rows="2" x-model="prov.edit.forwarding"></textarea></div>
+      <div class="field"><label>Webmail</label><input class="input" x-model="prov.edit.webmail" placeholder="https://<dominio>:2096"><div class="hint">&lt;dominio&gt; diventa il dominio della riga: il pulsante Webmail della scheda apre l'indirizzo giusto.</div></div>
+      <div class="field"><label>Note</label><textarea class="input" rows="3" x-model="prov.edit.notes"></textarea></div>
+      <div class="msg err" x-show="prov.err" x-text="prov.err"></div>
+    </div>
+    <div class="foot"><button class="btn" @click="drawer=null">Annulla</button><button class="btn primary" @click="saveProvider()">Salva</button></div>
   </div></div>
 </template>
 

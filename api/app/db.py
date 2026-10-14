@@ -155,6 +155,11 @@ async def run_migrations(conn) -> None:
     await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS update_failed_version VARCHAR(40) NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS dlkey_missing BOOLEAN NOT NULL DEFAULT FALSE"))
 
+    # 2.39.0: scheda cliente (le tabelle dei domini e dei provider le crea create_all)
+    await conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''"))
+    await conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS parent_id INTEGER NULL REFERENCES clients(id) ON DELETE SET NULL"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_clients_parent_id ON clients (parent_id)"))
+
     # admin_auth: 2FA / passkey
     await conn.execute(text("ALTER TABLE admin_auth ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64) NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE admin_auth ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE"))

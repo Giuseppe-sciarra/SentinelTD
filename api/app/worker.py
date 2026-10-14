@@ -2602,6 +2602,28 @@ async def plugin_catalog_scan(ctx, force: bool = False):
         log.warning("Catalogo plugin: scansione non riuscita: %s", ex)
 
 
+async def client_dns_check(ctx, client_id: int | None = None, manual: bool = False):
+    """Controllo DNS (MX/NS/A) dei domini nelle schede clienti: ogni mattina, o dal pulsante.
+    Il pulsante mette il segnale "in corso" prima di accodare; il giro automatico lo prende
+    solo se libero (non si sovrappone a un controllo gia' partito)."""
+    from .client_dns import RUNNING_KEY, get_config, run_check
+    r = ctx["redis"]
+    if manual:
+        await r.set(RUNNING_KEY, b"running", ex=900)
+    else:
+        if not (await get_config())["enabled"]:
+            return
+        if not await r.set(RUNNING_KEY, b"running", ex=900, nx=True):
+            log.info("Controllo DNS clienti: gia' in corso, giro saltato")
+            return
+    try:
+        await run_check(client_id)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("Controllo DNS clienti non riuscito: %s", ex)
+    finally:
+        await r.delete(RUNNING_KEY)
+
+
 async def retired_diagnostics_job(ctx, *args):
     """Discard diagnostics queued by a previous version without contacting the site."""
     return
@@ -2610,7 +2632,8 @@ async def retired_diagnostics_job(ctx, *args):
 class WorkerSettings:
     functions = [arq_func(poll_site, keep_result=0), arq_func(shoot_site, keep_result=0), update_site, cycle_summary, mass_update_now, eventlog_purge,
                  mass_update_selected, security_scan, vendor_scan, arq_func(domain_expiry_scan, timeout=21600, keep_result=0), monthly_report,
-                 arq_func(retired_diagnostics_job, name="diag_site", keep_result=0), connector_rollout, plugin_catalog_scan, install_site]
+                 arq_func(retired_diagnostics_job, name="diag_site", keep_result=0), connector_rollout, plugin_catalog_scan, install_site,
+                 arq_func(client_dns_check, keep_result=0)]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),
@@ -2621,6 +2644,7 @@ class WorkerSettings:
         cron(monthly_report, minute=set(range(0, 60, 5))),   # ogni 5 minuti: invia quando giorno e orario sono arrivati
         cron(connector_rollout, hour={4}, minute={30}),   # connettore nuovo sui siti che ne hanno uno vecchio
         cron(plugin_catalog_scan, weekday={6}, hour={5}, minute={0}, run_at_startup=True),
+        cron(client_dns_check, hour={6}, minute={50}),   # schede clienti: MX/NS/A dei domini, avvisa se cambiano
         cron(eventlog_purge, hour={3}, minute={10}),   # registro eventi: via le righe piu' vecchie di log_retention_days   # catalogo plugin da wordpress.org: la domenica, e al primo avvio
     ]
     on_startup = _startup

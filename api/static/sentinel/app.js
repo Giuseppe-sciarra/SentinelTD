@@ -49,6 +49,12 @@ function sentinel() {
     cli: { list: [], periods: [], period: '', cfg: null, html: '', htmlFor: null, busy: false, sending: 0, edit: null, q: '', fromSel: [], fromQ: '', err: '',
            fromMode: 'each', fromName: '', fromEmails: '', selMode: false, sel: [], merge: { name: '', emails: '' },
            open: {}, inSel: {}, ac: { field: null, idx: 0 }, tab: 'list' },
+    cust: { tab: 'list', q: '', edit: null, err: '' },
+    // Gestione clienti: scheda del cliente (domini, posta, DNS, rinnovi), provider, controllo DNS
+    card: { id: null, data: null, loading: false, err: '', q: '', filter: '', host: '', open: {}, howto: {}, menu: false, showInactive: false, edit: null, editErr: '',
+            busy: false, notes: '', notesDirty: false, dnsRunning: false, impFile: null, imp: null, impBusy: false, impErr: '', impSubs: true },
+    prov: { list: [], edit: null, err: '' },
+    dnsCfg: { enabled: true, running: false },
     cliSet: { cfg: null, template: '', defaultTemplate: '', advanced: false, dirty: false, busy: false, msg: '', err: '', html: '', clientId: null, savedAt: '' },
     sec2fa: { totp: false, passkeys: [], setup: null, code: '', msg: '', err: '' },
 
@@ -276,11 +282,12 @@ function sentinel() {
     _readHash() {
       const h = (location.hash || '#/').slice(1);
       const p = h.split('/').filter(Boolean);
-      const r = { page: 'dashboard', folder: null, siteId: null, tab: 'overview' };
+      const r = { page: 'dashboard', folder: null, siteId: null, tab: 'overview', clientId: null };
       if (p[0] === 'sites') r.page = 'sites';
       else if (p[0] === 'folder') { r.page = 'sites'; r.folder = decodeURIComponent(p[1] || ''); }
       else if (p[0] === 'site') { r.page = 'site'; r.siteId = parseInt(p[1]); r.tab = ['overview','ext','history'].includes(p[2]) ? p[2] : 'overview'; }
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
+      else if (p[0] === 'customers') { r.page = 'customers'; r.clientId = /^\d+$/.test(p[1] || '') ? parseInt(p[1]) : null; }
       else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers', 'eventlog'].includes(p[0])) r.page = p[0];
       this.route = r; this.sideOpen = false;
     },
@@ -298,6 +305,12 @@ function sentinel() {
       if (this.route.page === 'notifications') { await this.loadNotif(); }
       if (this.route.page === 'reports') { await this.loadReports(); }
       if (this.route.page === 'clients') { await this.loadClients(); }
+      if (this.route.page === 'customers') {
+        await this.loadClients();
+        if (this.route.clientId) await this.loadCard(this.route.clientId);
+        else if (this.cust.tab === 'providers') this.loadProviders();
+        else if (this.cust.tab === 'settings') this.loadDnsCfg();
+      }
       if (this.route.page === 'plugins') { await this.loadPluginCatalog(); }
       if (this.route.page === 'servers') { await this.loadPrefs(); await this.loadServersPage(); }
       if (this.route.page === 'eventlog') { await this.loadEventLog(); }
@@ -313,6 +326,8 @@ function sentinel() {
       try {
         const r = await this.api('/api/sites');
         if (r.ok) this.sites = await r.json();
+        // numero dei domini con DNS cambiati accanto a "Gestione clienti" nel menu
+        if (!silent && !['clients', 'customers'].includes(this.route.page)) this.api('/api/clients').then(x => x.ok ? x.json() : null).then(d => { if (d) this.cli.list = d; }).catch(() => {});
         if (!silent) await this._onRoute();
         else if (this.route.page === 'dashboard') await this.loadDashboard();
       } catch (e) { /* logout gestito in api() */ }
@@ -2076,6 +2091,269 @@ function sentinel() {
       if (c.ok) { const d = await c.json(); this.cli.cfg = d.config; if (!this.cli.period) this.cli.period = d.suggested_period; }
       if (p.ok) { this.cli.periods = await p.json(); if (!this.cli.periods.some(x => x.period === this.cli.period) && this.cli.periods.length) this.cli.period = this.cli.periods[0].period; }
     },
+    // Report clienti: i clienti del report (con siti o indirizzi); non i sottoclienti ne' i clienti
+    // che hanno solo la scheda (Gestione clienti), come un'agenzia con i suoi domini
+    get cliReport() { return this.cli.list.filter(c => !c.parent_id && (c.sites.length || c.emails || !(c.card_domains || c.subs || c.notes))); },
+    // Gestione clienti: i clienti principali con una scheda (o senza siti); i sottoclienti stanno dentro
+    get custList() { return this.cli.list.filter(c => !c.parent_id && (c.card_domains || c.subs || c.notes || (!c.sites.length && !c.emails))); },
+    get custShown() {
+      const q = (this.cust.q || '').trim().toLowerCase();
+      if (!q) return this.custList;
+      const viaSub = new Set(this.cli.list.filter(c => c.parent_id && (c.name || '').toLowerCase().includes(q)).map(c => c.parent_id));
+      return this.custList.filter(c => (c.name || '').toLowerCase().includes(q) || (c.notes || '').toLowerCase().includes(q) || viaSub.has(c.id));
+    },
+    get cliDnsTotal() { return this.cli.list.filter(c => !c.parent_id).reduce((n, c) => n + (c.dns_changes || 0), 0); },
+    get custParentChoices() { const id = this.cust.edit && this.cust.edit.id; return this.custList.filter(c => c.id !== id); },
+    get custHasSubs() { const id = this.cust.edit && this.cust.edit.id; return !!id && this.cli.list.some(c => c.parent_id === id); },
+    openCustClient(c = null, parentId = null) {
+      this.cust.edit = c ? { id: c.id, name: c.name, notes: c.notes || '', parent_id: c.parent_id ? String(c.parent_id) : '' }
+                         : { id: null, name: '', notes: '', parent_id: parentId ? String(parentId) : '' };
+      this.cust.err = ''; this.drawer = 'cclient';
+    },
+    async saveCustClient() {
+      const e = this.cust.edit; this.cust.err = '';
+      const name = (e.name || '').trim();
+      if (!name) { this.cust.err = 'Serve il nome del cliente'; return; }
+      if (!e.id) {
+        // stesso nome di un cliente che c'e' gia' (anche del Report clienti): niente doppione, si apre la sua scheda
+        const same = this.cli.list.find(c => c.name.trim().toLowerCase() === name.toLowerCase());
+        if (same) { this.drawer = null; this.say(`${same.name} esiste già: apro la sua scheda`, 4000); this.go('customers/' + same.id); return; }
+      }
+      const body = { name, notes: e.notes || '' };
+      if (!this.custHasSubs) body.parent_id = e.parent_id ? parseInt(e.parent_id) : null;
+      const r = await this.api(e.id ? '/api/clients/' + e.id : '/api/clients', { method: e.id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.cust.err = d.detail || 'Salvataggio non riuscito'; return; }
+      this.drawer = null; await this.loadClients();
+      if (!e.id && !d.parent_id) { this.go('customers/' + d.id); return; }
+      if (this.route.page === 'customers' && this.route.clientId) await this.loadCard(this.route.clientId, true);
+      this.say(`${d.name} salvato`);
+    },
+    async deleteCustClient() {
+      const e = this.cust.edit;
+      const subs = this.cli.list.filter(c => c.parent_id === e.id).length;
+      const msg = subs ? `Eliminare il cliente ${e.name} con i suoi ${subs} sottoclienti e le loro schede? I siti non vengono toccati.`
+                       : `Eliminare ${e.name} e la sua scheda? I siti non vengono toccati.`;
+      if (!confirm(msg)) return;
+      const r = await this.api('/api/clients/' + e.id, { method: 'DELETE' });
+      if (!r.ok) { this.cust.err = 'Eliminazione non riuscita'; return; }
+      this.drawer = null; await this.loadClients();
+      if (this.route.clientId === e.id) this.go('customers' + (e.parent_id ? '/' + e.parent_id : ''));
+      else if (this.route.clientId) await this.loadCard(this.route.clientId, true);
+    },
+    // ---------- gestione clienti: scheda del cliente ----------
+    async loadCard(id, keep = false) {
+      if (!keep || this.card.id !== id) Object.assign(this.card, { id, data: null, q: '', filter: '', host: '', open: {}, howto: {}, menu: false, showInactive: false, notesDirty: false });
+      this.card.loading = true; this.card.err = '';
+      try {
+        const [r] = await Promise.all([this.api(`/api/clients/${id}/card`), this.prov.list.length ? null : this.loadProviders()]);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.card.err = d.detail || 'Scheda non disponibile'; this.card.data = null; return; }
+        this.card.data = d; this.card.dnsRunning = !!d.dns_running;
+        if (!this.card.notesDirty) this.card.notes = d.client.notes || '';
+      } finally { this.card.loading = false; }
+    },
+    // un cliente con sottoclienti: una riga per sottocliente (piu' una per i domini propri);
+    // altrimenti una riga per dominio. Il dettaglio si apre cliccando la riga.
+    get cardSubsMode() { const d = this.card.data; return !!(d && !d.parent && d.subs.length); },
+    cardMatch(x) {
+      const f = this.card.filter, h = this.card.host;
+      return (!h || (x.mail_host || '—') === h)
+        && (!f || (f === 'dns' && Object.keys(x.dns_change).length) || (f === 'expiring' && x.hosting_level) || (f === 'noprov' && !x.provider_id) || (f === 'err' && x.dns.error));
+    },
+    cardText(x) { return [x.domain, x.mail_host, x.dns_host, x.site_host, x.notes, x.account_ref, x.provider_name, x.renewal_payer].join(' ').toLowerCase(); },
+    get cardRows() {
+      const d = this.card.data; if (!d) return [];
+      const q = (this.card.q || '').trim().toLowerCase();
+      const active = d.domains.filter(x => x.active);
+      const order = { expired: 0, crit: 1, warn: 2, '': 3 };
+      const row = (key, title, doms, extra = {}) => {
+        const worst = doms.filter(x => x.hosting_level).sort((a, b) => order[a.hosting_level] - order[b.hosting_level] || a.hosting_days - b.hosting_days)[0];
+        const hosts = [...new Set(doms.map(x => x.mail_host).filter(Boolean))];
+        const names = doms.map(x => x.domain);
+        return { key, title, domains: doms, root: false, subId: null, notes: '',
+                 changes: doms.filter(x => Object.keys(x.dns_change).length).length, nx: doms.some(x => x.dns.nx),
+                 level: worst ? worst.hosting_level : '', days: worst ? worst.hosting_days : null,
+                 hosts: hosts.join(', '), domainsLine: (names.length === 1 && names[0] === title) ? '' : names.join(', '), ...extra };
+      };
+      if (!this.cardSubsMode) {
+        return active.filter(x => this.cardMatch(x) && (!q || this.cardText(x).includes(q))).map(x => row('d' + x.id, x.domain, [x]));
+      }
+      const own = active.filter(x => x.client_id === d.client.id);
+      const rows = [];
+      if (own.length) rows.push(row('c' + d.client.id, d.client.name, own, { root: true }));
+      for (const sub of d.subs) {
+        const doms = active.filter(x => x.client_id === sub.id);
+        if (!doms.length && sub.inactive) continue;      // solo domini non attivi: stanno in fondo
+        rows.push(row('s' + sub.id, sub.name, doms, { subId: sub.id, notes: sub.notes }));
+      }
+      return rows.filter(r => {
+        const shown = (this.card.filter || this.card.host) ? r.domains.filter(x => this.cardMatch(x)) : r.domains;
+        if ((this.card.filter || this.card.host) && !shown.length) return false;
+        return !q || r.title.toLowerCase().includes(q) || (r.notes || '').toLowerCase().includes(q) || r.domains.some(x => this.cardText(x).includes(q));
+      });
+    },
+    cardToggle(key) { this.card.open = { ...this.card.open, [key]: !this.card.open[key] }; },
+    get cardInactive() { return this.card.data ? this.card.data.domains.filter(x => !x.active) : []; },
+    cardSubName(d) {
+      if (!this.cardSubsMode) return '';
+      const sub = this.card.data.subs.find(x => x.id === d.client_id);
+      return sub && sub.name !== d.domain ? sub.name : '';
+    },
+    openClientById(id) { const c = this.cli.list.find(x => x.id === id); if (c) this.openCustClient(c); },
+    openSubClient() { this.openCustClient(null, this.card.id); },
+    cardProvider(d) { return (d.provider_id && this.prov.list.find(p => p.id === d.provider_id)) || null; },
+    cardLink(u) { u = (u || '').trim(); if (!u) return ''; return /^https?:\/\//i.test(u) ? u : (/^[\w.-]+\.[a-z]{2,}(:\d+)?(\/|$)/i.test(u) ? 'https://' + u : ''); },
+    cardWebmail(d) {
+      const p = this.cardProvider(d);
+      const raw = d.webmail_url || (p && p.webmail ? p.webmail.replace(/<dominio>|\{dominio\}/gi, d.domain) : '');
+      return this.cardLink(raw);
+    },
+    cardDnsLabel(k) { return { mx: 'MX', ns: 'NS', a: 'A', resolve: 'Dominio' }[k] || k; },
+    cardDnsVal(v) {
+      // "nessuno", "risolve", "non risolve" li scrive Sentinel: si traducono; i record no
+      const T = x => (window.I18n && I18n.t) ? I18n.t(x) : x;
+      return Array.isArray(v) ? (v.length ? v.join(', ') : T('nessuno')) : T(v || '');
+    },
+    cardChangeText(d) {
+      const T = x => (window.I18n && I18n.t) ? I18n.t(x) : x;
+      return Object.entries(d.dns_change).map(([k, v]) => `${T(this.cardDnsLabel(k))}: ${this.cardDnsVal(v.from)} → ${this.cardDnsVal(v.to)}`).join(' · ');
+    },
+    cardExpiryText(days) {
+      if (days == null) return '';
+      if (days < 0) return 'rinnovo scaduto';
+      if (days === 0) return 'rinnovo scade oggi';
+      return `rinnovo tra ${days} ${this.pl(days, 'giorno', 'giorni')}`;
+    },
+    cardSheetKind(k) { return { domains: 'domini', inactive: 'domini non attivi', providers: 'provider' }[k] || 'ignorato'; },
+    openClientFromCard() {
+      const c = this.cli.list.find(x => x.id === this.card.id);
+      if (c) this.openCustClient(c);
+    },
+    openCardDomain(d = null, clientId = null) {
+      const blank = { id: null, domain: '', active: true, status_note: '', mail_host: '', provider_id: '', manage_howto: '', panel_url: '', account_ref: '', webmail_url: '',
+                      dns_host: '', site_host: '', renewal_payer: '', renewal_cost: '', hosting_expires: '', notes: '', client_id: String(clientId || this.card.id) };
+      this.card.edit = d ? Object.fromEntries(Object.keys(blank).map(k => [k, ['provider_id', 'client_id'].includes(k) ? (d[k] ? String(d[k]) : '') : (d[k] ?? blank[k])])) : blank;
+      this.card.editErr = ''; this.drawer = 'cdomain';
+      if (!this.prov.list.length) this.loadProviders();
+    },
+    async saveCardDomain() {
+      const e = this.card.edit; this.card.editErr = '';
+      if (!(e.domain || '').trim()) { this.card.editErr = 'Scrivi il dominio'; return; }
+      const body = { ...e, client_id: e.client_id ? parseInt(e.client_id) : null }; delete body.id;
+      // "Scegli in automatico": il provider si ricava da "Email ospitate su"
+      if (!body.provider_id) { if (e.id) body.provider_id = null; else delete body.provider_id; }
+      this.card.busy = true;
+      try {
+        const r = await this.api(e.id ? `/api/clients/${this.card.id}/domains/${e.id}` : `/api/clients/${this.card.id}/domains`, { method: e.id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.card.editErr = d.detail || 'Salvataggio non riuscito'; return; }
+        this.drawer = null; await this.loadCard(this.card.id, true); this.say(`${d.domain} salvato`);
+      } finally { this.card.busy = false; }
+    },
+    async deleteCardDomain() {
+      const e = this.card.edit;
+      if (!confirm(`Togliere ${e.domain} dalla scheda?`)) return;
+      const r = await this.api(`/api/clients/${this.card.id}/domains/${e.id}`, { method: 'DELETE' });
+      if (r.ok) { this.drawer = null; await this.loadCard(this.card.id, true); } else this.card.editErr = 'Eliminazione non riuscita';
+    },
+    async ackCardDomain(d) {
+      const r = await this.api(`/api/clients/${this.card.id}/domains/${d.id}/dns-ack`, { method: 'POST' });
+      if (r.ok) {
+        await this.loadCard(this.card.id, true); this.loadClients();
+        if (this.card.filter === 'dns' && this.card.data && !this.card.data.summary.dns_changes) this.card.filter = '';
+      }
+    },
+    async ackCardDns() {
+      const r = await this.api(`/api/clients/${this.card.id}/dns-ack`, { method: 'POST' });
+      if (r.ok) { if (this.card.filter === 'dns') this.card.filter = ''; await this.loadCard(this.card.id, true); this.loadClients(); }
+    },
+    async saveCardNotes() {
+      this.card.busy = true;
+      try {
+        const r = await this.api(`/api/clients/${this.card.id}/notes`, { method: 'PUT', body: JSON.stringify({ notes: this.card.notes }) });
+        if (r.ok) { this.card.notesDirty = false; this.say('Note salvate'); } else this.say('Salvataggio non riuscito');
+      } finally { this.card.busy = false; }
+    },
+    async _waitDns(after) {
+      // il controllo gira nel worker: si guarda ogni 3 secondi se ha finito (massimo 5 minuti)
+      for (let i = 0; i < 100; i++) {
+        await new Promise(res => setTimeout(res, 3000));
+        const r = await this.api('/api/clients/dns/config').catch(() => null);
+        const d = r && r.ok ? await r.json() : null;
+        if (d && !d.running) { await after(); return; }
+      }
+    },
+    async checkCardDns() {
+      const id = this.card.id;
+      const r = await this.api(`/api/clients/${id}/dns-check`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.say(d.detail || 'Controllo non avviato', 5000); return; }
+      this.card.dnsRunning = true;
+      await this._waitDns(async () => {
+        this.card.dnsRunning = false;
+        if (this.route.page === 'customers' && this.route.clientId === id) await this.loadCard(id, true);
+        this.loadClients(); this.say('Controllo DNS finito');
+      });
+      this.card.dnsRunning = false;
+    },
+    openCardImport() { Object.assign(this.card, { impFile: null, imp: null, impErr: '', impBusy: false, impSubs: !!(this.card.data && !this.card.data.parent) }); this.drawer = 'cimport'; },
+    async cardImport(dry) {
+      if (!this.card.impFile) return;
+      this.card.impBusy = true; this.card.impErr = '';
+      try {
+        const fd = new FormData(); fd.append('file', this.card.impFile); fd.append('dry_run', dry ? 'true' : 'false'); fd.append('subs', this.card.impSubs ? 'true' : 'false');
+        const r = await fetch(`/api/clients/${this.card.id}/import`, { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.token }, body: fd });
+        if (r.status === 401) { this.logout(); return; }
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { this.card.imp = null; this.card.impErr = d.detail || 'Import non riuscito'; return; }
+        this.card.imp = d;
+        if (!dry) { await this.loadProviders(); await this.loadCard(this.card.id, true); this.loadClients(); }
+      } finally { this.card.impBusy = false; }
+    },
+    // ---- provider ----
+    async loadProviders() {
+      const r = await this.api('/api/clients/providers');
+      if (r.ok) this.prov.list = await r.json();
+    },
+    async openProvidersTab() { this.cli.tab = 'providers'; await this.loadProviders(); },
+    openProvider(p = null) {
+      this.prov.edit = p ? { id: p.id, name: p.name, login: p.login, create_mailbox: p.create_mailbox, change_password: p.change_password, forwarding: p.forwarding, webmail: p.webmail, notes: p.notes }
+                         : { id: null, name: '', login: '', create_mailbox: '', change_password: '', forwarding: '', webmail: '', notes: '' };
+      this.prov.err = ''; this.drawer = 'cprovider';
+    },
+    async saveProvider() {
+      const e = this.prov.edit; this.prov.err = '';
+      if (!(e.name || '').trim()) { this.prov.err = 'Serve il nome del provider'; return; }
+      const r = await this.api(e.id ? `/api/clients/providers/${e.id}` : '/api/clients/providers', { method: e.id ? 'PUT' : 'POST', body: JSON.stringify(e) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.prov.err = d.detail || 'Salvataggio non riuscito'; return; }
+      this.drawer = null; await this.loadProviders(); this.say(`${d.name} salvato`);
+    },
+    async deleteProvider(p) {
+      if (!confirm(`Eliminare il provider ${p.name}? I domini restano, senza istruzioni collegate.`)) return;
+      const r = await this.api(`/api/clients/providers/${p.id}`, { method: 'DELETE' });
+      if (r.ok) await this.loadProviders(); else this.say('Eliminazione non riuscita');
+    },
+    // ---- controllo DNS ----
+    async loadDnsCfg() {
+      const r = await this.api('/api/clients/dns/config');
+      if (r.ok) this.dnsCfg = await r.json();
+    },
+    async toggleDnsCheck(ev) {
+      const want = !this.dnsCfg.enabled;
+      const r = await this.api('/api/clients/dns/config', { method: 'PUT', body: JSON.stringify({ enabled: want }) });
+      if (r.ok) { this.dnsCfg.enabled = want; this.say(want ? 'Controllo DNS giornaliero acceso' : 'Controllo DNS giornaliero spento'); }
+      else { if (ev && ev.target) ev.target.checked = this.dnsCfg.enabled; this.say('Non riuscito'); }
+    },
+    async checkAllDns() {
+      const r = await this.api('/api/clients/dns/check', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { this.say(d.detail || 'Controllo non avviato', 5000); return; }
+      this.dnsCfg.running = true;
+      await this._waitDns(async () => { this.dnsCfg.running = false; await this.loadClients(); this.say('Controllo DNS finito'); });
+      this.dnsCfg.running = false;
+    },
     get cliPeriodLabel() { const p = this.cli.periods.find(x => x.period === this.cli.period); return p ? p.label : this.cli.period; },
     get cliSchedule() {
       const c = this.cli.cfg; if (!c) return '';
@@ -2090,8 +2368,8 @@ function sentinel() {
       if (!r.ok) return;
       const d = await r.json();
       Object.assign(this.cliSet, { cfg: d.config, template: d.template, defaultTemplate: d.default_template, dirty: false, msg: '', err: '' });
-      if (!this.cliSet.clientId || !this.cli.list.some(c => c.id === this.cliSet.clientId)) {
-        const first = this.cli.list.find(c => c.sites.length) || this.cli.list[0];
+      if (!this.cliSet.clientId || !this.cliReport.some(c => c.id === this.cliSet.clientId)) {
+        const first = this.cliReport.find(c => c.sites.length) || this.cliReport[0];
         this.cliSet.clientId = first ? first.id : null;
       }
       await this.previewClientSettings();
@@ -2210,12 +2488,12 @@ function sentinel() {
     cliToggleSel(c) { this.cli.sel = this.cli.sel.includes(c.id) ? this.cli.sel.filter(x => x !== c.id) : [...this.cli.sel, c.id]; },
     cliSelectFolder(f) {
       const ids = new Set(this.cliFolderSites(f));
-      const match = this.cli.list.filter(c => c.sites.length && c.sites.every(s => ids.has(s.id))).map(c => c.id);
+      const match = this.cliReport.filter(c => c.sites.length && c.sites.every(s => ids.has(s.id))).map(c => c.id);
       this.cli.sel = match.every(id => this.cli.sel.includes(id)) ? this.cli.sel.filter(id => !match.includes(id)) : [...new Set([...this.cli.sel, ...match])];
     },
     cliSelFolderOn(f) {
       const ids = new Set(this.cliFolderSites(f));
-      const match = this.cli.list.filter(c => c.sites.length && c.sites.every(s => ids.has(s.id))).map(c => c.id);
+      const match = this.cliReport.filter(c => c.sites.length && c.sites.every(s => ids.has(s.id))).map(c => c.id);
       return match.length && match.every(id => this.cli.sel.includes(id));
     },
     cliExitSel() { this.cli.selMode = false; this.cli.sel = []; },
@@ -2239,7 +2517,7 @@ function sentinel() {
     },
     // selezione rapida da fuori: tutti, solo i clienti con un sito, solo i gruppi
     cliSelectKind(kind) {
-      const ids = this.cli.list.filter(c => kind === 'all' || (kind === 'group' ? c.sites.length > 1 : c.sites.length <= 1)).map(c => c.id);
+      const ids = this.cliReport.filter(c => kind === 'all' || (kind === 'group' ? c.sites.length > 1 : c.sites.length <= 1)).map(c => c.id);
       this.cli.sel = ids.every(id => this.cli.sel.includes(id)) ? this.cli.sel.filter(id => !ids.includes(id)) : [...new Set([...this.cli.sel, ...ids])];
     },
     async bulkDeleteClients() {

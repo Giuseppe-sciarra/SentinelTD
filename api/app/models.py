@@ -402,6 +402,9 @@ class Client(Base):
     name: Mapped[str] = mapped_column(String(190))
     emails: Mapped[str] = mapped_column(Text, default="")        # piu' indirizzi separati da virgola
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # invio automatico mensile
+    notes: Mapped[str] = mapped_column(Text, default="")             # note generali della scheda cliente
+    # sottocliente: il cliente "padre" (es. un'agenzia) a cui appartiene; un livello solo
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -409,6 +412,57 @@ class ClientSite(Base):
     __tablename__ = "client_sites"
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True)
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), primary_key=True, index=True)
+
+
+class ClientProvider(Base):
+    """Provider di posta/hosting con le istruzioni "come fare" (comuni a tutti i clienti).
+
+    Solo indicazioni e riferimenti: mai password."""
+    __tablename__ = "client_providers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(190), unique=True)
+    login: Mapped[str] = mapped_column(Text, default="")             # dove entrare
+    create_mailbox: Mapped[str] = mapped_column(Text, default="")    # crea / elimina casella
+    change_password: Mapped[str] = mapped_column(Text, default="")
+    forwarding: Mapped[str] = mapped_column(Text, default="")        # inoltri e risposta automatica
+    webmail: Mapped[str] = mapped_column(Text, default="")           # anche con segnaposto <dominio>
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientDomain(Base):
+    """Dominio di un cliente: dove sta la posta, come si gestisce, DNS, rinnovi.
+
+    I record DNS (MX/NS/A) sono l'ultima lettura del controllo automatico; dns_change resta
+    pieno finche' il cambio non viene segnato come visto."""
+    __tablename__ = "client_domains"
+    __table_args__ = (UniqueConstraint("client_id", "domain", name="uq_client_domain"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    domain: Mapped[str] = mapped_column(String(253))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    status_note: Mapped[str] = mapped_column(Text, default="")       # situazione (domini non attivi)
+    mail_host: Mapped[str] = mapped_column(String(190), default="")  # email ospitate su
+    provider_id: Mapped[int | None] = mapped_column(ForeignKey("client_providers.id", ondelete="SET NULL"), nullable=True)
+    manage_howto: Mapped[str] = mapped_column(Text, default="")
+    panel_url: Mapped[str] = mapped_column(Text, default="")
+    account_ref: Mapped[str] = mapped_column(String(255), default="")  # riferimento all'account, mai la password
+    webmail_url: Mapped[str] = mapped_column(Text, default="")
+    dns_host: Mapped[str] = mapped_column(String(190), default="")   # DNS / record MX modificabili su
+    site_host: Mapped[str] = mapped_column(String(190), default="")  # sito su
+    notes: Mapped[str] = mapped_column(Text, default="")
+    renewal_payer: Mapped[str] = mapped_column(String(120), default="")
+    renewal_cost: Mapped[str] = mapped_column(String(60), default="")
+    hosting_expires: Mapped[date | None] = mapped_column(Date, nullable=True)
+    dns_mx: Mapped[str] = mapped_column(Text, default="")            # JSON: lista ordinata
+    dns_ns: Mapped[str] = mapped_column(Text, default="")
+    dns_a: Mapped[str] = mapped_column(Text, default="")
+    dns_nx: Mapped[bool] = mapped_column(Boolean, default=False)     # il dominio non risolve
+    dns_error: Mapped[str] = mapped_column(String(255), default="")
+    dns_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dns_change: Mapped[str] = mapped_column(Text, default="")        # JSON del cambio non ancora visto
+    dns_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class PluginCatalog(Base):

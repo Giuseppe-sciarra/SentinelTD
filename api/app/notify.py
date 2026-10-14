@@ -243,6 +243,24 @@ EVENTS: dict[str, dict[str, Any]] = {
 </div>""",
         "telegram": "⏳ <b>{{ item }}</b>\n{{ kind }}{% if platform %} · {{ platform }}{% endif %}\n📅 <b>{{ expires_on }}</b> — tra <b>{{ days }} giorni</b>{% if site_name %}\n🌐 {{ site_name }}{% endif %}{% if provider %}\n🏢 {{ provider }}{% endif %}{% if notes %}\n<i>{{ notes }}</i>{% endif %}",
     },
+    "client_dns_changed": {
+        "label": "DNS cambiati (clienti)",
+        "desc": "Il controllo DNS giornaliero dei domini nelle schede clienti ha trovato MX, NS o indirizzi del sito diversi da prima. Un messaggio per cliente.",
+        "channels": {"email": False, "telegram": True},
+        "vars": {"client_name": "Nome del cliente", "changes_head": "Riga di sintesi (es. 2 domini con DNS cambiati)",
+                 "changes_count": "Quanti domini", "changes_lines": "Elenco per Telegram: un cambio per riga",
+                 "changes_html": "Elenco per email (HTML)", "panel_url": "Link alla scheda del cliente", "date": "Data e ora"},
+        "subject": "[Sentinel] 🌐 {{ client_name }} — {{ changes_head }}",
+        "email": """<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#222;max-width:640px">
+  <h2 style="margin:0 0 6px">🌐 {{ client_name }}</h2>
+  <p style="margin:0 0 10px"><b>{{ changes_head }}</b></p>
+  {{ changes_html }}
+  <p style="color:#666">Se il cambio è voluto, segnalo come visto nella scheda del cliente.</p>
+  {% if panel_url %}<p><a href="{{ panel_url }}">{{ panel_url }}</a></p>{% endif %}
+  <p style="color:#999;font-size:12px;margin-top:16px">Sentinel TD &middot; {{ date }}</p>
+</div>""",
+        "telegram": "🌐 <b>{{ client_name }}</b> — {{ changes_head }}\n{{ changes_lines }}{% if panel_url %}\n🔗 {{ panel_url }}{% endif %}",
+    },
 }
 
 # The dictionaries above stay in the Italian source language. They are localized
@@ -308,6 +326,9 @@ SAMPLE: dict[str, dict[str, Any]] = {
     "expiry_alert": {"site_name": "Sito di prova", "site_url": "https://esempio.it", "kind": "Dominio",
                      "item": "esempio.it", "platform": "", "provider": "Registro dominio",
                      "expires_on": "15/10/2026", "days": 30, "notes": "Rinnovo automatico disattivato"},
+    "client_dns_changed": {"client_name": "Hotel Esempio", "panel_url": "",
+                           "changes": [{"domain": "esempio.it", "kind": "mx", "from": ["10 mail.esempio.it"], "to": ["0 esempio-it.mail.protection.outlook.com"]},
+                                       {"domain": "esempio.com", "kind": "resolve", "from": "risolve", "to": "non risolve"}]},
 }
 
 _env = Environment(loader=BaseLoader(), autoescape=False)
@@ -649,6 +670,30 @@ def _failures_vars(out: dict, lang: str) -> None:
     out["failures_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
 
 
+def _dns_vars(out: dict, lang: str) -> None:
+    """DNS cambiati: una riga per cambio, "dominio — MX: prima → dopo"."""
+    ch = [c for c in (out.get("changes") or []) if isinstance(c, dict)]
+    labels = {"mx": "MX", "ns": "NS", "a": "A", "resolve": t("Dominio", lang)}
+
+    def fmt(v):
+        if isinstance(v, list):
+            return ", ".join(str(x) for x in v) if v else t("nessuno", lang)
+        return t(str(v or ""), lang)
+    n = len({c.get("domain") for c in ch})
+    out["changes_count"] = n
+    out["changes_head"] = (f"{n} {t('dominio con DNS cambiati', lang)}" if n == 1
+                           else f"{n} {t('domini con DNS cambiati', lang)}")
+    tg, em = [], []
+    for c in ch:
+        what = labels.get(c.get("kind"), str(c.get("kind") or ""))
+        tg.append(f"• <b>{_esc(c.get('domain'))}</b> — {what}: {_esc(fmt(c.get('from')))} → {_esc(fmt(c.get('to')))}")
+        em.append(f'<li style="margin-bottom:6px"><b>{_esc(c.get("domain"))}</b> — {what}: '
+                  f'<span style="font-family:monospace;color:#555">{_esc(fmt(c.get("from")))}</span> → '
+                  f'<span style="font-family:monospace">{_esc(fmt(c.get("to")))}</span></li>')
+    out["changes_lines"] = "\n".join(tg)
+    out["changes_html"] = '<ul style="margin:0;padding-left:18px">' + "".join(em) + "</ul>"
+
+
 def _rollback_vars(out: dict, lang: str) -> None:
     items = out.get("items") or []
     out["items_count"] = len(items)
@@ -743,6 +788,8 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
         _failures_vars(out, lang)
     if event == "auto_rollback":
         _rollback_vars(out, lang)
+    if event == "client_dns_changed":
+        _dns_vars(out, lang)
 
     if event == "cycle_summary" and isinstance(out.get("report"), list):
         when = str(out.get("when") or out.get("date") or "")

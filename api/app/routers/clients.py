@@ -8,24 +8,77 @@ dell'agenzia (Report mensile), solo per i clienti con l'interruttore acceso.
 """
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import report as rep
 from ..auth import require_auth, verify_token
 from ..db import get_session
-from ..models import Client, ClientSite, Site
+from ..models import Client, ClientDomain, ClientSite, Site
 from .reports import _strip_page_rule, client_emails, send_client_report
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
 
-def _out(cl: Client, sites: list[Site]) -> dict:
+def _out(cl: Client, sites: list[Site], counts: dict | None = None) -> dict:
+    c = counts or {}
     return {
         "id": cl.id, "name": cl.name, "emails": cl.emails, "enabled": bool(cl.enabled),
-        "email_list": client_emails(cl.emails),
+        "email_list": client_emails(cl.emails), "notes": cl.notes or "",
         "sites": [{"id": x.id, "name": x.name, "url": x.url, "cms": x.cms, "tags": x.tags or ""} for x in sites],
+        # scheda cliente: domini attivi e cambi DNS non ancora visti (per un cliente con
+        # sottoclienti contano anche quelli dei sottoclienti), quanti sottoclienti ha
+        "parent_id": cl.parent_id, "subs": int(c.get("subs", 0)), "card_domains": int(c.get("card_domains", 0)),
+        "domains": int(c.get("domains", 0)), "dns_changes": int(c.get("dns_changes", 0)),
     }
+
+
+async def _domain_counts(s: AsyncSession) -> dict:
+    parent = dict((await s.execute(select(Client.id, Client.parent_id))).all())
+    rows = (await s.execute(select(ClientDomain.client_id, ClientDomain.active, ClientDomain.dns_change))).all()
+    out: dict[int, dict] = {}
+    for cid, active, change in rows:
+        for target in {cid, parent.get(cid)} - {None}:
+            c = out.setdefault(target, {"domains": 0, "dns_changes": 0, "subs": 0, "card_domains": 0})
+            c["card_domains"] += 1
+            c["domains"] += int(bool(active))
+            c["dns_changes"] += int(bool(change))
+    for cid, pid in parent.items():
+        if pid:
+            out.setdefault(pid, {"domains": 0, "dns_changes": 0, "subs": 0, "card_domains": 0})["subs"] += 1
+    return out
+
+
+async def family_ids(s: AsyncSession, cid: int) -> list[int]:
+    """Il cliente e i suoi sottoclienti."""
+    return [cid, *(await s.execute(select(Client.id).where(Client.parent_id == cid))).scalars().all()]
+
+
+async def _check_parent(s: AsyncSession, cl: Client | None, pid) -> int | None:
+    """Padre valido per un sottocliente: esiste, non e' lui stesso, e' un cliente principale;
+    un cliente che ha gia' sottoclienti non puo' diventare sottocliente (un livello solo)."""
+    if pid in (None, "", 0, "0"):
+        return None
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Cliente principale non valido")
+    parent = await s.get(Client, pid)
+    if not parent or (cl is not None and pid == cl.id) or parent.parent_id:
+        raise HTTPException(422, "Cliente principale non valido")
+    if cl is not None and cl.id and (await s.execute(select(Client.id).where(Client.parent_id == cl.id))).first():
+        raise HTTPException(422, "Questo cliente ha dei sottoclienti: non può diventare a sua volta un sottocliente")
+    return pid
+
+
+async def _delete_clients(s: AsyncSession, ids: list[int]) -> int:
+    """Elimina i clienti dati con i loro sottoclienti e le schede (domini); i siti restano."""
+    ids = sorted(set(ids) | set((await s.execute(select(Client.id).where(Client.parent_id.in_(ids or [0])))).scalars().all()))
+    await s.execute(delete(ClientSite).where(ClientSite.client_id.in_(ids or [0])))
+    await s.execute(delete(ClientDomain).where(ClientDomain.client_id.in_(ids or [0])))
+    await s.execute(update(Client).where(Client.parent_id.in_(ids or [0])).values(parent_id=None))
+    res = await s.execute(delete(Client).where(Client.id.in_(ids or [0])))
+    return res.rowcount or 0
 
 
 async def _sites_of(s: AsyncSession, cid: int) -> list[Site]:
@@ -56,13 +109,19 @@ def _clean(payload: dict) -> dict:
 @router.get("", dependencies=[Depends(require_auth)])
 async def list_clients(s: AsyncSession = Depends(get_session)):
     clients = (await s.execute(select(Client).order_by(Client.name))).scalars().all()
-    return [_out(cl, await _sites_of(s, cl.id)) for cl in clients]
+    counts = await _domain_counts(s)
+    links = (await s.execute(select(ClientSite.client_id, Site).join(Site, ClientSite.site_id == Site.id).order_by(Site.name))).all()
+    by_client: dict[int, list[Site]] = {}
+    for cid, site in links:
+        by_client.setdefault(cid, []).append(site)
+    return [_out(cl, by_client.get(cl.id, []), counts.get(cl.id)) for cl in clients]
 
 
 @router.post("", dependencies=[Depends(require_auth)])
 async def create_client(payload: dict = Body(...), s: AsyncSession = Depends(get_session)):
     data = _clean(payload)
-    cl = Client(**data)
+    cl = Client(**data, notes=str(payload.get("notes") or "")[:20000],
+                parent_id=await _check_parent(s, None, payload.get("parent_id")))
     s.add(cl)
     await s.flush()
     await _set_sites(s, cl.id, payload.get("site_ids"))
@@ -155,6 +214,22 @@ async def merge_clients(payload: dict = Body(...), s: AsyncSession = Depends(get
     if data["enabled"] and not client_emails(data["emails"]):
         data["enabled"] = False
     target.name, target.emails, target.enabled = data["name"], data["emails"], data["enabled"]
+    # scheda cliente: domini e note degli altri passano al cliente che resta (niente doppioni)
+    have = set((await s.execute(select(ClientDomain.domain).where(ClientDomain.client_id == target.id))).scalars().all())
+    for cl in others:
+        for d in (await s.execute(select(ClientDomain).where(ClientDomain.client_id == cl.id))).scalars().all():
+            if d.domain in have:
+                await s.delete(d)
+            else:
+                d.client_id = target.id
+                have.add(d.domain)
+        if (cl.notes or "").strip() and cl.notes.strip() not in (target.notes or ""):
+            target.notes = ((target.notes or "").rstrip() + "\n\n" + cl.notes.strip()).strip()
+    other_ids = [cl.id for cl in others]
+    await s.execute(update(Client).where(Client.parent_id.in_(other_ids)).values(parent_id=target.id))
+    if target.parent_id in other_ids:
+        target.parent_id = None
+    await s.flush()
     for cl in others:
         await s.execute(delete(ClientSite).where(ClientSite.client_id == cl.id))
         await s.delete(cl)
@@ -169,10 +244,9 @@ async def bulk_delete_clients(payload: dict = Body(...), s: AsyncSession = Depen
     ids = [int(x) for x in (payload.get("ids") or []) if str(x).strip().isdigit()]
     if not ids:
         return {"deleted": 0}
-    await s.execute(delete(ClientSite).where(ClientSite.client_id.in_(ids)))
-    res = await s.execute(delete(Client).where(Client.id.in_(ids)))
+    n = await _delete_clients(s, ids)
     await s.commit()
-    return {"deleted": res.rowcount or 0}
+    return {"deleted": n}
 
 
 @router.post("/{cid}/add-sites", dependencies=[Depends(require_auth)])
@@ -203,6 +277,10 @@ async def update_client(cid: int, payload: dict = Body(...), s: AsyncSession = D
         raise HTTPException(404, "Cliente non trovato")
     data = _clean({"name": cl.name, "emails": cl.emails, "enabled": cl.enabled, **payload})
     cl.name, cl.emails, cl.enabled = data["name"], data["emails"], data["enabled"]
+    if "notes" in payload:
+        cl.notes = str(payload.get("notes") or "")[:20000]
+    if "parent_id" in payload:
+        cl.parent_id = await _check_parent(s, cl, payload.get("parent_id"))
     if "site_ids" in payload:
         await _set_sites(s, cid, payload.get("site_ids"))
     await s.commit()
@@ -214,8 +292,7 @@ async def delete_client(cid: int, s: AsyncSession = Depends(get_session)):
     cl = await s.get(Client, cid)
     if not cl:
         raise HTTPException(404, "Cliente non trovato")
-    await s.execute(delete(ClientSite).where(ClientSite.client_id == cid))
-    await s.delete(cl)
+    await _delete_clients(s, [cid])
     await s.commit()
     return {"deleted": True}
 

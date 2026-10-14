@@ -1,5 +1,60 @@
 # Changelog
 
+## 2.39.0 — Gestione clienti: clienti, sottoclienti, domini e posta
+
+### Added
+- **Nuova voce di menu "Gestione clienti"** (sotto "Gestione server"), con tre schede: **Clienti**,
+  **Provider** e **Impostazioni**. Il **Report clienti** resta com'era, nella sua voce in Sistema.
+- **Scheda del cliente** (`#/customers/<id>`): i domini con dove sta la posta, come si gestiscono
+  le caselle, link al pannello, account da usare (solo il riferimento, mai la password),
+  webmail, dove si modificano DNS/MX, dove sta il sito, rinnovo (chi paga, costo, scadenza), note.
+  Una riga per dominio; il dettaglio si apre con un click. Ricerca e filtri: dove sta la posta,
+  DNS cambiati, rinnovo in scadenza, senza provider, errore DNS. I domini non attivi stanno in
+  fondo, chiusi.
+- **Sottoclienti**: un cliente (per esempio un'agenzia) può avere dei sottoclienti, un livello
+  solo. Nella scheda del cliente c'è una riga per sottocliente con i suoi domini. Ogni
+  sottocliente ha anche una sua scheda. I domini si spostano tra il cliente e i sottoclienti.
+- **Provider**: istruzioni "come fare" (dove entrare, crea/elimina casella, cambia password,
+  inoltri e risposta automatica, webmail con `<dominio>`) comuni a tutti i clienti e mostrate su
+  ogni dominio del provider. I domini si collegano da soli dal campo "Email ospitate su".
+- **Importa da Excel** (.xlsx o .csv) nella scheda:
+  - i fogli si riconoscono dalle intestazioni (domini, domini non attivi, provider; i riepiloghi
+    si ignorano), e prima di importare c'è l'anteprima;
+  - con "un sottocliente per ogni dominio", i domini con lo stesso nome finiscono nello stesso
+    sottocliente (esempio.com ed esempio.it). Vale la colonna "Cliente", se c'è. I domini col
+    nome del cliente restano sul cliente;
+  - i riferimenti a colonne del foglio ("colonna G del foglio …") diventano il campo del pannello
+    dove sta quel dato;
+  - reimportare aggiorna: una cella vuota non cancella niente, e i domini restano dove sono.
+- **Controllo DNS dei domini** (MX, NS, A): ogni mattina alle 6:50 (si spegne in Impostazioni)
+  e col comando "Controlla DNS ora".
+  - Un cambio vale solo se una seconda lettura lo conferma, e un errore di lettura non è un
+    cambio.
+  - Per gli A conta solo un cambio completo, così le CDN che ruotano gli indirizzi non
+    scattano.
+  - Il cambio resta evidenziato finché non lo segni come visto, e il numero compare accanto a
+    "Gestione clienti" nel menu.
+- Nuovo avviso **"DNS cambiati (clienti)"** in Notifiche (Telegram di base): un messaggio per
+  cliente, con i sottoclienti nel messaggio del loro cliente.
+
+### Changed
+- Report clienti non mostra i clienti che hanno solo la scheda né i sottoclienti.
+- Unire due clienti porta in quello che resta anche domini, note e sottoclienti dell'altro.
+  Eliminare un cliente elimina anche la sua scheda e i suoi sottoclienti; i siti restano.
+
+### Tests
+- `tests/test_client_cards.py`, che copre:
+  - lettura dei fogli e abbinamento ai provider, CSV, riferimenti alle colonne;
+  - raggruppamento dei domini, anteprima e import con e senza sottoclienti, reimport senza
+    doppioni;
+  - spostamento dei domini, regole sui sottoclienti, eliminazione;
+  - regole dei cambi DNS, controllo con lettura confermata, transitoria o in errore;
+  - avviso per cliente principale e interruttore del giro automatico.
+
+### Dependencies
+- `openpyxl` (lettura .xlsx) e `dnspython` (letture DNS): serve ricostruire l'immagine
+  (`docker compose build api worker`).
+
 ## 2.38.2 — Traduzioni contate giuste quando arrivano con un plugin
 
 ### Fixed
