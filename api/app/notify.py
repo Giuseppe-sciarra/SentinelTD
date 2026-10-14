@@ -42,8 +42,9 @@ EVENTS: dict[str, dict[str, Any]] = {
             "ok_count": "Update riusciti", "failed_count": "Update falliti", "date": "Data e ora",
             "updates_table": "Tabella HTML degli update (formato precedente)",
             "updates_lines": "Elenco testuale degli update (per Telegram)",
-            "results": "Lista grezza [{name, from, to, ok, manual, held, error}] per template avanzati",
+            "results": "Lista grezza [{name, from, to, ok, manual, held, retry, error}] per template avanzati",
             "manual_count": "Prodotti da aggiornare a mano (licenza)",
+            "retry_count": "Traduzioni da riprovare (in giallo, si riprova dopo 30 minuti)",
             "visual": "Controllo home prima/dopo: {status: ok|warn|ko|na, message, diff}",
         },
         "subject": "[Sentinel] {{ outcome_icon }} {{ site_name }} — {{ outcome_text }}{% if folder %} · {{ folder }}{% endif %}",
@@ -427,10 +428,16 @@ def _highlights(oks):
     return out[:3]
 
 
+def _failed(r) -> bool:
+    """Fallito davvero: non "in attesa", "a mano" o "da riprovare" (traduzioni, in giallo)."""
+    return not r.get("ok") and not r.get("manual") and not r.get("held") and not r.get("retry")
+
+
 def _site_outcome(results, visual, lang):
     ok = [r for r in results if r.get("ok")]
-    failed = [r for r in results if not r.get("ok") and not r.get("manual") and not r.get("held")]
+    failed = [r for r in results if _failed(r)]
     waiting = [r for r in results if r.get("manual") or r.get("held")]
+    retry = [r for r in results if r.get("retry")]
     vis = (visual or {}).get("status")
     n_ok = len(ok)
     upd = f"{n_ok} {t('aggiornati', lang) if n_ok != 1 else t('aggiornato', lang)}"
@@ -441,8 +448,13 @@ def _site_outcome(results, visual, lang):
         return "🛑", f"{upd}, {t('home con errori', lang)}"
     if vis in ("warn",):
         return "⚠️", f"{upd}, {t('home da controllare', lang)}"
-    if waiting:
-        return "⏸", f"{upd}, {len(waiting)} {t('in attesa', lang)}"
+    if waiting or retry:
+        text = upd
+        if waiting:
+            text += f", {len(waiting)} {t('in attesa', lang)}"
+        if retry:
+            text += f", {len(retry)} {t('da riprovare', lang)}"
+        return "⏸", text
     return "✅", upd
 
 
@@ -461,6 +473,7 @@ def _cycle_numbers(rep):
         "failed": sum(len(x.get("failed") or []) for x in rep),
         "held": sum(len(x.get("held") or []) for x in rep),
         "manual": sum(len(x.get("manual") or []) for x in rep),
+        "retry": sum(len(x.get("retry") or []) for x in rep),
         "vis_ok": sum(1 for x in rep if (x.get("visual") or {}).get("status") == "ok"),
         "vis_bad": [x for x in rep if (x.get("visual") or {}).get("status") in ("warn", "ko")],
     }
@@ -468,7 +481,7 @@ def _cycle_numbers(rep):
 
 def _cycle_headline(rep, lang):
     n = _cycle_numbers(rep)
-    icon = "❌" if n["failed"] else ("⚠️" if (n["vis_bad"] or n["held"] or n["manual"]) else "✅")
+    icon = "❌" if n["failed"] else ("⚠️" if (n["vis_bad"] or n["held"] or n["manual"] or n["retry"]) else "✅")
     text = _upd_on(n["applied"], n["sites"], lang)
     if n["failed"]:
         text += f", {n['failed']} {t('falliti', lang) if n['failed'] != 1 else t('fallito', lang)}"
@@ -497,6 +510,9 @@ def _problem_lines(rep, lang, html=True):
             out.append((site, f"{E(_short(h.get('name'), 32))} {t('in attesa del Pro', lang)}", ""))
         for m in x.get("manual") or []:
             out.append((site, f"{E(_short(m.get('name'), 32))} {t('da aggiornare a mano', lang)}", ""))
+        for r in x.get("retry") or []:
+            out.append((site, f"{E(_short(r.get('name'), 32))} {t('da riprovare', lang)}",
+                        E(_short(t(str(r.get("error") or ""), lang), 110))))
     return out
 
 
@@ -522,6 +538,8 @@ def _cycle_telegram(rep, lang, panel_url, when):
         extra.append(f"⏸ {n['held']} {t('in attesa', lang)}")
     if n["manual"]:
         extra.append(f"🔧 {n['manual']} {t('a mano', lang)}")
+    if n["retry"]:
+        extra.append(f"⏸ {n['retry']} {t('da riprovare', lang)}")
     if extra:
         head.append(" · ".join(extra))
     if n["vis_ok"] or n["vis_bad"]:
@@ -576,6 +594,8 @@ def _cycle_email(rep, lang, panel_url, when):
         bits.append(f'⏸ {n["held"]} {t("in attesa", lang)}')
     if n["manual"]:
         bits.append(f'🔧 {n["manual"]} {t("a mano", lang)}')
+    if n["retry"]:
+        bits.append(f'⏸ {n["retry"]} {t("da riprovare", lang)}')
     if n["vis_ok"] or n["vis_bad"]:
         bits.append(f'🖼 {t("Home", lang)}: {n["vis_ok"]} ok' + (f' · ⚠️ {len(n["vis_bad"])} {t("da guardare", lang)}' if n["vis_bad"] else ""))
     if bits:
@@ -625,7 +645,7 @@ def _site_report_extras(out, lang):
     def rank(r):
         if r.get("ok"):
             return 3
-        return 0 if not (r.get("manual") or r.get("held")) else 1
+        return 0 if _failed(r) else 1
     rows = []
     for r in sorted(results, key=rank):
         name, frm, to = _esc(r.get("name")), _esc(r.get("from")), _esc(r.get("to"))
@@ -637,6 +657,8 @@ def _site_report_extras(out, lang):
             badge = '<span style="color:#b26a00;font-weight:600">' + t("in attesa", lang) + '</span> <span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>"
         elif r.get("manual"):
             badge = '<span style="color:#b26a00;font-weight:600">' + t("da aggiornare a mano", lang) + '</span> <span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>"
+        elif r.get("retry"):
+            badge = '<span style="color:#b26a00;font-weight:600">' + t("da riprovare", lang) + '</span> <span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>"
         else:
             badge = '<span style="color:#b00020;font-weight:600">' + t("fallito", lang) + '</span> <span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>"
         ver = f"{frm} &rarr; {to}" if to and to != frm else frm
@@ -732,8 +754,9 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
         results = out.get("results") or []
         out["ok_count"] = sum(1 for r in results if r.get("ok"))
         # i prodotti da aggiornare a mano (licenza) NON sono falliti
-        out["failed_count"] = sum(1 for r in results if not r.get("ok") and not r.get("manual") and not r.get("held"))
+        out["failed_count"] = sum(1 for r in results if _failed(r))
         out["manual_count"] = sum(1 for r in results if r.get("manual"))
+        out["retry_count"] = sum(1 for r in results if r.get("retry"))
         rows, lines = [], []
         for r in results:
             name, frm, to = _esc(r.get("name")), _esc(r.get("from")), _esc(r.get("to"))
@@ -747,6 +770,12 @@ def enrich(event: str, ctx: dict, escape: bool = True, language: str | None = No
                          '<span style="color:#888">' + _esc(t(str(r.get("error") or ""), lang)) + "</span>")
                 ver = f"{frm} &rarr; {to}" if to and to != frm else frm
                 lines.append(f"🔧 {name} {frm}→{to} — " + t("da aggiornare a mano", lang))
+            elif r.get("retry"):
+                error = t(str(r.get("error") or ""), lang)
+                badge = ('<span style="color:#b26a00;font-weight:600">' + t("da riprovare", lang) + "</span> "
+                         '<span style="color:#888">' + _esc(error) + "</span>")
+                ver = frm
+                lines.append(f"⏸ {name} — " + t("da riprovare", lang) + (f": {_esc(error)}" if error else ""))
             elif r.get("ok"):
                 badge = '<span style="color:#1a7f4b;font-weight:600">' + t("aggiornato", lang) + "</span>"
                 ver = f"{frm} &rarr; {to}" if to and to != frm else (to or frm)

@@ -338,6 +338,9 @@ class UpdateHistory(Base):
     from_version: Mapped[str] = mapped_column(String(64), default="")
     to_version: Mapped[str] = mapped_column(String(64), default="")
     ok: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    # non riuscito ma non fallito: traduzioni WordPress non applicate, in giallo, si riprova
+    # fra circa 3 ore (di solito wordpress.org non ha ancora il pacchetto nuovo su tutti i server)
+    retry: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     # copia della versione precedente fatta dal connettore prima dell'aggiornamento (WP 2.26+):

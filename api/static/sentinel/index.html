@@ -226,8 +226,8 @@
                 <div class="timeline">
                   <template x-for="h in history.slice(0,10)" :key="h.id">
                     <div class="ev">
-                      <span class="dot" :class="h.ok?'ok':'err'" style="margin-top:6px"></span>
-                      <div><b x-text="h.site_name" translate="no"></b> · <span x-text="h.name" translate="no"></span> <span class="mut mono small" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok" x-text="h.error"></div></div>
+                      <span class="dot" :class="h.ok?'ok':(h.retry?'warn':'err')" style="margin-top:6px"></span>
+                      <div><b x-text="h.site_name" translate="no"></b> · <span x-text="h.name" translate="no"></span> <span class="mut mono small" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok && !h.retry" x-text="h.error"></div><div class="small warn" x-show="h.retry" x-text="h.error"></div></div>
                       <div class="when" x-text="ago(h.at)"></div>
                     </div>
                   </template>
@@ -699,7 +699,7 @@
                   <h3>Ultimi eventi</h3>
                   <div class="timeline">
                     <template x-for="h in siteHistory.slice(0,8)" :key="h.id">
-                      <div class="ev"><span class="dot" :class="h.ok?'ok':'err'" style="margin-top:6px"></span><div><span x-text="h.name" translate="no"></span> <span class="mono small mut" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok" x-text="h.error"></div></div><div class="when" x-text="ago(h.at)"></div></div>
+                      <div class="ev"><span class="dot" :class="h.ok?'ok':(h.retry?'warn':'err')" style="margin-top:6px"></span><div><span x-text="h.name" translate="no"></span> <span class="mono small mut" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok && !h.retry" x-text="h.error"></div><div class="small warn" x-show="h.retry" x-text="h.error"></div></div><div class="when" x-text="ago(h.at)"></div></div>
                     </template>
                     <div class="empty" x-show="!siteHistory.length">Nessun update negli ultimi 7 giorni</div>
                   </div>
@@ -727,7 +727,7 @@
             <template x-if="route.tab==='history'">
               <div class="card site-tab"><div class="timeline">
                 <template x-for="h in siteHistory" :key="h.id">
-                  <div class="ev"><span class="dot" :class="h.ok?'ok':'err'" style="margin-top:6px"></span><div><b x-text="h.name" translate="no"></b> <span class="badge" x-text="h.type"></span> <span class="mono small mut" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok" x-text="h.error"></div><div class="small mut" x-show="h.ok && h.error" x-text="h.error"></div><button class="btn sm ghost" style="margin-top:4px" x-show="h.ok && h.backup && h.from && (h.type==='plugin'||h.type==='theme')" :disabled="!!(busy['rb'+h.id])" @click="rollbackItem(h)" :title="'Rimette la ' + h.from + ' dalla copia fatta prima dell\'aggiornamento (' + h.backup + ')'" x-text="'⏪ Ripristina la ' + h.from"></button></div><div class="when" x-text="fmtDate(h.at)"></div></div>
+                  <div class="ev"><span class="dot" :class="h.ok?'ok':(h.retry?'warn':'err')" style="margin-top:6px"></span><div><b x-text="h.name" translate="no"></b> <span class="badge" x-text="h.type"></span> <span class="mono small mut" x-text="h.from+' → '+h.to"></span><div class="err small" x-show="!h.ok && !h.retry" x-text="h.error"></div><div class="small warn" x-show="h.retry" x-text="h.error"></div><div class="small mut" x-show="h.ok && h.error" x-text="h.error"></div><button class="btn sm ghost" style="margin-top:4px" x-show="h.ok && h.backup && h.from && (h.type==='plugin'||h.type==='theme')" :disabled="!!(busy['rb'+h.id])" @click="rollbackItem(h)" :title="'Rimette la ' + h.from + ' dalla copia fatta prima dell\'aggiornamento (' + h.backup + ')'" x-text="'⏪ Ripristina la ' + h.from"></button></div><div class="when" x-text="fmtDate(h.at)"></div></div>
                 </template>
                 <div class="empty" x-show="!siteHistory.length">Nessun update negli ultimi 7 giorni</div>
               </div></div>
@@ -910,7 +910,7 @@
         <template x-if="route.page==='history'">
           <div>
             <h1 class="page-title">Storico aggiornamenti</h1>
-            <div class="page-sub">Ultimi 7 giorni · <span x-text="histSummary?histSummary.ok:0"></span> riusciti · <span x-text="histSummary?histSummary.failed:0"></span> falliti</div>
+            <div class="page-sub">Ultimi 7 giorni · <span x-text="histSummary?histSummary.ok:0"></span> riusciti · <span x-text="histSummary?histSummary.failed:0"></span> falliti<span x-show="histSummary && histSummary.retry"> · <span x-text="histSummary?histSummary.retry:0"></span> da riprovare</span></div>
             <div class="card" style="margin-top:16px">
               <div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:12px">
                 <input class="input" style="flex:1;min-width:240px" x-model="histQ" placeholder="Cerca per sito, plugin o tema">
@@ -922,12 +922,12 @@
               <div class="hist-days">
               <template x-for="g in historyByDay" :key="'hd'+g.day">
                 <div class="hist-day">
-                  <div class="hist-day-h"><b x-text="dayLabel(g.day)"></b> <span class="small mut" x-text="g.ok + ' ' + pl(g.ok, 'riuscito', 'riusciti')"></span><span class="small err" x-show="g.failed" x-text="' · ' + g.failed + ' ' + pl(g.failed, 'fallito', 'falliti')"></span></div>
+                  <div class="hist-day-h"><b x-text="dayLabel(g.day)"></b> <span class="small mut" x-text="g.ok + ' ' + pl(g.ok, 'riuscito', 'riusciti')"></span><span class="small err" x-show="g.failed" x-text="' · ' + g.failed + ' ' + pl(g.failed, 'fallito', 'falliti')"></span><span class="small warn" x-show="g.retry" x-text="' · ' + g.retry + ' da riprovare'"></span></div>
                   <template x-for="h in g.rows" :key="h.id">
-                    <div class="hist-row" :class="h.ok ? '' : 'failed'">
+                    <div class="hist-row" :class="h.ok ? '' : (h.retry ? 'retry' : 'failed')">
                       <span class="hist-time mono small mut" x-text="h.at ? new Date(h.at).toLocaleTimeString(I18n.locale, { hour: '2-digit', minute: '2-digit' }) : ''"></span>
                       <div class="hist-main"><a :href="'#/site/'+h.site_id" x-text="h.site_name" translate="no"></a> · <b x-text="h.name" translate="no"></b> <span class="badge" x-text="h.type"></span> <span class="mono small" x-text="h.from + ' → ' + h.to"></span>
-                        <div class="err small" x-show="!h.ok" x-text="h.error"></div><div class="small mut" x-show="h.ok && h.error" x-text="h.error"></div></div>
+                        <div class="err small" x-show="!h.ok && !h.retry" x-text="h.error"></div><div class="small warn" x-show="h.retry" x-text="h.error"></div><div class="small mut" x-show="h.ok && h.error" x-text="h.error"></div></div>
                       <button class="btn sm hist-rb" x-show="h.ok && h.backup && h.from && (h.type==='plugin'||h.type==='theme')" :disabled="!!(busy['rb'+h.id])" @click="rollbackItem(h)" :title="'Rimette la ' + h.from + ' dalla copia fatta prima dell\'aggiornamento (' + h.backup + ')'" x-text="'⏪ Ripristina la ' + h.from"></button>
                     </div>
                   </template>

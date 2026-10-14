@@ -1170,6 +1170,7 @@ th.sortable:hover { color: var(--txt); }
 .hist-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 7px 10px; border-radius: 8px; border-left: 3px solid transparent; }
 .hist-row:hover { background: var(--panel-2); }
 .hist-row.failed { border-left-color: var(--err); background: rgba(255,93,108,.05); }
+.hist-row.retry { border-left-color: var(--warn); background: rgba(245,185,66,.06); }
 .hist-rb { white-space: nowrap; border-color: var(--acc); color: var(--acc); }
 /* Sicurezza: colori di gravità */
 .sev-badge.sev-err { background: rgba(255,93,108,.14); color: var(--err); }

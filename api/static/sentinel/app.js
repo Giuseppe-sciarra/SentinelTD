@@ -382,7 +382,7 @@ function sentinel() {
     },
     get historyRows() {
       const q = (this.histQ || '').trim().toLowerCase(), t = this.histType;
-      return this.history.filter(h => (!t || (t === 'failed' ? !h.ok : (t === 'backup' ? (h.ok && h.backup) : h.type === t)))
+      return this.history.filter(h => (!t || (t === 'failed' ? (!h.ok && !h.retry) : (t === 'backup' ? (h.ok && h.backup) : h.type === t)))
         && (!q || (h.site_name || '').toLowerCase().includes(q) || (h.name || '').toLowerCase().includes(q) || (h.slug || '').toLowerCase().includes(q)));
     },
     // storico diviso per giorno, per la pagina Storico
@@ -392,8 +392,8 @@ function sentinel() {
         // giorno LOCALE (non UTC): un aggiornamento alle 00:30 sta nel giorno giusto
         const t = h.at ? new Date(h.at) : null;
         const d = t ? `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}` : '';
-        if (!cur || cur.day !== d) { cur = { day: d, rows: [], ok: 0, failed: 0 }; out.push(cur); }
-        cur.rows.push(h); h.ok ? cur.ok++ : cur.failed++;
+        if (!cur || cur.day !== d) { cur = { day: d, rows: [], ok: 0, failed: 0, retry: 0 }; out.push(cur); }
+        cur.rows.push(h); h.ok ? cur.ok++ : (h.retry ? cur.retry++ : cur.failed++);
       }
       return out;
     },

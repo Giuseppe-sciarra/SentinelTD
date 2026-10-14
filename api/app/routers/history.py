@@ -33,7 +33,8 @@ async def list_history(
         "id": r.id, "site_id": r.site_id, "site_name": r.site_name, "cms": r.cms,
         "type": r.ext_type, "name": html.unescape(r.ext_name or ""), "slug": r.slug,   # "&#8211;" -> "–"
         # ripulito anche quello salvato prima della 2.9.0 (link interi col token, &#8230;…)
-        "from": r.from_version, "to": r.to_version, "ok": r.ok, "error": clean_error(r.error),
+        "from": r.from_version, "to": r.to_version, "ok": r.ok, "retry": bool(getattr(r, "retry", False)),
+        "error": clean_error(r.error),
         "at": r.created_at.isoformat() if r.created_at else None,
         "backup": r.backup_file or "",
     } for r in rows]
@@ -41,17 +42,22 @@ async def list_history(
 
 @router.get("/summary")
 async def history_summary(days: int = Query(7, ge=1, le=30), s: AsyncSession = Depends(get_session)):
-    """Conteggi per giorno (ok/falliti) per il grafico della dashboard + totali."""
+    """Conteggi per giorno (ok/falliti) per il grafico della dashboard + totali.
+    Le traduzioni "da riprovare" (in giallo) non sono falliti: contate a parte."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
     day = func.date_trunc("day", UpdateHistory.created_at)
     rows = (await s.execute(
-        select(day.label("d"), UpdateHistory.ok, func.count()).where(UpdateHistory.created_at >= since)
-        .group_by(day, UpdateHistory.ok).order_by(day)
+        select(day.label("d"), UpdateHistory.ok, UpdateHistory.retry, func.count()).where(UpdateHistory.created_at >= since)
+        .group_by(day, UpdateHistory.ok, UpdateHistory.retry).order_by(day)
     )).all()
     per_day: dict[str, dict] = {}
-    for d, ok, n in rows:
+    retry_total = 0
+    for d, ok, retry, n in rows:
         key = d.date().isoformat()
         per_day.setdefault(key, {"day": key, "ok": 0, "failed": 0})
+        if not ok and retry:
+            retry_total += n
+            continue
         per_day[key]["ok" if ok else "failed"] += n
     # riempi i giorni vuoti
     out = []
@@ -60,4 +66,4 @@ async def history_summary(days: int = Query(7, ge=1, le=30), s: AsyncSession = D
         out.append(per_day.get(k, {"day": k, "ok": 0, "failed": 0}))
     tot_ok = sum(x["ok"] for x in out)
     tot_failed = sum(x["failed"] for x in out)
-    return {"days": out, "ok": tot_ok, "failed": tot_failed}
+    return {"days": out, "ok": tot_ok, "failed": tot_failed, "retry": retry_total}

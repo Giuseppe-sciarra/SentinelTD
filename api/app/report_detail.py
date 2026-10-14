@@ -97,6 +97,8 @@ async def gather(p_from: str, p_to: str, site_ids: list[int] | None,
 
     hist_by_site: dict[int, list] = {}
     for h in hist:
+        if getattr(h, "retry", False):
+            continue        # traduzioni da riprovare: non e' un aggiornamento, ne' un fallimento
         if not include_failed and not h.ok:
             continue
         hist_by_site.setdefault(h.site_id, []).append({

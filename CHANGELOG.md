@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.46.0 — Traduzioni WordPress non applicate: in giallo, si riprova dopo 30 minuti
+
+### Changed
+- **Traduzioni non applicate: "da riprovare" in giallo, non più "fallito" in rosso.** Di solito
+  non è un guasto. wordpress.org annuncia la traduzione nuova prima di avere il pacchetto su
+  tutti i suoi server, e mezz'ora dopo si installa.
+  - **Storico** (pagina Storico e Storico del sito): pallino e riga gialli, col motivo. Non
+    contano tra i falliti, né nel filtro "Falliti" né nei conteggi. In cima alla pagina c'è
+    "N da riprovare".
+  - **Email e Telegram**: report del sito "⏸ 0 aggiornati, 1 da riprovare" invece di "❌ 1
+    fallito su 1"; nel riepilogo di ciclo "⏸ N da riprovare". Niente avviso "aggiornamento non
+    riuscito".
+  - **Nuovo tentativo dopo 30 minuti**, senza aspettare il giro. Poi a ogni giro, con almeno 25
+    minuti tra un tentativo e l'altro. Se dopo 3 ore non è ancora passata, una volta al giorno
+    come i falliti, sempre in giallo, così un caso che non si risolve non manda un avviso ogni ora.
+  - Fuori dalle statistiche e dal report dettagliato: non è né un aggiornamento né un fallimento.
+- Quando c'è da aggiornare solo le traduzioni, niente foto della home prima e dopo: non la
+  toccano, e il nuovo tentativo dopo 30 minuti resta leggero.
+
+### Tests
+- `tests/test_update_cycle_history.py`: traduzioni in giallo con nuovo tentativo dopo 30 minuti,
+  nessun secondo tentativo programmato se erano già in giallo, attesa di 25 minuti, dopo 3 ore
+  attesa dei falliti, niente foto della home per le sole traduzioni.
+- `tests/test_translation_retry_notify.py`: report del sito e riepilogo di ciclo in giallo; un
+  fallimento vero resta rosso.
+
 ## 2.45.0 — Traduzioni WordPress: niente più "1/1" se WordPress le ripropone (connettore WP 2.40.0)
 
 ### Fixed

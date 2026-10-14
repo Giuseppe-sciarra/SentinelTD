@@ -73,6 +73,8 @@ async def run_migrations(conn) -> None:
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS server_hostname VARCHAR(80) NOT NULL DEFAULT ''"))
     await conn.execute(text("ALTER TABLE sites ADD COLUMN IF NOT EXISTS shot_attempted_at TIMESTAMPTZ NULL"))
     await conn.execute(text("ALTER TABLE update_history ADD COLUMN IF NOT EXISTS backup_file VARCHAR(255) NOT NULL DEFAULT ''"))
+    # traduzioni non applicate: in giallo, si riprova (2.46.0)
+    await conn.execute(text("ALTER TABLE update_history ADD COLUMN IF NOT EXISTS retry BOOLEAN NOT NULL DEFAULT FALSE"))
 
     # Estensioni a licenza da aggiornare a mano (es. Elementor Pro senza pacchetto remoto)
     await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS update_manual BOOLEAN NOT NULL DEFAULT FALSE"))

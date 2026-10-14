@@ -2751,5 +2751,6 @@
   "•••••••• salvata": "•••••••• salvata",
   "Le password si salvano cifrate: per cambiarne una la riscrivi, lasciando vuoto resta quella di prima. Nella pagina si leggono solo col pulsante \"Mostra\", e ogni lettura finisce nel Registro.": "Le password si salvano cifrate: per cambiarne una la riscrivi, lasciando vuoto resta quella di prima. Nella pagina si leggono solo col pulsante \"Mostra\", e ogni lettura finisce nel Registro.",
   "Server salvato": "Server salvato",
-  "Dove sta ogni sito. Il server è l'indirizzo IP del dominio; tu gli dai un nome, un appunto e gli accessi (pannello dell'hosting e FTP). Cerca un sito per sapere su che hosting sta.": "Dove sta ogni sito. Il server è l'indirizzo IP del dominio; tu gli dai un nome, un appunto e gli accessi (pannello dell'hosting e FTP). Cerca un sito per sapere su che hosting sta."
+  "Dove sta ogni sito. Il server è l'indirizzo IP del dominio; tu gli dai un nome, un appunto e gli accessi (pannello dell'hosting e FTP). Cerca un sito per sapere su che hosting sta.": "Dove sta ogni sito. Il server è l'indirizzo IP del dominio; tu gli dai un nome, un appunto e gli accessi (pannello dell'hosting e FTP). Cerca un sito per sapere su che hosting sta.",
+  "da riprovare": "da riprovare"
 }

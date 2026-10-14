@@ -1270,6 +1270,30 @@ def _translations_not_applied(site: Site, etype: str, res: dict) -> dict:
                      "(il connettore 2.40, in arrivo col giro notturno, dice quale e perché)"}
 
 
+# Traduzioni WordPress non applicate (in giallo, mai "fallito"). Di solito e' wordpress.org che
+# annuncia la traduzione prima di avere il pacchetto nuovo su tutti i suoi server: mezz'ora dopo
+# si installa. Si riprova dopo 30 minuti, poi a ogni giro; se dopo 3 ore non e' ancora passata,
+# una volta al giorno (cosi' un caso che non si risolve non manda un avviso ogni ora).
+TRANSLATION_RETRY_FIRST = 30 * 60                          # secondi: il primo nuovo tentativo
+TRANSLATION_RETRY = timedelta(minutes=25)                  # attesa minima tra due tentativi
+TRANSLATION_RETRY_WINDOW = timedelta(hours=3)              # poi si passa all'attesa dei falliti
+
+
+def _aware(dt: datetime) -> datetime:
+    """Data con fuso: alcuni database la restituiscono senza (UTC)."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _tr_key(site_id: int) -> str:
+    """Redis: quando le traduzioni di un sito sono andate in giallo la prima volta."""
+    return f"tr:retry:{site_id}"
+
+
+def _is_failure(r: dict) -> bool:
+    """Fallito davvero: non riuscito e non "in attesa", "a mano" o "da riprovare"."""
+    return not r.get("ok") and not r.get("manual") and not r.get("held") and not r.get("retry")
+
+
 def _params_lost(resp: dict) -> bool:
     """Il connettore ha ricevuto la richiesta senza i dati (tipo e slug vuoti): non e' l'esito
     dell'aggiornamento, e' una richiesta arrivata vuota (redirect, proxy, hosting)."""
@@ -1639,6 +1663,14 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
 
         now = datetime.now(timezone.utc)
         cooldown = timedelta(hours=max(0, settings.AUTOUPDATE_RETRY_HOURS))
+        # traduzioni in giallo: da quanto non passano (vedi TRANSLATION_RETRY_WINDOW)
+        tr_wait = TRANSLATION_RETRY
+        try:
+            _first = await ctx["redis"].get(_tr_key(site.id))
+            if _first and now - datetime.fromtimestamp(float(_first), timezone.utc) > TRANSLATION_RETRY_WINDOW:
+                tr_wait = cooldown
+        except Exception:  # noqa: BLE001
+            pass
 
         # 2) costruisci la coda: prima il core, poi le estensioni con update.
         #    Il core non ha cooldown (raro e importante). Le estensioni si'.
@@ -1664,11 +1696,14 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 continue
             # cooldown: salta se ha gia' fallito di recente SULLA STESSA versione target.
             # Se e' uscita una versione nuova (new_version diverso da quello fallito) -> riprova.
+            # traduzioni WordPress non applicate: si riprova presto (vedi TRANSLATION_RETRY)
+            wait = tr_wait if (site.cms == "wp" and e.type == "language") else (
+                max(cooldown, timedelta(hours=24)) if getattr(e, "update_manual", False) else cooldown)
             if (
                 not manual
                 and e.update_failed_at is not None
                 and e.update_failed_version == (e.new_version or "")
-                and (now - e.update_failed_at) < (max(cooldown, timedelta(hours=24)) if getattr(e, "update_manual", False) else cooldown)
+                and (now - _aware(e.update_failed_at)) < wait
             ):
                 skipped.append(e.name)
                 continue
@@ -1736,8 +1771,10 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
 
         outcome["worked"] = True     # da qui si lavora davvero sul sito: dopo, il server riposa
 
-        # controllo visivo: istantanea della home PRIMA di toccare qualunque cosa
-        shot_before = await _visual_shot(site, "before")
+        # controllo visivo: istantanea della home PRIMA di toccare qualunque cosa. Non per le
+        # sole traduzioni (es. il nuovo tentativo dopo 30 minuti): non toccano la home.
+        only_translations = all(q[1] == "language" for q in queue) and site.cms == "wp"
+        shot_before = None if only_translations else await _visual_shot(site, "before")
         # seconda foto "prima": quanto la home cambia DA SOLA (video, slider, hosting lento) e' rumore,
         # e il confronto vero lo sottrae. Costa una richiesta in piu' solo ai siti che si aggiornano.
         visual_noise = 0.0
@@ -1777,6 +1814,38 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             res = await _update_one(site, etype, slug, expected=(ext.new_version if ext is not None else ""))
             res = _translations_done_with_updates(site, etype, ext, res, done)
             res = _translations_not_applied(site, etype, res)
+
+            # TRADUZIONI NON APPLICATE: non e' un guasto. Di solito wordpress.org annuncia la
+            # traduzione nuova prima di avere il pacchetto su tutti i suoi server, e poco dopo
+            # si installa. In giallo ("da riprovare"), niente avviso di fallimento, niente
+            # statistiche: si riprova dopo 30 minuti (vedi TRANSLATION_RETRY_*).
+            if site.cms == "wp" and etype == "language" and not res["ok"]:
+                err = res.get("error") or ""
+                log.info("TRADUZIONI DA RIPROVARE '%s' (id=%s): %s", site.name, site.id, err[:300])
+                try:
+                    # la prima volta che vanno in giallo: un nuovo tentativo fra 30 minuti, senza
+                    # aspettare il giro. Le volte dopo ci pensa il giro di ogni ora.
+                    if await ctx["redis"].set(_tr_key(site.id), str(time.time()), nx=True, ex=2 * 86400):
+                        await ctx["redis"].enqueue_job("update_site", site.id, _defer_by=TRANSLATION_RETRY_FIRST,
+                                                       _job_id=f"tr-retry:{site.id}:{int(time.time())}")
+                except Exception as ex:  # noqa: BLE001
+                    log.warning("Nuovo tentativo delle traduzioni non programmato (id=%s): %s", site.id, ex)
+                if ext is not None:
+                    ext.update_failed_at = datetime.now(timezone.utc)
+                    ext.update_failed_version = ext.new_version or ""
+                    ext.update_manual = False
+                results.append({"name": name, "from": current, "to": "", "ok": False, "retry": True,
+                                "error": err, "type": etype, "slug": slug})
+                s.add(UpdateHistory(
+                    site_id=site.id, site_name=site.name, cms=site.cms,
+                    ext_type=etype, ext_name=name, slug=slug,
+                    from_version=current or "", to_version="",
+                    ok=False, retry=True, error=err[:2000],
+                ))
+                await evlog(s, "updates", "warn", f"Traduzioni da riprovare: {err[:200]}",
+                            site=site, details={"type": etype, "slug": slug, "error": err})
+                await asyncio.sleep(item_pause)
+                continue
 
             # PRODOTTO A LICENZA che non si aggiorna da remoto (es. Elementor Pro senza
             # pacchetto scaricabile): non e' un guasto, va fatto dal backend del sito.
@@ -1852,6 +1921,11 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
 
             if res["ok"] and res["new"]:
                 done[slug] = res["new"]
+            if res["ok"] and site.cms == "wp" and etype == "language":
+                try:
+                    await ctx["redis"].delete(_tr_key(site.id))
+                except Exception:  # noqa: BLE001
+                    pass
             results.append({
                 "name": name + (" (pacchetto Sentinel)" if via_package else ""), "from": current,
                 "to": res["new"] or "", "ok": res["ok"], "error": res["error"],
@@ -1935,19 +2009,22 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             return
 
         _n_ok = sum(1 for r in results if r.get("ok"))
-        _n_fail = sum(1 for r in results if not r.get("ok") and not r.get("manual") and not r.get("held"))
+        _n_fail = sum(1 for r in results if _is_failure(r))
         _n_other = sum(1 for r in results if r.get("manual") or r.get("held"))
+        _n_retry = sum(1 for r in results if r.get("retry"))
         _parts = [f"{_n_ok} {'aggiornato' if _n_ok == 1 else 'aggiornati'}"]
         if _n_fail:
             _parts.append(f"{_n_fail} {'fallito' if _n_fail == 1 else 'falliti'}")
         if _n_other:
             _parts.append(f"{_n_other} in attesa o da fare a mano")
+        if _n_retry:
+            _parts.append(f"{_n_retry} da riprovare")
         outcome["text"] = ", ".join(_parts)
         outcome["parts"] = _parts
 
         # controllo visivo DOPO: solo se qualcosa e' cambiato davvero sul sito
         visual = None
-        if any(r.get("ok") for r in results):
+        if any(r.get("ok") for r in results) and not only_translations:
             # attesa prima della foto "dopo": su hosting lenti cache e pagina si assestano
             _delay = int(_vp.get("visual_after_delay", 30) or 0)
             if _delay > 0:
@@ -2020,7 +2097,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             if site.notifications_silenced:
                 return
             n_ok = sum(1 for r in results if r["ok"])
-            n_fail = sum(1 for r in results if not r["ok"] and not r.get("manual") and not r.get("held"))
+            n_fail = sum(1 for r in results if _is_failure(r))
             redis = ctx["redis"]
             # dati strutturati per il riepilogo di ciclo (Telegram ed email per ciclo)
             held_once = []
@@ -2032,9 +2109,9 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             report = {
                 "site": site.name, "id": site.id, "folder": _folder_label(site), "url": site.url,
                 "ok": [{"name": r["name"], "from": r.get("from") or "", "to": r.get("to") or ""} for r in results if r.get("ok")],
-                "failed": [{"name": r["name"], "error": r.get("error") or ""} for r in results
-                           if not r.get("ok") and not r.get("manual") and not r.get("held")],
+                "failed": [{"name": r["name"], "error": r.get("error") or ""} for r in results if _is_failure(r)],
                 "manual": [{"name": r["name"], "error": r.get("error") or ""} for r in results if r.get("manual")],
+                "retry": [{"name": r["name"], "error": r.get("error") or ""} for r in results if r.get("retry")],
                 "held": held_once,
                 "visual": ({"status": visual["status"], "message": visual["message"]} if visual else None),
             }
@@ -2070,7 +2147,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             if n_fail:
                 await redis.incrby("tg:cycle:failed", n_fail)
                 for r in results:
-                    if not r["ok"] and not r.get("manual") and not r.get("held"):
+                    if _is_failure(r):
                         await redis.rpush("tg:cycle:failed_detail", f"{site.name}: {r['name']}")
             # TTL di sicurezza: i contatori si autodistruggono dopo 2h se qualcosa va storto
             for k in ("tg:cycle:applied", "tg:cycle:sites", "tg:cycle:failed",
