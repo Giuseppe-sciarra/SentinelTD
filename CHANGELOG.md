@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.47.0 — Giro degli aggiornamenti ogni N ore
+
+### Added
+- **Impostazioni → "Giro degli aggiornamenti ogni N ore"** (da 1 a 24, di base 1 come sempre).
+  È il giro che, sui siti con l'aggiornamento automatico acceso, ricontrolla ogni sito e installa
+  quello che c'è. Parte allo scoccare dell'ora. Con 3, per esempio, gira alle 00, alle 03, alle
+  06… a partire dal primo giro dopo il salvataggio. Il controllo dei siti senza aggiornamento
+  automatico resta l'intervallo check di ogni sito. "Aggiorna tutto" e il nuovo tentativo delle
+  traduzioni dopo 30 minuti non dipendono da questa impostazione.
+
+### Tests
+- `tests/test_update_cycle_interval.py`: di base ogni ora, ogni 3 ore salta i giri intermedi,
+  valore tra 1 e 24.
+
 ## 2.46.0 — Traduzioni WordPress non applicate: in giallo, si riprova dopo 30 minuti
 
 ### Changed

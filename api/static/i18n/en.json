@@ -2752,5 +2752,7 @@
   "Le password si salvano cifrate: per cambiarne una la riscrivi, lasciando vuoto resta quella di prima. Nella pagina si leggono solo col pulsante \"Mostra\", e ogni lettura finisce nel Registro.": "Passwords are stored encrypted: to change one, type it again; leaving it empty keeps the previous one. In the page they are read only with the \"Show\" button, and every read goes into the Log.",
   "Server salvato": "Server saved",
   "Dove sta ogni sito. Il server è l'indirizzo IP del dominio; tu gli dai un nome, un appunto e gli accessi (pannello dell'hosting e FTP). Cerca un sito per sapere su che hosting sta.": "Where each site lives. The server is the domain's IP address; you give it a name, a note and the access details (hosting panel and FTP). Search for a site to find out which hosting it is on.",
-  "da riprovare": "to retry"
+  "da riprovare": "to retry",
+  "Giro degli aggiornamenti ogni": "Update round every",
+  "Installa gli aggiornamenti sui siti con l'aggiornamento automatico acceso, e prima ricontrolla ogni sito. Parte allo scoccare dell'ora. I siti senza aggiornamento automatico seguono l'intervallo check di ogni sito.": "Installs updates on the sites with automatic updates turned on, re-checking each site first. It starts on the hour. Sites without automatic updates follow each site's check interval."
 }

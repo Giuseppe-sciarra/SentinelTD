@@ -2158,10 +2158,39 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             log.warning("Aggiornamento contatori Telegram fallito: %s", ex)
 
 
+CYCLE_LAST_KEY = "upd:cycle:last"
+
+
+async def _cycle_due(redis) -> bool:
+    """Il giro degli aggiornamenti tocca adesso? Ogni N ore (Impostazioni, di base 1). Il cron
+    gira ogni ora: si salta finche' dall'ultimo giro non sono passate N ore (5 minuti di
+    margine, perche' i giri partono allo scoccare dell'ora ma non al secondo)."""
+    try:
+        hours = int((await get_operational_settings()).get("update_every_hours", 1) or 1)
+    except Exception:  # noqa: BLE001
+        hours = 1
+    if hours <= 1:
+        return True
+    try:
+        last = await redis.get(CYCLE_LAST_KEY)
+        if last and time.time() - float(last) < hours * 3600 - 300:
+            return False
+    except Exception:  # noqa: BLE001
+        return True
+    return True
+
+
 async def auto_update_cycle(ctx):
-    """Ogni ora: accoda l'update dei siti con auto_update attivo, scaglionati nel tempo."""
+    """Ogni N ore (Impostazioni, di base ogni ora): accoda l'update dei siti con auto_update
+    attivo, scaglionati nel tempo."""
     if not settings.AUTOUPDATE_ENABLED:
         return
+    if not await _cycle_due(ctx["redis"]):
+        return
+    try:
+        await ctx["redis"].set(CYCLE_LAST_KEY, str(time.time()), ex=3 * 86400)
+    except Exception:  # noqa: BLE001
+        pass
     async with SessionLocal() as s:
         rows = (await s.execute(
             select(Site).where(Site.enabled == True, Site.auto_update == True)  # noqa: E712
@@ -2744,7 +2773,7 @@ class WorkerSettings:
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
-        cron(auto_update_cycle, minute={0}),   # ogni ora, al minuto 0 (installa i pending)
+        cron(auto_update_cycle, minute={0}),   # ogni ora al minuto 0; gira davvero ogni N ore (Impostazioni)
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30
         cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True, timeout=21600),  # reminder giornalieri; registro secondo i giorni impostati; errori ritentati ogni giorno
         cron(monthly_report, minute=set(range(0, 60, 5))),   # ogni 5 minuti: invia quando giorno e orario sono arrivati

@@ -2752,5 +2752,7 @@
   "Le password si salvano cifrate: per cambiarne una la riscrivi, lasciando vuoto resta quella di prima. Nella pagina si leggono solo col pulsante \"Mostra\", e ogni lettura finisce nel Registro.": "Les mots de passe sont enregistrés chiffrés : pour en changer un, saisissez-le de nouveau ; vide, l'ancien est conservé. Dans la page, on les lit seulement avec « Afficher », et chaque lecture est inscrite dans le Journal.",
   "Server salvato": "Serveur enregistré",
   "Dove sta ogni sito. Il server è l'indirizzo IP del dominio; tu gli dai un nome, un appunto e gli accessi (pannello dell'hosting e FTP). Cerca un sito per sapere su che hosting sta.": "Où se trouve chaque site. Le serveur est l'adresse IP du domaine ; vous lui donnez un nom, une note et les accès (panneau d'hébergement et FTP). Cherchez un site pour savoir sur quel hébergement il se trouve.",
-  "da riprovare": "à réessayer"
+  "da riprovare": "à réessayer",
+  "Giro degli aggiornamenti ogni": "Tournée des mises à jour toutes les",
+  "Installa gli aggiornamenti sui siti con l'aggiornamento automatico acceso, e prima ricontrolla ogni sito. Parte allo scoccare dell'ora. I siti senza aggiornamento automatico seguono l'intervallo check di ogni sito.": "Installe les mises à jour sur les sites dont la mise à jour automatique est activée, en revérifiant d'abord chaque site. Elle démarre à l'heure pile. Les sites sans mise à jour automatique suivent l'intervalle de vérification de chaque site."
 }
