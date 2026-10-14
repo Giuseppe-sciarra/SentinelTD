@@ -1322,3 +1322,6 @@ th.sortable:hover { color: var(--txt); }
 .cust-row { display: flex; align-items: center; gap: 16px; justify-content: space-between; padding: 14px 18px; border: 1px solid var(--bd);
             border-radius: 12px; background: var(--panel); color: var(--txt); }
 .cust-row:hover { border-color: var(--bd-2); background: var(--panel-2); }
+/* righe e pulsanti che sono link: niente sottolineato al passaggio del mouse */
+.cust-row, .cust-row:hover, a.btn:hover { text-decoration: none; }
+.cust-row:hover .cli-name > span:first-child { color: var(--acc); }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.39.1 — Gestione clienti: niente sottolineato sulle righe
+
+### Fixed
+- Elenco di Gestione clienti: passando col mouse su un cliente tutto il testo della riga (nome,
+  numeri, note, pulsante "Scheda") veniva sottolineato. Ora la riga si evidenzia e basta.
+  Lo stesso per i pulsanti che sono link (Webmail, Pannello, PDF).
+
 ## 2.39.0 — Gestione clienti: clienti, sottoclienti, domini e posta
 
 ### Added
