@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.45.0 — Traduzioni WordPress: niente più "1/1" se WordPress le ripropone (connettore WP 2.40.0)
+
+### Fixed
+- **Traduzioni segnate "aggiornate (1/1)" mentre il backend le proponeva ancora.** Il connettore
+  2.39 contava una traduzione come installata se il file era stato scritto. Se WordPress la
+  riproponeva subito dopo, se la ricordava e non la segnalava più. Così Sentinel diceva "1/1" e
+  nascondeva la traduzione, mentre il backend la mostrava ancora.
+  - **Connettore WordPress 2.40.0**:
+    - Dopo l'installazione ricontrolla con wordpress.org. La traduzione risulta aggiornata solo
+      se WordPress non la propone più.
+    - Se la ripropone, riprova una volta col pacchetto proposto dopo il ricontrollo.
+    - Se la propone ancora, l'aggiornamento **fallisce**, con la data della traduzione sul sito
+      e quella data da wordpress.org.
+    - Se il file non è stato scritto, fallisce col motivo dato dall'installatore.
+  - Tolta la memoria delle traduzioni riproposte: Sentinel mostra quello che mostra il backend.
+    Quelle nascoste dal 2.39 tornano visibili.
+  - **Lo Storico dice quali traduzioni**, per esempio "traduzioni aggiornate (1/1): Yoast SEO
+    (de_DE)", invece del solo numero.
+  - Il ricontrollo usa i tempi del cron (30 secondi verso wordpress.org invece di 3) e rilegge
+    dal disco l'elenco dei file di traduzione, che WordPress tiene in cache fino a un'ora. Con
+    una risposta lenta la lista restava vuota e risultava "nessuna traduzione da aggiornare".
+    Se wordpress.org non risponde, l'esito si basa sui file scritti, e lo Storico lo dice.
+
+### Tests
+- `tests/connector_translations.test.php`: installata, riproposta subito (fallita, con le
+  date), pacchetto nuovo al secondo giro, download fallito, ricontrollo non riuscito, memoria
+  del 2.39 cancellata.
+
 ## 2.44.0 — Traduzioni WordPress: "aggiornate (0/1)" a ogni giro (connettore WP 2.39.0)
 
 ### Fixed

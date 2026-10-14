@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.39.0
+ * Version: 2.40.0
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -1068,11 +1068,17 @@ function tdpanop_plugin_file_by_slug(string $slug): string
  * Solo quelle REALMENTE piu' recenti di quelle gia' installate. WP a volte continua a
  * elencare la stessa traduzione anche DOPO averla aggiornata (le revisioni PO non vengono
  * riconciliate): senza questo confronto la voce "Traduzioni" resterebbe da aggiornare per
- * sempre -> riproposta ad ogni ciclo con relativa email/Telegram. Fuori anche quelle che
- * il connettore ha gia' installato e che WordPress ripropone identiche (tdpanop_trans_ghosts).
+ * sempre -> riproposta ad ogni ciclo con relativa email/Telegram.
  */
 function tdpanop_pending_translations(): array
 {
+    // Il connettore 2.39 si ricordava le traduzioni che WordPress riproponeva subito dopo
+    // l'installazione e non le segnalava piu'. Cosi' pero' Sentinel nascondeva una traduzione
+    // che il backend continuava a proporre (e diceva "aggiornate 1/1"). Tolto: Sentinel mostra
+    // quello che mostra WordPress.
+    if (get_option('tdpanop_trans_ghosts', null) !== null) {
+        delete_option('tdpanop_trans_ghosts');
+    }
     $installedTrans = [];
     if (function_exists('wp_get_installed_translations')) {
         foreach (['plugin' => 'plugins', 'theme' => 'themes', 'core' => 'default'] as $trType => $dom) {
@@ -1085,7 +1091,6 @@ function tdpanop_pending_translations(): array
         }
     }
     $trans = [];
-    $ghosts = (array) get_option('tdpanop_trans_ghosts', []);
     foreach (['update_core', 'update_plugins', 'update_themes'] as $tname) {
         $tr = get_site_transient($tname);
         if ($tr && !empty($tr->translations) && is_array($tr->translations)) {
@@ -1102,13 +1107,7 @@ function tdpanop_pending_translations(): array
                 if ($availTs > 0 && $instTs > 0 && $availTs <= $instTs) {
                     continue;
                 }
-                $k = $type . '|' . $slug . '|' . $lang;
-                // gia' installata da Sentinel, ma WordPress continua a riproporre lo STESSO
-                // pacchetto (stessa data): non e' un aggiornamento da fare (vedi tdpanop_update)
-                if (isset($ghosts[$k]) && (string) $ghosts[$k] === (string) ($t['updated'] ?? '')) {
-                    continue;
-                }
-                $trans[$k] = $t;
+                $trans[$type . '|' . $slug . '|' . $lang] = $t;
             }
         }
     }
@@ -1140,6 +1139,94 @@ function tdpanop_translation_file($u): string
             return WP_LANG_DIR . '/themes/' . $slug . '-' . $lang . '.mo';
     }
     return '';
+}
+
+/** Nome leggibile di una traduzione per lo Storico: "Yoast SEO (de_DE)", "WordPress (it_IT)". */
+function tdpanop_translation_label($u): string
+{
+    $u = (object) $u;
+    $type = (string) ($u->type ?? '');
+    $slug = (string) ($u->slug ?? '');
+    $name = $slug !== '' ? $slug : '?';
+    if ($type === 'core') {
+        $name = 'WordPress';
+    } elseif ($type === 'plugin' && function_exists('get_plugins')) {
+        foreach ((array) get_plugins() as $file => $p) {
+            if (dirname($file) === $slug || basename($file, '.php') === $slug) {
+                $name = (string) ($p['Name'] ?? $slug);
+                break;
+            }
+        }
+    } elseif ($type === 'theme' && function_exists('wp_get_theme')) {
+        $th = wp_get_theme($slug);
+        if ($th && $th->exists()) {
+            $name = (string) $th->get('Name');
+        }
+    }
+    $name = html_entity_decode(wp_strip_all_tags($name), ENT_QUOTES, 'UTF-8');
+    return $name . ' (' . (string) ($u->language ?? '') . ')';
+}
+
+/** Elenco di nomi per lo Storico, al massimo 5 ("… e altre 3"). */
+function tdpanop_translation_names(array $labels): string
+{
+    $labels = array_values($labels);
+    $txt = implode(', ', array_slice($labels, 0, 5));
+    return count($labels) > 5 ? $txt . ' e altre ' . (count($labels) - 5) : $txt;
+}
+
+/** Data della traduzione installata (PO-Revision-Date del .po sul disco), 0 se non c'e'. */
+function tdpanop_translation_installed_ts($u): int
+{
+    $mo = tdpanop_translation_file($u);
+    if ($mo === '' || !function_exists('wp_get_pomo_file_data')) {
+        return 0;
+    }
+    $po = substr($mo, 0, -3) . '.po';
+    if (!file_exists($po)) {
+        return 0;
+    }
+    $h = (array) wp_get_pomo_file_data($po);
+    $ts = isset($h['PO-Revision-Date']) ? strtotime((string) $h['PO-Revision-Date']) : 0;
+    return $ts ?: 0;
+}
+
+/**
+ * Ricalcolo completo degli aggiornamenti, come "Controlla di nuovo" nel backend.
+ * - Con i tempi del cron: fuori dal cron WordPress da' a wordpress.org 3 secondi, e su un
+ *   hosting lento la richiesta scade lasciando la lista vuota (= "nessuna traduzione", falso).
+ * - Con l'elenco dei file di traduzione riletto dal disco: WordPress lo tiene in cache fino a
+ *   un'ora, e con una cache vecchia direbbe a wordpress.org che manca una traduzione appena
+ *   installata.
+ * Torna false se la lista non e' stata ricalcolata (wordpress.org non ha risposto).
+ */
+function tdpanop_refresh_update_data(): bool
+{
+    tdpanop_wake_premium_updaters();
+    if (defined('WP_LANG_DIR') && function_exists('wp_cache_delete')) {
+        foreach (['/', '/plugins/', '/themes/'] as $sub) {
+            wp_cache_delete(md5(WP_LANG_DIR . $sub), 'translation_files');
+        }
+    }
+    delete_site_transient('update_plugins');
+    delete_site_transient('update_themes');
+    delete_site_transient('update_core');
+    $cron = function () {
+        return true;
+    };
+    add_filter('wp_doing_cron', $cron, 999);
+    try {
+        wp_version_check();
+        wp_update_plugins();
+        wp_update_themes();
+    } finally {
+        remove_filter('wp_doing_cron', $cron, 999);
+    }
+    $p = get_site_transient('update_plugins');
+    $t = get_site_transient('update_themes');
+    $c = get_site_transient('update_core');
+    return is_object($p) && isset($p->checked) && is_object($t) && isset($t->checked)
+        && is_object($c) && !empty($c->updates);
 }
 
 function tdpanop_update(WP_REST_Request $req)
@@ -1274,99 +1361,104 @@ function tdpanop_update(WP_REST_Request $req)
             $t = wp_get_theme($slug);
             $verAfter = $t->exists() ? (string) $t->get('Version') : '';
         } elseif ($type === 'language') {
-            // aggiorna TUTTI i language pack disponibili (core + plugin + temi).
-            // WP li gestisce insieme con Language_Pack_Upgrader.
+            // Aggiorna TUTTE le traduzioni proposte (core + plugin + temi), come il pulsante
+            // "Aggiorna le traduzioni" del backend. Riuscito SOLO se, ricontrollato con
+            // wordpress.org, WordPress non le propone piu'. Il file scritto da solo non basta:
+            // su alcuni siti WordPress ripropone la stessa traduzione subito dopo, e risultava
+            // "aggiornate (1/1)" mentre il backend la mostrava ancora.
             require_once ABSPATH . 'wp-admin/includes/class-language-pack-upgrader.php';
 
-            // conta le traduzioni disponibili PRIMA
-            $countBefore = 0;
-            foreach (['update_core', 'update_plugins', 'update_themes'] as $tname) {
-                $tr = get_site_transient($tname);
-                if ($tr && !empty($tr->translations)) {
-                    $countBefore += count($tr->translations);
-                }
-            }
-            if ($countBefore === 0) {
+            $due = tdpanop_pending_translations();   // quelle che Sentinel vede da aggiornare
+            if (!$due) {
                 return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'nessuna traduzione da aggiornare'], 200);
             }
-
-            // le traduzioni da installare, una per una: dopo si controlla quali file sono stati
-            // davvero scritti. Il conteggio "prima/dopo" sui transient non bastava: WordPress a
-            // volte ripropone lo STESSO pacchetto appena installato (risultava "0/1" ad ogni giro),
-            // altre volte l'installazione fallisce in silenzio.
-            $updates = function_exists('wp_get_translation_updates') ? (array) wp_get_translation_updates() : [];
-            $files = [];
-            foreach ($updates as $i => $u) {
-                $files[$i] = tdpanop_translation_file($u);
+            $labels = [];
+            foreach ($due as $k => $t) {
+                $labels[$k] = tdpanop_translation_label($t);
             }
+            $total = count($due);
+
+            $msgs = [];
+            $left = $due;
+            $verified = false;
+            $retried = false;
             clearstatcache();
             $start = time();
-            $up  = new Language_Pack_Upgrader($skin);
-            $res = $up->bulk_upgrade($updates);
+            // al massimo due giri: il secondo installa quello che WordPress propone dopo il
+            // ricontrollo (pacchetto piu' nuovo arrivato nel frattempo)
+            for ($round = 1; $round <= 2 && $left; $round++) {
+                $updates = function_exists('wp_get_translation_updates') ? (array) wp_get_translation_updates() : [];
+                if (!$updates) {
+                    break;
+                }
+                $retried = $round > 1;
+                $skin = new Automatic_Upgrader_Skin();
+                $res  = (new Language_Pack_Upgrader($skin))->bulk_upgrade($updates);
+                if (is_wp_error($res)) {
+                    $msgs[] = $res->get_error_message();
+                }
+                if (method_exists($skin, 'get_upgrade_messages')) {
+                    foreach ((array) $skin->get_upgrade_messages() as $m) {
+                        $m = trim(wp_strip_all_tags((string) $m));
+                        if ($m !== '' && !in_array($m, $msgs, true)) {
+                            $msgs[] = $m;
+                        }
+                    }
+                }
+                $verified = tdpanop_refresh_update_data();
+                if (!$verified) {
+                    break;
+                }
+                $left = array_intersect_key(tdpanop_pending_translations(), $due);
+            }
 
+            // file scritti in questo aggiornamento
             clearstatcache();
-            $installed = [];
-            foreach ($updates as $i => $u) {
-                $f = $files[$i];
-                if ($f !== '' && file_exists($f) && @filemtime($f) >= $start - 2) {
-                    $installed[tdpanop_translation_key($u)] = (string) ($u->updated ?? '');
+            $written = [];
+            foreach ($due as $k => $t) {
+                $f = tdpanop_translation_file($t);
+                $written[$k] = $f !== '' && file_exists($f) && @filemtime($f) >= $start - 2;
+            }
+            $why = $msgs ? implode(' · ', array_slice($msgs, -3)) : 'cartella wp-content/languages non scrivibile?';
+
+            if (!$verified) {
+                // wordpress.org non ha risposto al ricontrollo: si giudica dai file scritti
+                $missing = array_keys(array_filter($written, function ($w) {
+                    return !$w;
+                }));
+                if (!$missing) {
+                    return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'traduzioni aggiornate (' . $total . '/' . $total . '): '
+                        . tdpanop_translation_names($labels) . ' — non ricontrollate, wordpress.org non ha risposto'], 200);
                 }
+                $names = array_intersect_key($labels, array_flip($missing));
+                return new WP_REST_Response(['ok' => false, 'new' => '',
+                    'error' => 'traduzioni non installate: ' . tdpanop_translation_names($names) . ' — ' . $why], 200);
             }
 
-            // ricalcola dopo: rinfresca i transient
-            wp_clean_update_cache();
-            wp_update_plugins();
-            wp_update_themes();
-            wp_version_check();
-            $still = [];
-            foreach (['update_core', 'update_plugins', 'update_themes'] as $tname) {
-                $tr = get_site_transient($tname);
-                if ($tr && !empty($tr->translations)) {
-                    foreach ((array) $tr->translations as $t) {
-                        $still[tdpanop_translation_key((object) $t)] = (string) ($t['updated'] ?? '');
-                    }
-                }
+            $done = array_diff_key($labels, $left);
+            if (!$left) {
+                return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'traduzioni aggiornate (' . $total . '/' . $total . '): '
+                    . tdpanop_translation_names($labels) . ($retried ? ' (al secondo tentativo)' : '')], 200);
             }
-            // installata ma riproposta identica: si ricorda, cosi' non torna "da aggiornare"
-            // a ogni giro. Si dimentica quando WordPress smette di proporla o ne esce una nuova.
-            $ghosts = [];
-            foreach ((array) get_option('tdpanop_trans_ghosts', []) as $k => $upd) {
-                if (isset($still[$k]) && $still[$k] === (string) $upd) {
-                    $ghosts[$k] = (string) $upd;
-                }
-            }
-            foreach ($installed as $k => $upd) {
-                if (isset($still[$k]) && $still[$k] === $upd) {
-                    $ghosts[$k] = $upd;
-                }
-            }
-            update_option('tdpanop_trans_ghosts', $ghosts, false);
 
-            $total = count($updates);
-            $applied = count($installed);
-            if ($total > 0 && $applied > 0) {
-                return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'traduzioni aggiornate (' . $applied . '/' . $total . ')'], 200);
-            }
-            // niente scritto: si dice il perche' (messaggi dell'installatore di WordPress)
-            $msgs = [];
-            if (is_wp_error($res)) {
-                $msgs[] = $res->get_error_message();
-            }
-            if (method_exists($skin, 'get_upgrade_messages')) {
-                foreach ((array) $skin->get_upgrade_messages() as $m) {
-                    $m = trim(wp_strip_all_tags((string) $m));
-                    if ($m !== '' && !in_array($m, $msgs, true)) {
-                        $msgs[] = $m;
-                    }
+            // ancora proposte dopo l'installazione: si dice quali e perche'
+            $parts = [];
+            foreach ($left as $k => $t) {
+                $label = $labels[$k] ?? tdpanop_translation_label($t);
+                if (empty($written[$k])) {
+                    $parts[] = $label . ': file non scritto — ' . $why;
+                    continue;
                 }
+                $inst  = tdpanop_translation_installed_ts($t);
+                $offer = isset($t['updated']) ? strtotime((string) $t['updated']) : 0;
+                $parts[] = $label . ': installata, ma WordPress la ripropone subito'
+                    . ($inst ? ' (sul sito è del ' . gmdate('d/m/Y H:i', $inst) : ' (WordPress non la vede installata')
+                    . ($offer ? ', wordpress.org la dà del ' . gmdate('d/m/Y H:i', $offer) . ')' : ')');
             }
-            $names = [];
-            foreach ($updates as $u) {
-                $names[] = (($u->type ?? '') === 'core' ? 'WordPress' : (string) ($u->slug ?? '?')) . ' (' . (string) ($u->language ?? '') . ')';
-            }
-            $why = $msgs ? implode(' · ', array_slice($msgs, -3)) : 'nessun file scritto in wp-content/languages (cartella non scrivibile?)';
+            $head = $done ? 'traduzioni aggiornate ' . count($done) . ' di ' . $total . ' (' . tdpanop_translation_names($done) . '); ' : '';
             return new WP_REST_Response(['ok' => false, 'new' => '',
-                'error' => 'traduzioni non installate: ' . implode(', ', array_slice($names, 0, 5)) . ' — ' . $why], 200);
+                'error' => $head . 'traduzioni non applicate: ' . implode('; ', array_slice($parts, 0, 5))
+                    . (count($parts) > 5 ? '; e altre ' . (count($parts) - 5) : '')], 200);
         } elseif ($type === 'core') {
             require_once ABSPATH . 'wp-admin/includes/class-core-upgrader.php';
             $updates = get_core_updates();
@@ -1527,18 +1619,13 @@ add_action('wp_ajax_tdpanop_update', 'tdpanop_ajax_update');
  *  - per Elementor Pro, se manca ancora, si toglie il blocco del minuto e si chiede la
  *    versione direttamente al suo modulo di licenza.
  * $force = true ricostruisce comunque (secondo tentativo dopo un fallimento).
- * Core e traduzioni: ricostruzione completa come sempre.
+ * Core e traduzioni: ricostruzione completa (tdpanop_refresh_update_data).
  */
 function tdpanop_prepare_update_data($type, $slug, $force = false)
 {
     tdpanop_wake_premium_updaters();
     if ($type !== 'plugin' && $type !== 'theme') {
-        delete_site_transient('update_plugins');
-        delete_site_transient('update_themes');
-        delete_site_transient('update_core');
-        wp_update_plugins();
-        wp_update_themes();
-        wp_version_check();
+        tdpanop_refresh_update_data();
         return true;
     }
     $tname = ($type === 'plugin') ? 'update_plugins' : 'update_themes';

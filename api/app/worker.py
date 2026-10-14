@@ -1258,8 +1258,8 @@ def _translations_not_applied(site: Site, etype: str, res: dict) -> dict:
     Vuol dire che dopo l'installazione WordPress proponeva ancora le stesse N traduzioni:
     non sono state applicate (o WordPress ripropone sempre lo stesso pacchetto). Non e' un
     aggiornamento riuscito: risulta fallito, cosi' non riparte a ogni ciclo con email e
-    Telegram "aggiornato" e si riprova dopo l'attesa dei falliti. Dal connettore 2.39 il
-    connettore controlla i file scritti e lo dice da solo."""
+    Telegram "aggiornato" e si riprova dopo l'attesa dei falliti. Dal connettore 2.40 lo dice
+    il connettore stesso, con il nome della traduzione e le date."""
     if site.cms != "wp" or etype != "language" or not res.get("ok"):
         return res
     m = re.match(r"traduzioni aggiornate \(0/(\d+)\)", str(res.get("new") or ""))
@@ -1267,7 +1267,7 @@ def _translations_not_applied(site: Site, etype: str, res: dict) -> dict:
         return res
     return {**res, "ok": False, "new": "",
             "error": f"traduzioni non applicate: dopo l'installazione WordPress propone ancora le stesse {m.group(1)} "
-                     "(il connettore 2.39, in arrivo col giro notturno, dice il motivo)"}
+                     "(il connettore 2.40, in arrivo col giro notturno, dice quale e perché)"}
 
 
 def _params_lost(resp: dict) -> bool:
