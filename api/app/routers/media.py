@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..models import Site
 from ..auth import verify_token, require_auth
-from ..screenshot_schedule import enqueue_screenshot
+from ..screenshot_schedule import request_shots
 
 # Nessuna dependency globale: l'immagine si autentica col token in query string,
 # perche' <img>/background-image non possono inviare l'header Authorization.
@@ -46,7 +46,7 @@ async def get_image(site_id: int, k: str = Query(""), thumb: int = Query(0),
 
 @router.post("/{site_id}/shot", dependencies=[Depends(require_auth)])
 async def shoot_now(site_id: int, s: AsyncSession = Depends(get_session)):
-    """Rigenera subito l'anteprima del sito (accoda il job allo shooter)."""
+    """Rigenera subito l'anteprima del sito: in testa alla fila delle anteprime."""
     site = await s.get(Site, site_id)
     if not site:
         raise HTTPException(404, "Sito non trovato")
@@ -56,7 +56,7 @@ async def shoot_now(site_id: int, s: AsyncSession = Depends(get_session)):
         from ..config import settings
         pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
         try:
-            await enqueue_screenshot(pool, site.id)
+            await request_shots(pool, [site.id], manual=True)
         finally:
             await pool.close()
     except Exception as ex:  # noqa: BLE001
@@ -68,9 +68,8 @@ async def shoot_now(site_id: int, s: AsyncSession = Depends(get_session)):
 async def shoot_bulk(payload: dict = Body(default={}), s: AsyncSession = Depends(get_session)):
     """Rigenera le anteprime in blocco: tutti i siti abilitati o solo gli id passati.
 
-    Gli scatti vengono scaglionati (uno ogni 12s): lo shooter cattura una pagina per
-    volta e ogni scatto puo' durare parecchi secondi, quindi accodarli tutti insieme
-    terrebbe occupati i worker e farebbe scadere le chiamate in attesa del lock.
+    Tutti nella fila delle anteprime: un solo esecutore, uno scatto alla volta (lo shooter
+    cattura una pagina per volta), quindi nessuna chiamata scade in attesa.
     """
     ids = payload.get("ids") or []
     rows = (await s.execute(select(Site).where(Site.enabled == True))).scalars().all()  # noqa: E712
@@ -85,14 +84,13 @@ async def shoot_bulk(payload: dict = Body(default={}), s: AsyncSession = Depends
         from arq.connections import RedisSettings
         from ..config import settings
         pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        queued = 0
         try:
-            for site in rows:
-                if await enqueue_screenshot(pool, site.id, delay_seconds=queued * 12) is not None:
-                    queued += 1
+            await request_shots(pool, [site.id for site in rows])
+            queued = len(rows)
         finally:
             await pool.close()
     except Exception as ex:  # noqa: BLE001
         raise HTTPException(503, f"Coda non raggiungibile: {ex}")
 
-    return {"queued": queued, "eta_min": max(1, round(queued * 12 / 60)) if queued else 0}
+    # uno scatto dura di solito 20-40 secondi (video, verifiche antibot)
+    return {"queued": queued, "eta_min": max(1, round(queued * 30 / 60)) if queued else 0}

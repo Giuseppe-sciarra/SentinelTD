@@ -27,3 +27,6 @@ jobs:
       - run: php tests/connector_mode.test.php
       - run: php tests/connector_autoupdates.test.php
       - run: php tests/connector_translations.test.php
+      - run: php tests/connector_relay.test.php
+      - run: php tests/connector_relay_admin.test.php
+      - run: php tests/connector_relay_joomla.test.php

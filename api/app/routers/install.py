@@ -20,7 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..models import Site, Extension
 from ..auth import require_auth
-from ..connectors import wp_rest_url
+from ..connectors import raise_for_site, wp_rest_url
+from ..site_http import site_client, site_headers
+from .. import relay
 
 router = APIRouter(prefix="/api/install", tags=["install"], dependencies=[Depends(require_auth)])
 
@@ -44,7 +46,7 @@ def _unwrap_joomla(payload):
 
 async def _install_one(site: Site, content: bytes, filename: str, kind: str, activate: bool) -> dict:
     """Invia lo zip al connettore del sito. Ritorna l'esito normalizzato (non solleva)."""
-    headers = {
+    headers = site_headers(site, {
         "Authorization": f"Bearer {site.token}",
         # copia del token in un header che nessun hosting filtra: alcuni Apache in
         # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
@@ -52,11 +54,22 @@ async def _install_one(site: Site, content: bytes, filename: str, kind: str, act
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-    }
+    })
     cb = int(time.time())
     files = {"package": (filename, content, "application/zip")}
+    if relay.active(site):
+        # modalita' firewall: il connettore scarica lo zip da Sentinel al suo prossimo contatto
+        if await relay.jobs_blocked(site.id):
+            return {"ok": False, "error": relay.no_jobs_message()}
+        d = await relay.call(site, "install", {"kind": kind, "activate": "1" if activate else "0",
+                                               "filename": filename}, file=content)
+        if d is None:
+            return {"ok": False, "error": relay.not_taken_message()}
+        return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "name": str(d.get("name", "")),
+                "slug": str(d.get("slug", "")), "new": str(d.get("new", "")), "type": str(d.get("type", "")),
+                "activated": bool(d.get("activated", False))}
     try:
-        async with httpx.AsyncClient(timeout=_INSTALL_TIMEOUT, follow_redirects=True) as client:
+        async with site_client(site, timeout=_INSTALL_TIMEOUT, follow_redirects=True) as client:
             if site.cms == "wp":
                 r = await client.post(
                     wp_rest_url(site, "install", f"_={cb}"),
@@ -64,7 +77,7 @@ async def _install_one(site: Site, content: bytes, filename: str, kind: str, act
                     data={"kind": kind, "activate": "1" if activate else "0"},
                     files=files,
                 )
-                r.raise_for_status()
+                raise_for_site(r)
                 d = r.json()
             else:  # joomla
                 params = {
@@ -76,7 +89,7 @@ async def _install_one(site: Site, content: bytes, filename: str, kind: str, act
                     f"{site.url.rstrip('/')}/index.php",
                     headers=headers, params=params, files=files,
                 )
-                r.raise_for_status()
+                raise_for_site(r)
                 d = _unwrap_joomla(r.json())
         return {
             "ok": bool(d.get("ok")),
@@ -238,7 +251,7 @@ async def install_job(job: str):
 
 async def _uninstall_one(site: Site, ext_type: str, slug: str) -> dict:
     """Chiede al connettore di rimuovere un'estensione. Ritorna l'esito (non solleva)."""
-    headers = {
+    headers = site_headers(site, {
         "Authorization": f"Bearer {site.token}",
         # copia del token in un header che nessun hosting filtra: alcuni Apache in
         # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
@@ -246,17 +259,24 @@ async def _uninstall_one(site: Site, ext_type: str, slug: str) -> dict:
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-    }
+    })
     cb = int(time.time())
+    if relay.active(site):
+        # modalita' firewall: la rimozione la fa il connettore al suo prossimo contatto
+        if await relay.jobs_blocked(site.id):
+            return {"ok": False, "error": relay.no_jobs_message(), "slug": slug, "type": ext_type}
+        await relay.push_job(site.id, "uninstall", {"type": ext_type, "slug": slug})
+        return {"ok": True, "queued": True, "error": "", "name": slug, "slug": slug, "type": ext_type,
+                "message": "in coda (modalità firewall): il sito lo farà al prossimo contatto, entro pochi minuti"}
     try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        async with site_client(site, timeout=120.0, follow_redirects=True) as client:
             if site.cms == "wp":
                 r = await client.post(
                     wp_rest_url(site, "uninstall", f"_={cb}"),
                     headers={**headers, "Content-Type": "application/json"},
                     json={"type": ext_type, "slug": slug},
                 )
-                r.raise_for_status()
+                raise_for_site(r)
                 d = r.json()
             else:  # joomla
                 params = {
@@ -265,7 +285,7 @@ async def _uninstall_one(site: Site, ext_type: str, slug: str) -> dict:
                     "extype": ext_type, "slug": slug, "_": cb,
                 }
                 r = await client.post(f"{site.url.rstrip('/')}/index.php", headers=headers, params=params)
-                r.raise_for_status()
+                raise_for_site(r)
                 d = _unwrap_joomla(r.json())
         return {
             "ok": bool(d.get("ok")),

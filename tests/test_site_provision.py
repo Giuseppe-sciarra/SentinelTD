@@ -61,3 +61,29 @@ class ProvisionTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExtraHeadersApiTests(unittest.IsolatedAsyncioTestCase):
+    """Intestazioni extra del sito (2.48.0): salvate normalizzate, rifiutate se non valide,
+    visibili solo nel dettaglio del sito come il token."""
+    asyncSetUp = ProvisionTests.asyncSetUp
+    asyncTearDown = ProvisionTests.asyncTearDown
+
+    async def test_saved_normalized_and_only_in_detail(self):
+        from fastapi import HTTPException
+        from app.schemas import SiteUpdate, SiteOut, SiteDetailOut
+        async with self.SL() as s:
+            site = await S.create_site(SiteIn(name="S", url="https://x.it", cms="wp", token="T" * 16,
+                                              extra_headers=" X-Sentinel-Pass :  abc "), s)
+            self.assertEqual(site.extra_headers, "X-Sentinel-Pass: abc")
+            await S.update_site(site.id, SiteUpdate(extra_headers="CF-Access-Client-Id: id\nCF-Access-Client-Secret: sec"), s)
+            fresh = await s.get(Site, site.id)
+            self.assertEqual(fresh.extra_headers, "CF-Access-Client-Id: id\nCF-Access-Client-Secret: sec")
+            with self.assertRaises(HTTPException) as ctx:
+                await S.update_site(site.id, SiteUpdate(extra_headers="Authorization: Bearer x"), s)
+            self.assertEqual(ctx.exception.status_code, 422)
+            await S.update_site(site.id, SiteUpdate(name="Rinominato"), s)     # campo assente: non si tocca
+            fresh = await s.get(Site, site.id)
+            self.assertIn("CF-Access-Client-Secret", fresh.extra_headers)
+            self.assertNotIn("extra_headers", SiteOut.model_fields)
+            self.assertIn("extra_headers", SiteDetailOut.model_fields)

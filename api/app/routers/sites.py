@@ -14,6 +14,7 @@ from ..schemas import SiteIn, SiteUpdate, SiteOut, SiteDetailOut, BulkTagsIn
 from ..auth import require_auth
 from ..config import settings
 from ..connectors import apply_status, wp_rest_url
+from ..site_http import normalize_extra_headers, site_client, site_headers, user_agent
 from ..i18n import normalize_language, t
 
 router = APIRouter(prefix="/api/sites", tags=["sites"], dependencies=[Depends(require_auth)])
@@ -233,7 +234,7 @@ async def _resolve_final_url(url: str) -> str:
         return u
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            r = await client.head(u + "/", headers={"User-Agent": "PanopticonLite"})
+            r = await client.head(u + "/", headers={"User-Agent": user_agent()})
             # url finale dopo i redirect (preserva www/https reali del sito)
             final = str(r.url).rstrip("/")
             # tieni solo schema://host (butta eventuale path aggiunto da redirect lingua)
@@ -262,6 +263,10 @@ async def create_site(payload: SiteIn, s: AsyncSession = Depends(get_session)):
     from .agent import safe_site_url
     resolved = safe_site_url(await _resolve_final_url(safe_site_url(payload.url)))
     data = payload.model_dump(exclude={"admin_url", "gen_token"})
+    try:
+        data["extra_headers"] = normalize_extra_headers(data.get("extra_headers"))
+    except ValueError as ex:
+        raise HTTPException(422, str(ex))
     data["token"] = token
     data["url"] = resolved
     data["tags"] = _norm_tags(data.get("tags"))
@@ -321,6 +326,13 @@ async def rollback_now(site_id: int, payload: dict, s: AsyncSession = Depends(ge
     etype, slug, f = str(payload.get("type") or ""), str(payload.get("slug") or "").strip(), str(payload.get("file") or "").strip()
     if etype not in ("plugin", "theme") or not slug or not f:
         raise HTTPException(422, "Servono tipo, slug e file della copia")
+    from .. import relay
+    if relay.active(site):
+        # modalita' firewall: lo fa il connettore al suo prossimo contatto; lo storico si scrive
+        # quando arriva l'esito, senza tenere fermo il pannello
+        await _enqueue("relay_rollback", site.id, etype, slug, f, str(payload.get("name") or slug))
+        return {"ok": True, "queued": True,
+                "message": "Ripristino in coda (modalità firewall): il sito lo farà al prossimo contatto, entro pochi minuti"}
     res = await rollback_item(site, etype, slug, f)
     await record_rollback(s, site, etype, str(payload.get("name") or slug), slug, res, "a mano")
     await s.commit()
@@ -373,6 +385,11 @@ async def update_site(site_id: int, payload: SiteUpdate, s: AsyncSession = Depen
     if not site:
         raise HTTPException(404)
     data = payload.model_dump(exclude_none=True)
+    if "extra_headers" in data:
+        try:
+            data["extra_headers"] = normalize_extra_headers(data["extra_headers"])
+        except ValueError as ex:
+            raise HTTPException(422, str(ex))
     # tags: normalizza in forma canonica CSV se passati esplicitamente
     if "tags" in data:
         data["tags"] = _norm_tags(data["tags"])
@@ -397,6 +414,13 @@ async def update_site(site_id: int, payload: SiteUpdate, s: AsyncSession = Depen
         setattr(site, k, v)
     await s.commit()
     await s.refresh(site)
+    # modalita' firewall: salvare il sito (es. dopo un trasloco) fa dimenticare la copia nota del
+    # sito; la prossima che chiama Sentinel diventa quella buona
+    try:
+        from .. import relay
+        await relay.forget_fingerprint(site.id)
+    except Exception:  # noqa: BLE001
+        pass
     return site
 
 
@@ -530,12 +554,13 @@ async def open_admin(site_id: int, autologin: bool = Query(False), s: AsyncSessi
 
     admin_url = _build_admin_url(site)
 
-    if site.cms == "wp" and autologin:
+    from .. import relay
+    if site.cms == "wp" and autologin and not relay.active(site):
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            async with site_client(site, timeout=15.0, follow_redirects=True) as client:
                 r = await client.post(
                     wp_rest_url(site, "autologin"),
-                    headers={"Authorization": f"Bearer {site.token}", "X-Sentinel-Token": site.token},
+                    headers=site_headers(site, {"Authorization": f"Bearer {site.token}", "X-Sentinel-Token": site.token}),
                 )
                 r.raise_for_status()
                 u = r.json().get("url")

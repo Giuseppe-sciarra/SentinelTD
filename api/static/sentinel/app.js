@@ -26,7 +26,7 @@ function sentinel() {
     exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, whoisProgress: null, dSort: 'folder' },
     expiryForm: { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 }, expiryEdit: false, expiryErr: '',
     prefsLoaded: false,
-    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 1, domain_pause_seconds: 30, domain_source_attempts: 3, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, status_check_attempts: 3, status_check_retry_seconds: 15, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], busy: false, msg: '', err: '' },
+    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 1, domain_pause_seconds: 30, domain_source_attempts: 3, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, status_check_attempts: 3, status_check_retry_seconds: 15, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], relay_enabled: true, relay_poll_minutes: 5, relay_status_minutes: 60, relay_ping_minutes: 30, relay_silent_minutes: 60, relay_refresh_hours: 6, update_every_hours: 1, busy: false, msg: '', err: '' },
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
@@ -163,6 +163,7 @@ function sentinel() {
         const r = await this.api(`/api/sites/${h.site_id}/rollback`, { method: 'POST', body: JSON.stringify({ type: h.type, slug: h.slug, file: h.backup, name: h.name }) });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) { this.say(d.detail || 'Ripristino non riuscito', 6000); return; }
+        if (d.queued) { this.say(d.message || 'Ripristino in coda', 8000); return; }
         this.say(`${h.name} ripristinato alla ${d.to || h.from} e bloccato`, 6000);
         if (this.detail && this.detail.id === h.site_id) await this.refreshDetail(h.site_id);
         if (this.route.page === 'history') await this.loadHistory();
@@ -654,8 +655,8 @@ function sentinel() {
     },
 
     // ---------- site form (drawer) ----------
-    openNew() { this.form = { name: '', url: '', cms: 'wp', admin_url: '', token: '', gen_token: false, group: '', tags: this.route.folder && this.route.folder !== '__none' ? this.route.folder : '', poll_interval_minutes: 180, auto_update: true, notifications_silenced: false, enabled: true }; this.formErr = ''; this.drawer = 'site'; },
-    openEdit(s) { this.form = { id: s.id, name: s.name, url: s.url, cms: s.cms, admin_url: s.admin_url || '', token: s.token || '', group: s.group || '', tags: s.tags || '', poll_interval_minutes: s.poll_interval_minutes, auto_update: s.auto_update, notifications_silenced: !!s.notifications_silenced, enabled: s.enabled }; this.formErr = ''; this.drawer = 'site'; },
+    openNew() { this.form = { name: '', url: '', cms: 'wp', admin_url: '', token: '', gen_token: false, group: '', tags: this.route.folder && this.route.folder !== '__none' ? this.route.folder : '', poll_interval_minutes: 180, auto_update: true, notifications_silenced: false, enabled: true, extra_headers: '' }; this.formErr = ''; this.drawer = 'site'; },
+    openEdit(s) { this.form = { id: s.id, name: s.name, url: s.url, cms: s.cms, admin_url: s.admin_url || '', token: s.token || '', group: s.group || '', tags: s.tags || '', poll_interval_minutes: s.poll_interval_minutes, auto_update: s.auto_update, notifications_silenced: !!s.notifications_silenced, enabled: s.enabled, extra_headers: s.extra_headers || '' }; this.formErr = ''; this.drawer = 'site'; },
     async saveSite() {
       this.formErr = '';
       const f = this.form; const isNew = !f.id;
@@ -1138,10 +1139,13 @@ function sentinel() {
         const NUM_KEYS = ['domain_scan_days', 'domain_parallel_lookups', 'domain_pause_seconds', 'domain_source_attempts', 'expiry_warning_days',
                           'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days', 'log_retention_days', 'log_max_rows',
                           'domain_decision_days', 'domain_alert_norenew', 'status_check_attempts', 'status_check_retry_seconds', 'offline_alert_minutes',
-                          'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds'];
+                          'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds',
+                          'relay_poll_minutes', 'relay_status_minutes', 'relay_ping_minutes', 'relay_silent_minutes', 'relay_refresh_hours',
+                          'update_every_hours'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
                        server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, pre_update_backup: this.prefs.pre_update_backup !== false, wp_block_auto_updates: this.prefs.wp_block_auto_updates !== false, connector_auto_update: this.prefs.connector_auto_update !== false, server_labels: this.prefs.server_labels || {}, server_panels: this.prefs.server_panels || {}, server_split: this.prefs.server_split || [],
-                       visual_after_delay: this.prefs.visual_after_delay, visual_retry: this.prefs.visual_retry !== false, visual_noise: this.prefs.visual_noise !== false };
+                       visual_after_delay: this.prefs.visual_after_delay, visual_retry: this.prefs.visual_retry !== false, visual_noise: this.prefs.visual_noise !== false,
+                       relay_enabled: this.prefs.relay_enabled !== false };
         for (const k of NUM_KEYS) {
           const v = parseInt(this.prefs[k], 10);
           if (Number.isFinite(v)) body[k] = v;
@@ -1518,16 +1522,16 @@ function sentinel() {
       // ricarica dopo qualche minuto: le miniature si aggiornano man mano
       setTimeout(() => this.load(true), 90000);
     },
-    async shootNow(site, tries = 40) {
+    async shootNow(site, tries = 160) {
       this.busy['shot' + site.id] = true;
       try {
         const r = await this.api(`/api/sites/${site.id}/shot`, { method: 'POST' });
         if (!r.ok) { this.say('Anteprima non richiesta: coda non raggiungibile'); return; }
-        this.say('Anteprima in aggiornamento…');
-        // lo scatto richiede qualche secondo, e fino a 1-2 minuti se il sito ha una verifica antibot
-        // o un video: si ricarica il sito finche' cambia l'orario dell'anteprima (riuscita) o
-        // compare/cambia quello del blocco (il sito ha respinto l'accesso automatico)
-        const before = site.shot_at || '', beforeBlocked = site.shot_blocked_at || '';
+        this.say('Anteprima in fila: è la prossima');
+        // la richiesta a mano passa in testa alla fila: si aspetta lo scatto in corso (se c'e') e
+        // poi il proprio, fino a 1-2 minuti l'uno con un video o una verifica antibot. Si ricarica il
+        // sito finche' cambia l'orario del controllo: riuscito, respinto dall'antibot o non riuscito.
+        const before = site.shot_at || '', beforeBlocked = site.shot_blocked_at || '', beforeTry = site.shot_attempted_at || '';
         for (let i = 0; i < tries; i++) {
           await new Promise(res => setTimeout(res, 2500));
           const d = await this.api(`/api/sites/${site.id}`);
@@ -1535,11 +1539,13 @@ function sentinel() {
           const fresh = await d.json();
           const done = (fresh.shot_at || '') !== before;
           const blocked = !!fresh.shot_blocked_at && (fresh.shot_blocked_at || '') !== beforeBlocked;
-          if (done || blocked) {
+          const failed = !done && !blocked && (fresh.shot_attempted_at || '') !== beforeTry && !!fresh.shot_error;
+          if (done || blocked || failed) {
             if (this.detail && this.detail.id === site.id) this.detail = fresh;
             const inList = this.sites.find(x => x.id === site.id);
             if (inList) Object.assign(inList, fresh);
-            this.say(blocked ? "Il sito respinge l'accesso automatico (antibot): anteprima non aggiornata" : 'Anteprima aggiornata');
+            this.say(blocked ? "Il sito respinge l'accesso automatico (antibot): anteprima non aggiornata"
+              : failed ? 'Anteprima non riuscita: ' + fresh.shot_error : 'Anteprima aggiornata', failed ? 8000 : undefined);
             return;
           }
         }

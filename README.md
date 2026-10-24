@@ -37,9 +37,10 @@ The data shown is a demo fleet with made-up names.
 - Core, plugin, theme and translation versions for every site, through the included connectors
 - Visual **preview of each site**, refreshed on a schedule, with thumbnails in the list
   (independent timer checked every minute; frequency from Settings, even for unchanged pages).
-  Enabled sites with missing or overdue previews are queued at startup too. Failed or blocked
-  attempts retry after the configured interval; the last good image retains its real date.
-  Actual execution may be delayed by the queue
+  Enabled sites with missing or overdue previews are queued at startup too. One queue, one
+  capture at a time; a manual "Refresh" goes to the front. The site page shows when the photo was
+  taken, when it was last checked and, if that failed, why. Failed attempts retry within an hour,
+  blocked ones after the configured interval; the last good image retains its real date
 - Folders (clients), tags, quick filters, search and CSV export
 
 
@@ -314,6 +315,24 @@ with them your history and settings.
 
 ## Troubleshooting
 
+- **A site behind Cloudflare, SiteGround or another firewall no longer answers Sentinel** — since
+  2.49 this fixes itself: with WordPress connector 2.41 / Joomla 1.43 the site switches to
+  *firewall mode* and calls Sentinel itself (notice on the site page). If the page says "install
+  connector … on the site by hand", the connector is old and the nightly round cannot reach it:
+  download it from *Settings → Connectors* and install it once from the site's admin (on Joomla also
+  enter the panel's address in the plugin settings). After moving a site to a new server,
+  *Edit → Save* makes the panel accept the new copy.
+  If you would rather let Sentinel through the firewall:
+  - *Cloudflare*: in *Security → WAF → Custom rules* create a rule with action **Skip** and the
+    expression `any(http.request.headers["x-sentinel-pass"][*] eq "secret-value")`, then in the
+    site settings, under *Extra headers sent to the connector*, write `X-Sentinel-Pass: secret-value`.
+    Alternatively allow the panel's IP in *Security → WAF → Tools → IP Access Rules*. The free
+    plan's *Bot Fight Mode* cannot be skipped by rules: turn it off on that domain. With
+    Cloudflare Access, use service tokens (`CF-Access-Client-Id` and `CF-Access-Client-Secret`)
+    as extra headers.
+  - *SiteGround*: the anti-bot is not configurable from the site panel; ask support to exclude the
+    panel's IP.
+  - *Sucuri, Imunify360, Wordfence, ModSecurity*: allow the panel's IP in their allowlist.
 - **A site shows as offline but it works (HTTP 401 `rest_forbidden`)** — the site answers but the
   connector rejects the token, usually because the connector was removed and reinstalled. On
   the site, *Settings → Sentinel TD → Connect this site to Sentinel TD* realigns the token by

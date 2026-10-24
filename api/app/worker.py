@@ -25,14 +25,16 @@ from .config import settings
 from .check_gate import updating_server
 from .db import SessionLocal, engine, run_migrations
 from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
-from .connectors import SLOW_PREFIX, apply_status, fetch_status, _category, wp_rest_url, ConnectorTooOld, schedule_dns_recheck, schedule_pending_recheck
+from .connectors import SLOW_PREFIX, apply_status, fetch_status, _category, wp_rest_url, ConnectorTooOld, schedule_dns_recheck, schedule_pending_recheck, raise_for_site
+from .site_http import site_client, site_headers
+from . import relay
 from .connectors import CONNECTOR_PREFIX, confirmation_running, start_confirmation, down_kind, needs_confirmation
 from .errtext import clean_error
 from .servers import server_of, acquire as srv_acquire, release as srv_release
 from .notify import dispatch as notify_dispatch
 from .settings_store import get_operational_settings
 from .eventlog import record as evlog, record_now as evlog_now
-from .screenshot_schedule import screenshot_due, enqueue_screenshot
+from .screenshot_schedule import screenshot_due, request_shots, start_runner, QUEUE as SHOT_QUEUE, RUNNER_LOCK
 from .telegram import send_telegram
 from .i18n import DEFAULT_LANGUAGE, t
 from . import security
@@ -781,6 +783,10 @@ async def poll_site(ctx, site_id: int, force: bool = False):
     per il PRIMO controllo di un sito appena aggiunto (non c'e' ancora nessuna conoscenza
     precedente, e la cache di WordPress puo' essere vecchia o mancare: in modalita' passiva
     il sito dichiarerebbe meno aggiornamenti di quanti ne ha, o "tutto ok")."""
+    if await relay.busy(site_id, redis=ctx.get("redis") if isinstance(ctx, dict) else None):
+        # modalita' firewall con un ciclo di aggiornamenti in corso: lo stato lo rilegge il ciclo
+        log.info("CHECK RIMANDATO (id=%s): aggiornamenti in corso in modalita' firewall", site_id)
+        return
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
         if not site or not site.enabled:
@@ -877,42 +883,88 @@ async def poll_site(ctx, site_id: int, force: bool = False):
 
 
 async def screenshot_tick(ctx):
-    """Timer autonomo: rilegge ogni minuto l'intervallo salvato nel pannello."""
+    """Timer autonomo: rilegge ogni minuto l'intervallo salvato nel pannello e mette nella fila
+    delle anteprime i siti che ne hanno bisogno (vedi screenshot_schedule)."""
     prefs = await get_operational_settings()
     hours = max(1, min(720, int(prefs["screenshot_every_hours"])))
     now = datetime.now(timezone.utc)
     async with SessionLocal() as s:
         # Solo le colonne utili: niente caricamento delle estensioni dei siti.
         rows = (await s.execute(
-            select(Site.id, Site.shot_at, Site.shot_attempted_at)
+            select(Site.id, Site.shot_at, Site.shot_attempted_at, Site.shot_error)
             .where(Site.enabled == True)  # noqa: E712
             .order_by(func.coalesce(Site.shot_attempted_at, Site.shot_at).asc().nullsfirst(), Site.id)
         )).all()
-    queued = 0
-    for site_id, shot_at, attempted_at in rows:
-        if not screenshot_due(shot_at, attempted_at, now, hours):
-            continue
-        try:
-            job = await enqueue_screenshot(ctx["redis"], site_id, delay_seconds=queued * 12)
-            if job is not None:
-                queued += 1
-        except Exception:  # noqa: BLE001
-            log.exception("Accodamento screenshot fallito (id=%s)", site_id)
+    due = [site_id for site_id, shot_at, attempted_at, err in rows
+           if screenshot_due(shot_at, attempted_at, now, hours, failed=bool(err))]
+    try:
+        queued = await request_shots(ctx["redis"], due) if due else 0
+        if not due:
+            await start_runner(ctx["redis"])      # fila rimasta da un giro interrotto
+    except Exception:  # noqa: BLE001
+        log.exception("Fila delle anteprime non aggiornata")
+        return
     if queued:
-        log.info("ANTEPRIME: accodati %d screenshot (intervallo %d ore)", queued, hours)
+        log.info("ANTEPRIME: %d siti in fila (intervallo %d ore)", queued, hours)
+
+
+async def shot_runner(ctx):
+    """Esecutore della fila delle anteprime: uno scatto alla volta, quindi nessuna chiamata resta
+    in attesa davanti allo shooter e scade. Le richieste a mano sono in testa alla fila. Dopo 10
+    minuti lascia il posto agli altri lavori del worker; il timer del minuto dopo lo riavvia."""
+    import uuid as _uuid
+    redis = ctx["redis"]
+    token = _uuid.uuid4().hex
+    if not await redis.set(RUNNER_LOCK, token, nx=True, px=900_000):
+        return
+    try:
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
+            item = await redis.zpopmin(SHOT_QUEUE, 1)
+            if not item:
+                break
+            raw = item[0][0]
+            site_id = int(raw.decode() if isinstance(raw, bytes) else raw)
+            await redis.pexpire(RUNNER_LOCK, 900_000)
+            await _shoot_one(site_id)
+    finally:
+        try:
+            cur = await redis.get(RUNNER_LOCK)
+            if (cur.decode() if isinstance(cur, bytes) else cur) == token:
+                await redis.delete(RUNNER_LOCK)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def shoot_site(ctx, site_id: int):
+    """Lavoro delle versioni precedenti (ancora in coda dopo l'aggiornamento): passa dalla fila."""
+    await request_shots(ctx["redis"], [site_id], manual=True)
+
+
+def _shot_error_text(ex: Exception) -> str:
+    if isinstance(ex, httpx.TimeoutException):
+        return "lo scatto ha superato i 3 minuti (sito molto lento o verifica antibot che non finisce)"
+    if isinstance(ex, (httpx.ConnectError, httpx.NetworkError)):
+        return "servizio delle anteprime non raggiungibile"
+    if isinstance(ex, httpx.HTTPStatusError):
+        return f"servizio delle anteprime in errore (HTTP {ex.response.status_code})"
+    return f"{type(ex).__name__}: {str(ex)[:200]}"
+
+
+async def _shoot_one(site_id: int) -> None:
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
         if not site or not site.enabled:
             return
         # Persistito prima della chiamata HTTP, anche se fallisce o il worker
         # riparte. Non modifica la data dell'ultima immagine riuscita.
+        prev_error = site.shot_error or ""
         site.shot_attempted_at = datetime.now(timezone.utc)
+        site.shot_error = ""          # tentativo in corso: l'errore di prima non vale piu'
         await s.commit()
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:   # video e verifiche antibot: serve margine
+            # una foto alla volta: il tempo e' tutto per questo sito (video e verifiche antibot)
+            async with httpx.AsyncClient(timeout=180.0) as client:
                 r = await client.post(f"{settings.SHOOTER_URL}/shot", json={"url": site.url, "site_id": site.id})
                 r.raise_for_status()
                 res = r.json()
@@ -929,13 +981,22 @@ async def shoot_site(ctx, site_id: int):
                     site.shot_path = res["path"]
                     site.shot_at = now
                     log.info("SCREENSHOT OK '%s' (id=%s)", site.name, site.id)
+                site.shot_error = ""
                 await s.commit()
         except Exception as ex:  # noqa: BLE001
             # WARNING e non info: a livello info il messaggio veniva filtrato dai log del
             # container e gli screenshot fallivano in silenzio per giorni senza che nulla
-            # lo segnalasse. Lo screenshot resta comunque non bloccante per il monitoraggio.
+            # lo segnalasse. Ora il motivo resta anche sul sito e si vede nel pannello.
+            err = _shot_error_text(ex)
             log.warning("SCREENSHOT FALLITO '%s' (id=%s): %s: %s",
                         site.name, site.id, type(ex).__name__, str(ex)[:200])
+            try:
+                site.shot_error = err[:480]
+                if err != prev_error:
+                    await evlog(s, "screenshots", "warn", f"Anteprima non riuscita: {err}", site=site)
+                await s.commit()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def tick(ctx):
@@ -1204,16 +1265,36 @@ async def _email_mode() -> str:
 async def rollback_item(site: Site, ext_type: str, slug: str, backup_file: str) -> dict:
     """Chiede al connettore WordPress di rimettere la copia fatta prima dell'aggiornamento.
     Ritorna {ok, error, from, to}."""
-    headers = {"Authorization": f"Bearer {site.token}", "X-Sentinel-Token": site.token}
+    headers = site_headers(site, {"Authorization": f"Bearer {site.token}", "X-Sentinel-Token": site.token})
+    if relay.active(site):
+        d = await relay.call(site, "rollback", {"type": ext_type, "slug": slug, "file": backup_file})
+        if d is None:
+            return {"ok": False, "error": relay.not_taken_message(), "from": "", "to": ""}
+        return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "from": str(d.get("from", "")), "to": str(d.get("to", ""))}
     try:
-        async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+        async with site_client(site, timeout=180.0, follow_redirects=True) as client:
             r = await client.post(wp_rest_url(site, "rollback"), headers=headers,
                                   json={"type": ext_type, "slug": slug, "file": backup_file})
-            r.raise_for_status()
+            raise_for_site(r)
             d = r.json()
             return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "from": str(d.get("from", "")), "to": str(d.get("to", ""))}
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "from": "", "to": ""}
+
+
+async def relay_rollback(ctx, site_id: int, ext_type: str, slug: str, backup_file: str, name: str) -> None:
+    """Ripristino a mano su un sito in modalita' firewall: lo fa il connettore al suo prossimo
+    contatto, e lo storico si scrive quando arriva l'esito (il pannello non resta in attesa)."""
+    async with SessionLocal() as s:
+        site = await s.get(Site, site_id)
+        if not site:
+            return
+        res = await rollback_item(site, ext_type, slug, backup_file)
+        await record_rollback(s, site, ext_type, name or slug, slug, res, "a mano")
+        await s.commit()
+        if res.get("ok"):
+            await apply_status(s, site, force=True)
+            await s.commit()
 
 
 async def record_rollback(s, site: Site, ext_type: str, name: str, slug: str, res: dict, how: str) -> None:
@@ -1300,9 +1381,27 @@ def _params_lost(resp: dict) -> bool:
     return not resp.get("ok") and str(resp.get("error") or "").startswith("type non valido")
 
 
+def _result_of(d: dict) -> dict:
+    """Esito di un aggiornamento nella forma usata dal ciclo, dalla risposta del connettore."""
+    return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "new": str(d.get("new", "")),
+            "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
+            "manual": bool(d.get("manual")), "reason": str(d.get("reason", "")),
+            "backup": str(d.get("backup") or ""), "backup_error": str(d.get("backup_error") or "")}
+
+
+async def _relay_update(site: Site, action: str, params: dict) -> dict:
+    """Modalita' firewall: l'aggiornamento lo fa il connettore al suo prossimo contatto."""
+    if await relay.jobs_blocked(site.id):
+        return {"ok": False, "error": relay.no_jobs_message(), "new": "", "relay_timeout": True}
+    d = await relay.call(site, action, params)
+    if d is None:
+        return {"ok": False, "error": relay.not_taken_message(), "new": "", "relay_timeout": True}
+    return _result_of(d)
+
+
 async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
     """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}."""
-    headers = {
+    headers = site_headers(site, {
         "Authorization": f"Bearer {site.token}",
         # copia del token in un header che nessun hosting filtra: alcuni Apache in
         # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
@@ -1310,7 +1409,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-    }
+    })
     cb = int(time.time())   # cache-buster: evita risposte cachate dal reverse proxy
     # copia zip prima dell'aggiornamento: "1" di base, "0" se spenta in Impostazioni (connettore WP 2.33+;
     # i connettori piu' vecchi ignorano il parametro e copiano come sempre)
@@ -1319,8 +1418,11 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
         backup_flag = "1" if (await _gos()).get("pre_update_backup", True) else "0"
     except Exception:  # noqa: BLE001
         backup_flag = "1"
+    if relay.active(site):
+        return await _relay_update(site, "update", {"type": ext_type, "slug": slug, "expected": expected or "",
+                                                     "backup": backup_flag})
     try:
-        async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+        async with site_client(site, timeout=180.0, follow_redirects=True) as client:
             if site.cms == "wp":
                 # 1) dal BACKEND del sito (admin-ajax.php): li' i plugin a licenza come
                 #    Elementor Pro caricano il proprio sistema di aggiornamento, via REST no.
@@ -1349,7 +1451,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                         wp_rest_url(site, "update", f"_={cb}"),
                         headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag},
                     )
-                    r.raise_for_status()
+                    raise_for_site(r)
                     d = r.json()
             else:  # joomla via com_ajax
                 params = {
@@ -1358,7 +1460,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                     "_": cb,
                 }
                 r = await client.post(f"{site.url.rstrip('/')}/index.php", headers=headers, params=params)
-                r.raise_for_status()
+                raise_for_site(r)
                 payload = r.json()
                 # com_ajax di norma wrappa in {"success":bool,"data":[...]}.
                 # Gestisco anche risposte gia' "piatte" per robustezza.
@@ -1373,10 +1475,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                     d = payload[0] if payload else {"ok": False, "error": "risposta vuota", "new": ""}
                 else:
                     d = {"ok": False, "error": "formato risposta non valido", "new": ""}
-            return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "new": str(d.get("new", "")),
-                    "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
-                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", "")),
-                    "backup": str(d.get("backup") or ""), "backup_error": str(d.get("backup_error") or "")}
+            return _result_of(d)
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -1392,7 +1491,7 @@ VENDOR_PACKAGES = {"pkg_BaForms": "Balbooa Forms", "pkg_Gallery": "Balbooa Galle
 
 async def _vendor_update_one(site: Site, slug: str) -> dict:
     """Chiama il connettore Joomla task=vendorupdate per un package vendor. {ok, error, new}."""
-    headers = {
+    headers = site_headers(site, {
         "Authorization": f"Bearer {site.token}",
         # copia del token in un header che nessun hosting filtra: alcuni Apache in
         # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
@@ -1400,16 +1499,18 @@ async def _vendor_update_one(site: Site, slug: str) -> dict:
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-    }
+    })
     cb = int(time.time())
+    if relay.active(site):
+        return await _relay_update(site, "vendorupdate", {"slug": slug})
     try:
-        async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
+        async with site_client(site, timeout=300.0, follow_redirects=True) as client:
             params = {
                 "option": "com_ajax", "plugin": "tdpanopticon", "group": "system",
                 "format": "json", "task": "vendorupdate", "slug": slug, "_": cb,
             }
             r = await client.post(f"{site.url.rstrip('/')}/index.php", headers=headers, params=params)
-            r.raise_for_status()
+            raise_for_site(r)
             payload = r.json()
             if isinstance(payload, dict) and "success" in payload:
                 if not payload.get("success"):
@@ -1422,10 +1523,7 @@ async def _vendor_update_one(site: Site, slug: str) -> dict:
                 d = payload[0] if payload else {"ok": False, "error": "risposta vuota", "new": ""}
             else:
                 d = {"ok": False, "error": "formato risposta non valido", "new": ""}
-            return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "new": str(d.get("new", "")),
-                    "noop": bool(d.get("noop")), "message": str(d.get("message", "")),
-                    "manual": bool(d.get("manual")), "reason": str(d.get("reason", "")),
-                    "backup": str(d.get("backup") or ""), "backup_error": str(d.get("backup_error") or "")}
+            return _result_of(d)
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -1552,9 +1650,11 @@ async def update_site(ctx, site_id: int, manual: bool = False):
     redis = ctx["redis"]
     # un sito alla volta per server (vedi servers.py): se il server e' occupato o a riposo,
     # il lavoro torna in coda dopo qualche secondo invece di tenere fermo il worker
+    await relay.refresh_config()
     async with SessionLocal() as s:
         _site = await s.get(Site, site_id)
         _url = _site.url if _site else ""
+        _relay_cycle = bool(_site is not None and relay.active(_site))
     server = await server_of(redis, _url) if _url else ""
     slot, wait = await srv_acquire(redis, server)
     if slot is None:
@@ -1575,12 +1675,24 @@ async def update_site(ctx, site_id: int, manual: bool = False):
     if manual:
         await _set_upd_status(redis, site_id, "running", "aggiornamento in corso")
     owned_context = updating_server.set(server)
+    deadline_token = None
+    if _relay_cycle:
+        # modalita' firewall: per tutto il ciclo il controllo normale non riscrive le estensioni del
+        # sito (le usa il ciclo), e i lavori non superano il job_timeout di arq
+        await relay.mark_busy(site_id, relay.CYCLE_SECONDS + 300)
+        deadline_token = relay.set_cycle_deadline()
     try:
         await _update_site(ctx, site_id, manual, outcome)
     except Exception as ex:  # noqa: BLE001
         outcome["text"] = f"aggiornamento interrotto da un errore: {str(ex)[:200]}"
         raise
     finally:
+        if deadline_token is not None:
+            relay.reset_cycle_deadline(deadline_token)
+            try:
+                await relay.clear_busy(site_id)
+            except Exception:  # noqa: BLE001
+                pass
         updating_server.reset(owned_context)
         await srv_release(redis, server, slot, bool(outcome.get("worked")))
         if manual:
@@ -1590,6 +1702,13 @@ async def update_site(ctx, site_id: int, manual: bool = False):
 
 async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
     item_pause = max(0, int(outcome.get("item_pause", settings.AUTOUPDATE_PAUSE_SECONDS)))
+    async with SessionLocal() as _s0:
+        _site0 = await _s0.get(Site, site_id)
+        if _site0 is not None and relay.active(_site0):
+            # modalita' firewall: il connettore aspetta il lavoro successivo per pochi secondi
+            # (relay.WAIT_SECONDS); una pausa piu' lunga gli farebbe chiudere il giro e il
+            # prossimo lavoro aspetterebbe 5 minuti
+            item_pause = min(item_pause, 10)
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
         if not site or not site.enabled:
@@ -1769,6 +1888,12 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 outcome["text"] = "niente da aggiornare: il sito è già a posto"
             return
 
+        if relay.active(site) and await relay.jobs_blocked(site.id):
+            # modalita' firewall su un Joomla che non sa eseguire lavori: inutile fotografare la home
+            # e accodare aggiornamenti che nessuno prendera'
+            outcome["text"] = relay.no_jobs_message()
+            return
+
         outcome["worked"] = True     # da qui si lavora davvero sul sito: dopo, il server riposa
 
         # controllo visivo: istantanea della home PRIMA di toccare qualunque cosa. Non per le
@@ -1811,7 +1936,25 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # forzato su vendorupdate causava un loop quando il canale offriva l'update:
             # vendorupdate diceva "gia' all'ultima" senza installare, la riga restava in
             # #__updates, e il pending (con notifica) rinasceva a ogni ciclo.
+            _left = relay.cycle_time_left()
+            if _left is not None and _left < 120:
+                # modalita' firewall: il tempo del ciclo e' finito, il resto al prossimo giro
+                log.warning("MODALITA' FIREWALL '%s' (id=%s): tempo del ciclo finito, %s e il resto al prossimo giro",
+                            site.name, site.id, name)
+                outcome["text"] = "tempo del giro finito (modalità firewall): il resto al prossimo giro"
+                outcome["relay_stop"] = True
+                break
             res = await _update_one(site, etype, slug, expected=(ext.new_version if ext is not None else ""))
+            if res.get("relay_timeout"):
+                # modalita' firewall: il sito non ha preso il lavoro (cron del sito fermo, sito giu').
+                # Non e' un aggiornamento fallito: niente storico ne' pausa, si riprova al prossimo giro.
+                log.warning("MODALITA' FIREWALL '%s' (id=%s): %s non preso dal sito in tempo, il resto al prossimo giro",
+                            site.name, site.id, name)
+                await evlog(s, "updates", "warn", res.get("error") or "Modalità firewall: il sito non ha preso gli aggiornamenti in tempo, si riprova al prossimo giro",
+                            site=site, details={"item": name})
+                outcome["text"] = res.get("error") or relay.not_taken_message()
+                outcome["relay_stop"] = True
+                break
             res = _translations_done_with_updates(site, etype, ext, res, done)
             res = _translations_not_applied(site, etype, res)
 
@@ -2005,7 +2148,8 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
         # altrimenti arriva un "0 aggiornati, 0 falliti" con la tabella vuota.
         if not results:
             log.info("Nessun aggiornamento reale per '%s' (id=%s): report non inviato", site.name, site.id)
-            outcome["text"] = "niente da aggiornare: tutto era già alla versione giusta"
+            if not outcome.get("relay_stop"):      # modalita' firewall: resta il motivo vero
+                outcome["text"] = "niente da aggiornare: tutto era già alla versione giusta"
             return
 
         _n_ok = sum(1 for r in results if r.get("ok"))
@@ -2765,10 +2909,10 @@ async def retired_diagnostics_job(ctx, *args):
 
 
 class WorkerSettings:
-    functions = [arq_func(poll_site, keep_result=0), arq_func(shoot_site, keep_result=0), update_site, cycle_summary, mass_update_now, eventlog_purge,
+    functions = [arq_func(poll_site, keep_result=0), arq_func(shoot_site, keep_result=0), arq_func(shot_runner, keep_result=0), update_site, cycle_summary, mass_update_now, eventlog_purge,
                  mass_update_selected, security_scan, vendor_scan, arq_func(domain_expiry_scan, timeout=21600, keep_result=0), monthly_report,
                  arq_func(retired_diagnostics_job, name="diag_site", keep_result=0), connector_rollout, plugin_catalog_scan, install_site,
-                 arq_func(client_dns_check, keep_result=0)]
+                 arq_func(client_dns_check, keep_result=0), arq_func(relay_rollback, keep_result=0)]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),

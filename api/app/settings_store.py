@@ -42,6 +42,13 @@ DEFAULTS = {
     "server_panels": {},            # pagina Server: IP -> {"url": link al pannello dell'hosting, "note": appunto}
     "server_split": [],             # IP da dividere per macchina (nome macchina del connettore): piu' macchine dietro un IP
     "server_limited": [],           # server (IP) con il freno; di base nessuno, si lavora come sempre
+    # modalita' firewall (vedi relay.py)
+    "relay_enabled": True,          # se un firewall blocca Sentinel, il sito passa da solo a chiamarlo
+    "relay_poll_minutes": 5,        # ogni quanto il sito chiede se ci sono lavori (richiesta leggera)
+    "relay_status_minutes": 60,     # ogni quanto manda lo stato completo (e sempre dopo un lavoro o una ricerca)
+    "relay_ping_minutes": 30,       # fuori modalita': ping del connettore se Sentinel non lo cerca da tanto
+    "relay_silent_minutes": 60,     # in modalita': avviso se il sito non manda lo stato da tanto
+    "relay_refresh_hours": 6,       # in modalita': ricerca forzata degli aggiornamenti (dal backend del sito)
 }
 
 
@@ -78,6 +85,11 @@ def normalize(data: dict | None) -> dict:
         ("server_parallel", 1, 4),
         ("server_pause_seconds", 0, 600),
         ("server_item_pause_seconds", 0, 300),
+        ("relay_poll_minutes", 1, 15),
+        ("relay_status_minutes", 5, 240),
+        ("relay_ping_minutes", 15, 240),
+        ("relay_silent_minutes", 15, 1440),
+        ("relay_refresh_hours", 1, 48),
     ):
         try:
             out[key] = max(lo, min(hi, int(src.get(key, out[key]))))
@@ -92,6 +104,9 @@ def normalize(data: dict | None) -> dict:
     out["auto_rollback"] = bool(src.get("auto_rollback", out["auto_rollback"]))
     out["pre_update_backup"] = bool(src.get("pre_update_backup", out["pre_update_backup"]))
     out["wp_block_auto_updates"] = bool(src.get("wp_block_auto_updates", out["wp_block_auto_updates"]))
+    out["relay_enabled"] = bool(src.get("relay_enabled", out["relay_enabled"]))
+    # "il sito tace" conta ogni chiamata, anche la domanda leggera: almeno tre giri mancati
+    out["relay_silent_minutes"] = max(out["relay_silent_minutes"], 3 * out["relay_poll_minutes"])
     try:
         out["visual_after_delay"] = max(0, min(180, int(src.get("visual_after_delay", out["visual_after_delay"]))))
     except (TypeError, ValueError):

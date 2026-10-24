@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.40.0
+ * Version: 2.41.3
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -83,6 +83,17 @@ function tdpanop_translations()
 {
     return [
         'en' => [
+            'Ultima chiamata a Sentinel TD: %s' => 'Last call to Sentinel TD: %s',
+            'Chiama Sentinel TD ora' => 'Call Sentinel TD now',
+            'chiamata riuscita: Sentinel TD raggiunge il sito direttamente' => 'call succeeded: Sentinel TD reaches the site directly',
+            'modalità firewall: stato mandato, lavori eseguiti: %s' => 'firewall mode: status sent, jobs run: %s',
+            'modalità firewall: stato mandato a Sentinel TD' => 'firewall mode: status sent to Sentinel TD',
+            'chiamata non riuscita: %s' => 'call failed: %s',
+            'indirizzo di Sentinel TD mancante: collega il sito o installa il connettore scaricato dal pannello' => 'Sentinel TD address missing: connect the site or install the connector downloaded from the panel',
+            'una chiamata a Sentinel TD è già in corso, riprova fra un minuto' => 'a call to Sentinel TD is already running, try again in a minute',
+            'Modalità firewall' => 'Firewall mode',
+            'attiva: un firewall blocca Sentinel TD, è il sito a chiamarlo ogni 5 minuti' => 'on: a firewall blocks Sentinel TD, so the site calls it every 5 minutes',
+            'non attiva: Sentinel TD raggiunge il sito direttamente' => 'off: Sentinel TD reaches the site directly',
             'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Sentinel TD connector: exposes versions and available updates over REST and allows remote updates. Token and connection in Settings → Sentinel TD.',
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token regenerated. Update it in Sentinel TD as well.',
             'Collegamento fallito: %s' => 'Connection failed: %s',
@@ -118,6 +129,17 @@ function tdpanop_translations()
             'Collega questo sito a Sentinel TD' => 'Connect this site to Sentinel TD',
         ],
         'fr' => [
+            'Ultima chiamata a Sentinel TD: %s' => 'Dernier appel à Sentinel TD : %s',
+            'Chiama Sentinel TD ora' => 'Appeler Sentinel TD maintenant',
+            'chiamata riuscita: Sentinel TD raggiunge il sito direttamente' => 'appel réussi : Sentinel TD atteint le site directement',
+            'modalità firewall: stato mandato, lavori eseguiti: %s' => 'mode pare-feu : état envoyé, tâches exécutées : %s',
+            'modalità firewall: stato mandato a Sentinel TD' => 'mode pare-feu : état envoyé à Sentinel TD',
+            'chiamata non riuscita: %s' => 'appel échoué : %s',
+            'indirizzo di Sentinel TD mancante: collega il sito o installa il connettore scaricato dal pannello' => 'adresse de Sentinel TD manquante : connectez le site ou installez le connecteur téléchargé depuis le panneau',
+            'una chiamata a Sentinel TD è già in corso, riprova fra un minuto' => 'un appel à Sentinel TD est déjà en cours, réessayez dans une minute',
+            'Modalità firewall' => 'Mode pare-feu',
+            'attiva: un firewall blocca Sentinel TD, è il sito a chiamarlo ogni 5 minuti' => 'actif : un pare-feu bloque Sentinel TD, c\'est le site qui l\'appelle toutes les 5 minutes',
+            'non attiva: Sentinel TD raggiunge il sito direttamente' => 'inactif : Sentinel TD atteint le site directement',
             'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Connecteur Sentinel TD : expose les versions et les mises à jour disponibles via REST et permet les mises à jour à distance. Jeton et connexion dans Réglages → Sentinel TD.',
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Jeton régénéré. Mettez-le aussi à jour dans Sentinel TD.',
             'Collegamento fallito: %s' => 'Échec de la connexion : %s',
@@ -153,6 +175,17 @@ function tdpanop_translations()
             'Collega questo sito a Sentinel TD' => 'Connecter ce site à Sentinel TD',
         ],
         'de' => [
+            'Ultima chiamata a Sentinel TD: %s' => 'Letzter Aufruf von Sentinel TD: %s',
+            'Chiama Sentinel TD ora' => 'Sentinel TD jetzt aufrufen',
+            'chiamata riuscita: Sentinel TD raggiunge il sito direttamente' => 'Aufruf erfolgreich: Sentinel TD erreicht die Website direkt',
+            'modalità firewall: stato mandato, lavori eseguiti: %s' => 'Firewall-Modus: Status gesendet, ausgeführte Aufträge: %s',
+            'modalità firewall: stato mandato a Sentinel TD' => 'Firewall-Modus: Status an Sentinel TD gesendet',
+            'chiamata non riuscita: %s' => 'Aufruf fehlgeschlagen: %s',
+            'indirizzo di Sentinel TD mancante: collega il sito o installa il connettore scaricato dal pannello' => 'Adresse von Sentinel TD fehlt: Website verbinden oder den im Panel heruntergeladenen Connector installieren',
+            'una chiamata a Sentinel TD è già in corso, riprova fra un minuto' => 'Ein Aufruf von Sentinel TD läuft bereits, versuche es in einer Minute erneut',
+            'Modalità firewall' => 'Firewall-Modus',
+            'attiva: un firewall blocca Sentinel TD, è il sito a chiamarlo ogni 5 minuti' => 'aktiv: Eine Firewall blockiert Sentinel TD, deshalb meldet sich die Website alle 5 Minuten selbst',
+            'non attiva: Sentinel TD raggiunge il sito direttamente' => 'inaktiv: Sentinel TD erreicht die Website direkt',
             'Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.' => 'Sentinel-TD-Connector: stellt Versionen und verfügbare Updates per REST bereit und ermöglicht Updates aus der Ferne. Token und Verbindung unter Einstellungen → Sentinel TD.',
             'Token rigenerato. Aggiornalo anche in Sentinel TD.' => 'Token neu erzeugt. Aktualisieren Sie ihn auch in Sentinel TD.',
             'Collegamento fallito: %s' => 'Verbindung fehlgeschlagen: %s',
@@ -336,6 +369,16 @@ function tdpanop_admin_page()
         return;
     }
 
+    // modalita' firewall: chiamata a Sentinel adesso, senza aspettare il giro
+    if (isset($_POST['tdpanop_relay_now']) && check_admin_referer('tdpanop_relay_now')) {
+        // veloce: solo la chiamata e lo stato completo; i lavori li prende il giro normale (dietro
+        // Cloudflare una pagina che dura piu' di 100 secondi viene interrotta)
+        $tdpanop_out = tdpanop_relay_tick(['force' => true, 'nojobs' => true, 'status_now' => true]);
+        $tdpanop_ok = in_array(explode(':', $tdpanop_out)[0], ['ping', 'report'], true);
+        echo '<div class="notice ' . ($tdpanop_ok ? 'notice-success' : 'notice-error') . ' is-dismissible"><p>'
+            . esc_html(tdpanop_relay_outcome_text($tdpanop_out)) . '</p></div>';
+    }
+
     // rigenera
     if (isset($_POST['tdpanop_rotate']) && check_admin_referer('tdpanop_rotate')) {
         update_option(TDPANOP_OPT, wp_generate_password(48, false, false));
@@ -436,6 +479,29 @@ function tdpanop_admin_page()
             <tr>
                 <th scope="row">Endpoint</th>
                 <td><code><?php echo esc_html(rest_url('tdpanopticon/v1/status')); ?></code></td>
+            </tr>
+            <tr>
+                <th scope="row"><?php echo esc_html(tdpanop__('Modalità firewall')); ?></th>
+                <td><?php
+                    $tdpanop_rs = tdpanop_relay_state();
+                    echo esc_html($tdpanop_rs['mode'] === 'relay'
+                        ? tdpanop__('attiva: un firewall blocca Sentinel TD, è il sito a chiamarlo ogni 5 minuti')
+                        : tdpanop__('non attiva: Sentinel TD raggiunge il sito direttamente'));
+                    $tdpanop_hub = tdpanop_relay_hub();
+                    if ($tdpanop_hub !== '') {
+                        echo '<br><code>' . esc_html($tdpanop_hub) . '</code>';
+                    }
+                    if (!empty($tdpanop_rs['last_at'])) {
+                        echo '<br>' . esc_html(sprintf(tdpanop__('Ultima chiamata a Sentinel TD: %s'),
+                            (function_exists('wp_date') ? 'wp_date' : 'date_i18n')(get_option('date_format') . ' ' . get_option('time_format'), (int) $tdpanop_rs['last_at'])))
+                            . ' · ' . esc_html(tdpanop_relay_outcome_text((string) ($tdpanop_rs['last'] ?? '')));
+                    }
+                ?>
+                    <form method="post" style="margin-top:8px">
+                        <?php wp_nonce_field('tdpanop_relay_now'); ?>
+                        <input type="submit" name="tdpanop_relay_now" class="button" value="<?php echo esc_attr(tdpanop__('Chiama Sentinel TD ora')); ?>">
+                    </form>
+                </td>
             </tr>
         </table>
         <form method="post" onsubmit="return confirm('<?php echo esc_js(tdpanop__('Rigenerare il token? Dovrai aggiornarlo anche in Sentinel TD, altrimenti i check falliranno.')); ?>');">
@@ -844,6 +910,7 @@ function tdpanop_auth(WP_REST_Request $req)
         return false;
     }
     if (hash_equals(tdpanop_token(), $bearer)) {
+        tdpanop_relay_note_contact($req);
         return true;
     }
     // AUTH SELF-HEALING contro l'object cache avvelenata (Redis).
@@ -856,7 +923,11 @@ function tdpanop_auth(WP_REST_Request $req)
     wp_cache_delete(TDPANOP_OPT, 'options');
     wp_cache_delete('alloptions', 'options');
     $real = get_option(TDPANOP_OPT);
-    return is_string($real) && $real !== '' && hash_equals($real, $bearer);
+    $ok = is_string($real) && $real !== '' && hash_equals($real, $bearer);
+    if ($ok) {
+        tdpanop_relay_note_contact($req);
+    }
+    return $ok;
 }
 
 function tdpanop_status($req = null)
@@ -1605,6 +1676,37 @@ function tdpanop_ajax_update()
 }
 add_action('wp_ajax_nopriv_tdpanop_update', 'tdpanop_ajax_update');
 add_action('wp_ajax_tdpanop_update', 'tdpanop_ajax_update');
+
+/* Ricerca degli aggiornamenti nel contesto del BACKEND (2.41.3), per la modalita' firewall: i
+ * plugin e i temi a licenza dicono se hanno una versione nuova solo quando il loro aggiornatore e'
+ * caricato, cioe' nel backend. Stessa autenticazione di tdpanop_ajax_update. */
+function tdpanop_ajax_status()
+{
+    $req = new WP_REST_Request('GET');
+    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION'] as $k) {
+        if (!empty($_SERVER[$k])) {
+            $req->set_header('authorization', (string) $_SERVER[$k]);
+            break;
+        }
+    }
+    if (!empty($_SERVER['HTTP_X_SENTINEL_TOKEN'])) {
+        $req->set_header('x_sentinel_token', (string) $_SERVER['HTTP_X_SENTINEL_TOKEN']);
+    }
+    if (!tdpanop_auth($req)) {
+        wp_send_json(['ok' => false, 'error' => 'non autorizzato'], 401);
+    }
+    $req->set_param('refresh', sanitize_text_field(wp_unslash((string) ($_POST['refresh'] ?? '1'))));
+    $auto = sanitize_text_field(wp_unslash((string) ($_POST['wp_auto_updates'] ?? '')));
+    if ($auto !== '') {
+        $req->set_param('wp_auto_updates', $auto);
+    }
+    $resp = tdpanop_status($req);
+    $data = ($resp instanceof WP_REST_Response) ? (array) $resp->get_data() : (array) $resp;
+    $data['context'] = 'admin';
+    wp_send_json($data, 200);
+}
+add_action('wp_ajax_nopriv_tdpanop_status', 'tdpanop_ajax_status');
+add_action('wp_ajax_tdpanop_status', 'tdpanop_ajax_status');
 
 /**
  * Prepara i dati di aggiornamento per UN plugin o tema, senza distruggere quelli buoni.
@@ -2420,5 +2522,606 @@ add_action('wp_loaded', function () {
     }
     update_option('tdpanop_last_flush', ['at' => time(), 'caches' => $done], false);
 }, 99);
+
+
+/* ---------------------------------------------------------------------------
+ * Modalita' firewall (2.41.0): quando un firewall o un antibot davanti al sito (Cloudflare,
+ * SiteGround, Sucuri, un IP bannato...) blocca Sentinel TD, e' il connettore a chiamarlo.
+ * Il firewall filtra chi ENTRA nel sito, non quello che il sito manda fuori.
+ *
+ * - Fuori dalla modalita': se Sentinel non cerca il sito da mezz'ora, un ping leggero al
+ *   pannello; la risposta dice in che modalita' stare. Niente altro.
+ * - In modalita' firewall (la decide il pannello quando trova il firewall): ogni 5 minuti lo
+ *   stato del sito al pannello, poi i lavori in coda (aggiornamenti, ripristini, installazioni,
+ *   rimozioni) eseguiti con le stesse funzioni delle chiamate REST, e gli esiti.
+ * - L'indirizzo del pannello lo impara dalle chiamate autenticate di Sentinel (X-Sentinel-Hub);
+ *   in mancanza usa quello del pacchetto o della pagina Impostazioni → Sentinel TD.
+ * Il giro parte dal cron di WordPress e, se il cron non riesce a partire (la richiesta che
+ * WordPress fa a se stesso puo' fermarsi proprio sul firewall), dopo una visita al sito, a
+ * pagina gia' consegnata.
+ * ------------------------------------------------------------------------- */
+define('TDPANOP_RELAY_STATE', 'tdpanop_relay_state');   // modalita' e tempi
+define('TDPANOP_RELAY_HUB', 'tdpanop_relay_hub');       // indirizzo del pannello imparato da X-Sentinel-Hub
+define('TDPANOP_RELAY_SEEN', 'tdpanop_relay_contact');  // ultima chiamata autenticata di Sentinel
+define('TDPANOP_RELAY_LOCK', 'tdpanop_relay_lock');     // un giro alla volta
+
+function tdpanop_relay_clean_hub(string $url): string
+{
+    $url = rtrim(trim($url), '/');
+    if ($url === '' || strlen($url) > 255) {
+        return '';
+    }
+    $p = parse_url($url);
+    // solo https: a questo indirizzo il connettore manda il token del sito
+    if (!is_array($p) || empty($p['host']) || strtolower((string) ($p['scheme'] ?? '')) !== 'https'
+        || isset($p['user']) || isset($p['pass']) || isset($p['query']) || isset($p['fragment'])) {
+        return '';
+    }
+    return $url;
+}
+
+/* Sentinel ha chiamato il connettore (token valido): se ne prende nota, e dell'indirizzo del pannello. */
+function tdpanop_relay_note_contact($req): void
+{
+    try {
+        $now = time();
+        if ($now - (int) get_option(TDPANOP_RELAY_SEEN, 0) >= 60) {
+            update_option(TDPANOP_RELAY_SEEN, $now, true);
+        }
+        $hub = tdpanop_relay_clean_hub((string) $req->get_header('x_sentinel_hub'));
+        if ($hub !== '' && $hub !== (string) get_option(TDPANOP_RELAY_HUB, '')) {
+            update_option(TDPANOP_RELAY_HUB, $hub, true);
+        }
+    } catch (\Throwable $e) {
+        // mai bloccare una chiamata del pannello per questo
+    }
+}
+
+function tdpanop_relay_hub(): string
+{
+    $learned = tdpanop_relay_clean_hub((string) get_option(TDPANOP_RELAY_HUB, ''));
+    if ($learned !== '') {
+        return $learned;
+    }
+    if (TDPANOP_HUB_URL !== '') {
+        return tdpanop_relay_clean_hub(TDPANOP_HUB_URL);
+    }
+    return tdpanop_relay_clean_hub((string) get_option('td_panopticon_hub_url', ''));
+}
+
+function tdpanop_relay_state(): array
+{
+    $st = get_option(TDPANOP_RELAY_STATE, []);
+    // status_every 0 = stato completo a ogni giro (pannello che non dice ogni quanto)
+    return array_merge(['mode' => 'direct', 'tick' => 300, 'every' => 1800, 'ping_at' => 0, 'tick_at' => 0,
+        'status_every' => 0, 'status_at' => 0], is_array($st) ? $st : []);
+}
+
+function tdpanop_relay_save(array $st): void
+{
+    // opzioni piccole e caricate con le altre: il controllo a fine pagina non fa query
+    update_option(TDPANOP_RELAY_STATE, $st, true);
+}
+
+/* Cron di WordPress: ogni 5 minuti in modalita' firewall, ogni 15 fuori (basta per il ping
+ * della mezz'ora, senza una richiesta di WordPress a se stesso ogni 5 minuti su tutti i siti). */
+function tdpanop_relay_schedule(string $mode): void
+{
+    if (!function_exists('wp_next_scheduled') || !function_exists('wp_schedule_event')) {
+        return;
+    }
+    $want = $mode === 'relay' ? 'tdpanop_5min' : 'tdpanop_15min';
+    $ev = function_exists('wp_get_scheduled_event') ? wp_get_scheduled_event('tdpanop_relay_tick') : null;
+    if ($ev && isset($ev->schedule) && $ev->schedule === $want) {
+        return;
+    }
+    if (function_exists('wp_clear_scheduled_hook')) {
+        wp_clear_scheduled_hook('tdpanop_relay_tick');
+    }
+    wp_schedule_event(time() + 60, $want, 'tdpanop_relay_tick');
+}
+
+/* La risposta del pannello: modalita' e tempi (con limiti, qualunque cosa arrivi). */
+function tdpanop_relay_apply(array $st, array $d): array
+{
+    $was = $st['mode'];
+    $st['mode']  = (($d['mode'] ?? '') === 'relay') ? 'relay' : 'direct';
+    $st['tick']  = max(60, min(3600, (int) ($d['tick'] ?? 300)));
+    $st['every'] = max(300, min(86400, (int) ($d['ping'] ?? 1800)));
+    $st['status_every'] = max(0, min(86400, (int) ($d['status_every'] ?? 0)));
+    if ($was !== 'relay' && $st['mode'] === 'relay') {
+        $st['status_at'] = 0;      // appena in modalita' firewall: lo stato completo subito
+    }
+    tdpanop_relay_save($st);
+    if ($was !== $st['mode']) {
+        tdpanop_relay_schedule($st['mode']);
+    }
+    return $st;
+}
+
+/* Il pannello non vuole piu' sentire questa copia (sito tolto o disattivato, token cambiato,
+ * un'altra copia del sito gia' collegata): si torna al solo ping della mezz'ora. */
+function tdpanop_relay_refused(array $st, $d, int $now): array
+{
+    if (is_array($d) && in_array((int) ($d['_code'] ?? 0), [401, 403, 409], true)) {
+        $st['mode'] = 'direct';
+        $st['ping_at'] = $now;
+        tdpanop_relay_save($st);
+        tdpanop_relay_schedule('direct');
+    }
+    return $st;
+}
+
+/* Impronta di questa installazione (cartella del sito): una copia con lo stesso token e lo
+ * stesso indirizzo (vecchio server dopo un trasloco, copia locale) non parla al posto del sito. */
+function tdpanop_relay_fp(): string
+{
+    return substr(sha1('wp|' . (defined('ABSPATH') ? ABSPATH : __DIR__)), 0, 16);
+}
+
+/* E' ora di farsi sentire? $grace: secondi di ritardo tollerati (il giro dopo una visita
+ * aspetta che il cron abbia avuto la sua occasione). */
+function tdpanop_relay_due(int $now, int $grace = 0): bool
+{
+    if (tdpanop_relay_hub() === '') {
+        return false;
+    }
+    $st = tdpanop_relay_state();
+    // un po' di tolleranza: il cron di WordPress parte con qualche secondo di ritardo variabile,
+    // e senza si salterebbe un giro su due (10 minuti invece di 5)
+    if ($st['mode'] === 'relay') {
+        return $now - (int) $st['tick_at'] >= (int) $st['tick'] - 30 + $grace;
+    }
+    $contact = (int) get_option(TDPANOP_RELAY_SEEN, 0);
+    return $now - $contact >= (int) $st['every'] + $grace && $now - (int) $st['ping_at'] >= (int) $st['every'] - 60 + $grace;
+}
+
+/* Un giro alla volta. Con MySQL: GET_LOCK, atomico e rilasciato da solo se il processo muore; il
+ * nome vale per tutto il server MySQL, quindi dentro c'e' questo sito (database, prefisso, cartella).
+ * Senza (test): un'option col momento d'inizio, superata dopo 15 minuti. */
+function tdpanop_relay_lock_name(): string
+{
+    global $wpdb;
+    $db = defined('DB_NAME') ? DB_NAME : '';
+    $prefix = (isset($wpdb) && is_object($wpdb) && isset($wpdb->prefix)) ? $wpdb->prefix : '';
+    return 'tdpanop_relay_' . substr(md5($db . '|' . $prefix . '|' . (defined('ABSPATH') ? ABSPATH : '')), 0, 20);
+}
+
+function tdpanop_relay_lock(int $now): bool
+{
+    global $wpdb;
+    if (isset($wpdb) && is_object($wpdb) && method_exists($wpdb, 'get_var')) {
+        return (string) $wpdb->get_var("SELECT GET_LOCK('" . tdpanop_relay_lock_name() . "', 0)") === '1';
+    }
+    if (add_option(TDPANOP_RELAY_LOCK, $now, '', 'no')) {
+        return true;
+    }
+    if ($now - (int) get_option(TDPANOP_RELAY_LOCK, 0) > 900) {   // giro precedente morto a meta'
+        update_option(TDPANOP_RELAY_LOCK, $now, false);
+        return true;
+    }
+    return false;
+}
+
+function tdpanop_relay_unlock(): void
+{
+    global $wpdb;
+    if (isset($wpdb) && is_object($wpdb) && method_exists($wpdb, 'get_var')) {
+        $wpdb->get_var("SELECT RELEASE_LOCK('" . tdpanop_relay_lock_name() . "')");
+        return;
+    }
+    delete_option(TDPANOP_RELAY_LOCK);
+}
+
+function tdpanop_relay_post(string $hub, array $body, int $timeout)
+{
+    $r = wp_remote_post($hub . '/api/agent/relay', [
+        'timeout' => $timeout,
+        'headers' => [
+            'Content-Type'     => 'application/json',
+            'Accept'           => 'application/json',
+            'X-Sentinel-Token' => tdpanop_token(),
+            'User-Agent'       => 'SentinelTD-Agent/' . TDPANOP_VERSION . '; ' . home_url('/'),
+        ],
+        'body'    => wp_json_encode($body),
+        'redirection' => 0,     // il token non segue un redirect verso un altro indirizzo
+    ]);
+    if (is_wp_error($r)) {
+        return ['_error' => $r->get_error_message()];
+    }
+    $code = (int) wp_remote_retrieve_response_code($r);
+    $d = json_decode((string) wp_remote_retrieve_body($r), true);
+    if ($code !== 200 || !is_array($d)) {
+        return ['_error' => 'HTTP ' . $code, '_code' => $code];
+    }
+    return $d;
+}
+
+function tdpanop_relay_status(bool $refresh, $auto): array
+{
+    if ($refresh) {
+        // ricerca degli aggiornamenti dal backend: anche i plugin a licenza rispondono
+        $d = tdpanop_relay_admin_call('tdpanop_status', ['refresh' => '1', 'wp_auto_updates' => $auto === null ? '' : (string) $auto]);
+        if (is_array($d) && isset($d['extensions']) && is_array($d['extensions'])) {
+            return $d;
+        }
+    }
+    $req = new WP_REST_Request('GET', '/tdpanopticon/v1/status');
+    if ($refresh) {
+        $req->set_param('refresh', '1');
+    }
+    if ($auto !== null) {
+        $req->set_param('wp_auto_updates', (string) $auto);
+    }
+    $r = tdpanop_status($req);
+    return ($r instanceof WP_REST_Response) ? (array) $r->get_data() : (array) $r;
+}
+
+/* Zip di un lavoro di installazione, scaricato dal pannello col token del sito. */
+function tdpanop_relay_download(string $hub, string $path)
+{
+    if (strpos($path, '/api/agent/relay/file/') !== 0) {
+        return new WP_Error('relay', 'indirizzo del pacchetto non valido');
+    }
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    $tmp = wp_tempnam('tdpanop-relay.zip');
+    $r = wp_remote_get($hub . $path, [
+        'timeout'  => 300,
+        'stream'   => true,
+        'filename' => $tmp,
+        'redirection' => 0,
+        'headers'  => ['X-Sentinel-Token' => tdpanop_token()],
+    ]);
+    if (is_wp_error($r) || (int) wp_remote_retrieve_response_code($r) !== 200) {
+        @unlink($tmp);
+        return new WP_Error('relay', 'pacchetto non scaricato da Sentinel TD' . (is_wp_error($r) ? ': ' . $r->get_error_message() : ''));
+    }
+    return $tmp;
+}
+
+/*
+ * Aggiornamento nel BACKEND del sito, in modalita' firewall (2.41.1).
+ * I plugin e i temi a licenza (Elementor Pro, ACF Pro, Gravity Forms, WP Rocket, YOOtheme…)
+ * spesso caricano il proprio aggiornatore solo nel backend: per questo, senza firewall, Sentinel
+ * li aggiorna da admin-ajax.php. In modalita' firewall Sentinel non arriva al sito, e il giro gira
+ * nel cron o dopo una visita, che backend non sono: il file di quei prodotti non arrivava.
+ * Qui il sito chiama il proprio admin-ajax.php, puntando direttamente alla macchina su cui gira
+ * (127.0.0.1, poi l'indirizzo del server): la richiesta non esce dal server e non passa dal
+ * firewall. Stesso token, stessa funzione che Sentinel usa senza firewall. Se il server non
+ * risponde cosi', null: si aggiorna come prima, dentro il giro.
+ */
+function tdpanop_relay_admin_update(array $job)
+{
+    $body = [];
+    foreach (['type', 'slug', 'expected', 'backup'] as $k) {
+        $body[$k] = isset($job[$k]) && is_scalar($job[$k]) ? (string) $job[$k] : '';
+    }
+    // "type non valido": richiesta arrivata senza i dati, si prova l'indirizzo successivo
+    return tdpanop_relay_admin_call('tdpanop_update', $body, function ($d) {
+        return !(empty($d['ok']) && strpos((string) ($d['error'] ?? ''), 'type non valido') === 0);
+    });
+}
+
+/* Chiamata al proprio admin-ajax.php puntando alla macchina stessa (vedi sopra). Torna la
+ * risposta JSON del connettore, o null se il server non risponde cosi'. */
+function tdpanop_relay_admin_call(string $action, array $body, $accept = null)
+{
+    $url = admin_url('admin-ajax.php');
+    $host = (string) parse_url($url, PHP_URL_HOST);
+    if ($host === '') {
+        return null;
+    }
+    $ips = ['127.0.0.1'];
+    $own = isset($_SERVER['SERVER_ADDR']) ? (string) $_SERVER['SERVER_ADDR'] : '';
+    if ($own !== '' && filter_var($own, FILTER_VALIDATE_IP) && !in_array($own, $ips, true)) {
+        $ips[] = $own;
+    }
+    $token = tdpanop_token();
+    foreach ($ips as $ip) {
+        $pin = function ($handle, $args, $req_url) use ($host, $ip, $action) {
+            if (strpos((string) $req_url, $action) !== false && defined('CURLOPT_RESOLVE')) {
+                $ipv = strpos($ip, ':') !== false ? '[' . $ip . ']' : $ip;
+                curl_setopt($handle, CURLOPT_RESOLVE, [$host . ':443:' . $ipv, $host . ':80:' . $ipv]);
+            }
+        };
+        add_action('http_api_curl', $pin, 10, 3);
+        try {
+            $r = wp_remote_post(add_query_arg(['action' => $action, '_' => time()], $url), [
+                'timeout'     => 280,
+                'redirection' => 0,
+                // stessa macchina, indirizzo fissato: il certificato puo' essere quello d'origine
+                // (Cloudflare) e non serve verificarlo, come fa WordPress con le sue richieste a se stesso
+                'sslverify'   => false,
+                'headers'     => ['X-Sentinel-Token' => $token, 'Authorization' => 'Bearer ' . $token],
+                'body'        => $body,
+            ]);
+        } finally {
+            remove_action('http_api_curl', $pin, 10);
+        }
+        if (is_wp_error($r) || (int) wp_remote_retrieve_response_code($r) !== 200) {
+            continue;
+        }
+        $d = json_decode((string) wp_remote_retrieve_body($r), true);
+        if (!is_array($d) || !(array_key_exists('ok', $d) || array_key_exists('extensions', $d))) {
+            continue;          // risposta che non e' del connettore (pagina del server, "0")
+        }
+        if ($accept !== null && !$accept($d)) {
+            continue;
+        }
+        return $d;
+    }
+    return null;
+}
+
+/* Un lavoro del pannello, con le stesse funzioni delle chiamate REST. $deps (per i test):
+ * admin (aggiornamento nel backend), update (aggiornamento dentro il giro). */
+function tdpanop_relay_run(array $job, string $hub, array $deps = []): array
+{
+    try {
+        $action = (string) ($job['action'] ?? '');
+        $req = new WP_REST_Request('POST');
+        foreach (['type', 'slug', 'expected', 'backup', 'file', 'kind', 'activate'] as $k) {
+            if (isset($job[$k]) && is_scalar($job[$k])) {
+                $req->set_param($k, (string) $job[$k]);
+            }
+        }
+        $tmp = '';
+        if ($action === 'update') {
+            $r = null;
+            if (in_array((string) ($job['type'] ?? ''), ['plugin', 'theme'], true)) {
+                // prima nel backend (plugin e temi a licenza), poi dentro il giro come prima
+                $r = ($deps['admin'] ?? 'tdpanop_relay_admin_update')($job);
+            }
+            if ($r === null) {
+                $r = ($deps['update'] ?? 'tdpanop_update')($req);
+            }
+        } elseif ($action === 'rollback') {
+            $r = tdpanop_rollback($req);
+        } elseif ($action === 'uninstall') {
+            $r = tdpanop_uninstall($req);
+        } elseif ($action === 'install') {
+            $tmp = tdpanop_relay_download($hub, (string) ($job['download'] ?? ''));
+            if (is_wp_error($tmp)) {
+                return ['ok' => false, 'error' => $tmp->get_error_message()];
+            }
+            $name = basename((string) ($job['filename'] ?? 'package.zip'));
+            $req->set_file_params(['package' => ['name' => $name, 'tmp_name' => $tmp, 'error' => 0, 'size' => (int) @filesize($tmp)]]);
+            $r = tdpanop_install($req);
+        } else {
+            return ['ok' => false, 'error' => 'lavoro sconosciuto: ' . $action];
+        }
+        if ($tmp !== '') {
+            @unlink($tmp);
+        }
+        if (is_wp_error($r)) {
+            return ['ok' => false, 'error' => $r->get_error_message()];
+        }
+        return ($r instanceof WP_REST_Response) ? (array) $r->get_data() : (array) $r;
+    } catch (\Throwable $e) {
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
+}
+
+/* Esito di un giro, a parole (pagina Impostazioni → Sentinel TD). */
+function tdpanop_relay_outcome_text(string $out): string
+{
+    $head = explode(':', $out, 2);
+    $tail = isset($head[1]) ? trim($head[1]) : '';
+    switch ($head[0]) {
+        case 'ping':
+            return tdpanop__('chiamata riuscita: Sentinel TD raggiunge il sito direttamente');
+        case 'report':
+            return $tail !== '' ? sprintf(tdpanop__('modalità firewall: stato mandato, lavori eseguiti: %s'), $tail)
+                : tdpanop__('modalità firewall: stato mandato a Sentinel TD');
+        case 'ping-failed':
+        case 'report-failed':
+            return sprintf(tdpanop__('chiamata non riuscita: %s'), $tail !== '' ? $tail : '?');
+        case 'no-hub':
+            return tdpanop__('indirizzo di Sentinel TD mancante: collega il sito o installa il connettore scaricato dal pannello');
+        case 'busy':
+            return tdpanop__('una chiamata a Sentinel TD è già in corso, riprova fra un minuto');
+        default:
+            return $out;
+    }
+}
+
+/**
+ * Il giro: ping o, in modalita' firewall, stato + lavori + esiti. Torna cosa ha fatto.
+ * $deps (per i test): post, status, run, now, budget.
+ */
+function tdpanop_relay_tick(array $deps = []): string
+{
+    $post   = $deps['post'] ?? 'tdpanop_relay_post';
+    $status = $deps['status'] ?? 'tdpanop_relay_status';
+    $run    = $deps['run'] ?? 'tdpanop_relay_run';
+    $now    = (int) ($deps['now'] ?? time());
+    // un lavoro nuovo comincia solo entro questo tempo: ogni lavoro ha poi i suoi 5 minuti
+    $budget = (float) ($deps['budget'] ?? 150);
+    $force  = !empty($deps['force']);      // pulsante "Chiama Sentinel TD ora"
+
+    if ($force && tdpanop_relay_hub() === '') {
+        return 'no-hub';
+    }
+    if (!$force && !tdpanop_relay_due($now)) {
+        return 'wait';
+    }
+    if (!tdpanop_relay_lock($now)) {
+        return 'busy';
+    }
+    if (!empty($deps['status_now'])) {
+        $st = tdpanop_relay_state();
+        $st['status_at'] = 0;
+        tdpanop_relay_save($st);
+    }
+    if (!empty($deps['nojobs'])) {
+        $budget = -1;
+    }
+    $out = tdpanop_relay_round($post, $status, $run, $now, $budget);
+    // l'esito resta per la pagina Impostazioni → Sentinel TD
+    $st = tdpanop_relay_state();
+    $st['last'] = $out;
+    $st['last_at'] = $now;
+    tdpanop_relay_save($st);
+    return $out;
+}
+
+function tdpanop_relay_round($post, $status, $run, int $now, float $budget): string
+{
+    $hub  = tdpanop_relay_hub();
+    $base = ['url' => home_url('/'), 'connector' => TDPANOP_VERSION, 'cms' => 'wp', 'fp' => tdpanop_relay_fp()];
+    try {
+        ignore_user_abort(true);
+        $st = tdpanop_relay_state();
+        if ($st['mode'] !== 'relay') {
+            $st['ping_at'] = $now;
+            tdpanop_relay_save($st);
+            $d = $post($hub, $base + ['kind' => 'ping'], 15);
+            if (!is_array($d) || isset($d['_error'])) {
+                return 'ping-failed: ' . (is_array($d) ? (string) $d['_error'] : '?');
+            }
+            $st = tdpanop_relay_apply($st, $d);
+            if ($st['mode'] !== 'relay') {
+                return 'ping';
+            }
+        }
+        $st['tick_at'] = $now;
+        tdpanop_relay_save($st);
+
+        $start   = microtime(true);
+        $results = [];
+        $refresh = false;
+        $auto    = null;
+        $wait    = false;
+        $done    = 0;
+        // stato completo solo ogni status_every secondi (Impostazioni del pannello), su richiesta di
+        // ricalcolo e dopo un lavoro; negli altri giri la sola domanda "ci sono lavori?", leggera
+        $needStatus = ($now - (int) $st['status_at']) >= (int) $st['status_every'] - 30;
+        $sentStatus = false;
+        $searched = null;      // una sola ricerca degli aggiornamenti per giro
+        for ($round = 0; $round < 50; $round++) {
+            $over = (microtime(true) - $start) > $budget;
+            $body = $base + [
+                'kind'    => 'report',
+                'jobs_ok' => true,
+                'results' => $results,
+                'wait'    => $wait && !$over,
+                'nojobs'  => $over,
+            ];
+            if ($needStatus || $refresh) {
+                $body['status'] = $status($refresh, $auto);
+                $st['status_at'] = $now;
+                $needStatus = false;
+                $sentStatus = true;
+            }
+            $d = $post($hub, $body, $wait ? 60 : 30);
+            if (!is_array($d) || isset($d['_error'])) {
+                tdpanop_relay_refused($st, $d, $now);
+                return 'report-failed: ' . (is_array($d) ? (string) $d['_error'] : '?');
+            }
+            $results = [];
+            $refresh = false;
+            $st = tdpanop_relay_apply($st, $d);
+            if (isset($d['wp_auto_updates'])) {
+                $auto = (string) $d['wp_auto_updates'];
+            }
+            $jobs = (isset($d['jobs']) && is_array($d['jobs'])) ? $d['jobs'] : [];
+            if (!$jobs) {
+                if (!empty($d['need_status']) && !$sentStatus) {
+                    // il pannello non ha uno stato recente: un altro giro, con lo stato
+                    $needStatus = true;
+                    continue;
+                }
+                break;
+            }
+            foreach ($jobs as $job) {
+                if (!is_array($job) || empty($job['id'])) {
+                    continue;
+                }
+                $id = (string) $job['id'];
+                if ((microtime(true) - $start) > $budget) {
+                    // tempo finito prima di cominciarlo: torna in coda per il prossimo giro
+                    $results[] = ['id' => $id, 'result' => ['_requeue' => true]];
+                    continue;
+                }
+                if (($job['action'] ?? '') === 'refresh') {
+                    // ricerca degli aggiornamenti adesso: lo stato fresco va con l'esito (il ciclo
+                    // degli aggiornamenti lo aspetta per decidere cosa aggiornare). Una sola per giro.
+                    if ($searched === null) {
+                        $searched = $status(true, $auto);
+                    }
+                    $results[] = ['id' => $id, 'result' => ['ok' => true, 'status' => $searched]];
+                    $st['status_at'] = $now;
+                    $sentStatus = true;
+                    continue;
+                }
+                if ((microtime(true) - $start) > $budget) {
+                    // tempo finito prima di cominciarlo: torna in coda per il prossimo giro
+                    $results[] = ['id' => $id, 'result' => ['_requeue' => true]];
+                    continue;
+                }
+                if (function_exists('set_time_limit')) {
+                    @set_time_limit(300);   // ogni lavoro ha i suoi 5 minuti
+                }
+                $results[] = ['id' => $id, 'result' => $run($job, $hub)];
+                $done++;
+                $needStatus = true;    // dopo un lavoro, lo stato nuovo
+            }
+            $wait = true;
+        }
+        return 'report' . ($done ? ':' . $done : '');
+    } finally {
+        tdpanop_relay_unlock();
+    }
+}
+
+add_filter('cron_schedules', function ($s) {
+    // in modalita' firewall: ogni quanto il pannello vuole sentire il sito (Impostazioni)
+    $tdpanop_st = get_option(TDPANOP_RELAY_STATE, []);
+    $tdpanop_tick = is_array($tdpanop_st) ? (int) ($tdpanop_st['tick'] ?? 300) : 300;
+    $s['tdpanop_5min'] = ['interval' => max(60, min(3600, $tdpanop_tick)), 'display' => 'Sentinel TD (modalità firewall)'];
+    $s['tdpanop_15min'] = ['interval' => 900, 'display' => 'Sentinel TD (15 min)'];
+    return $s;
+});
+add_action('tdpanop_relay_tick', function () {
+    try {
+        tdpanop_relay_tick();
+    } catch (\Throwable $e) {
+        // mai rompere il cron del sito
+    }
+});
+add_action('init', function () {
+    if (function_exists('wp_next_scheduled') && !wp_next_scheduled('tdpanop_relay_tick')) {
+        $st = tdpanop_relay_state();
+        wp_schedule_event(time() + 60, $st['mode'] === 'relay' ? 'tdpanop_5min' : 'tdpanop_15min', 'tdpanop_relay_tick');
+    }
+});
+// Se il cron non parte (la richiesta che WordPress fa a se stesso si ferma sul firewall), il giro
+// parte dopo una visita, a pagina gia' consegnata al visitatore: solo dove PHP sa chiudere la
+// risposta prima (PHP-FPM, LiteSpeed) e solo se il giro e' in ritardo di due minuti.
+add_action('shutdown', function () {
+    if ((function_exists('wp_doing_cron') && wp_doing_cron()) || (function_exists('wp_doing_ajax') && wp_doing_ajax())
+        || (defined('REST_REQUEST') && REST_REQUEST) || (defined('WP_CLI') && WP_CLI)) {
+        return;
+    }
+    if (!function_exists('fastcgi_finish_request') && !function_exists('litespeed_finish_request')) {
+        return;
+    }
+    try {
+        if (!tdpanop_relay_due(time(), 120)) {
+            return;
+        }
+        function_exists('fastcgi_finish_request') ? fastcgi_finish_request() : litespeed_finish_request();
+        tdpanop_relay_tick();
+    } catch (\Throwable $e) {
+        // mai rompere una pagina per questo
+    }
+}, 999);
+if (function_exists('register_deactivation_hook')) {
+    register_deactivation_hook(__FILE__, function () {
+        if (function_exists('wp_clear_scheduled_hook')) {
+            wp_clear_scheduled_hook('tdpanop_relay_tick');
+        }
+    });
+}
 
 } // fine blocco condizionale (vedi sopra)

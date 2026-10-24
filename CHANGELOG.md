@@ -1,5 +1,239 @@
 # Changelog
 
+## 2.49.3 — Modalità firewall regolabile, più leggera, e ricerca aggiornamenti dei plugin a licenza (connettori WP 2.41.3, Joomla 1.43.1)
+
+### Added
+- **Impostazioni → Modalità firewall**, con i valori di base scelti per pesare poco sui siti:
+  - *Modalità firewall automatica* (accesa). Spenta, un sito dietro un firewall resta in errore
+    con il motivo, come nella 2.48.
+  - *Il sito chiede i lavori ogni* **5 minuti** (da 1 a 15): è il ritardo massimo con cui parte un
+    aggiornamento. Richiesta leggera, la sola domanda "ci sono lavori?".
+  - *Stato completo ogni* **60 minuti**: versioni e aggiornamenti disponibili. Arriva comunque
+    subito dopo ogni lavoro e dopo ogni ricerca degli aggiornamenti.
+  - *Ping dei connettori se Sentinel non li cerca da* **30 minuti**: è come un sito scopre che
+    deve passare in modalità firewall.
+  - *Avvisa se un sito tace da* **60 minuti**: conta ogni chiamata, anche la domanda leggera.
+  - *Ricerca aggiornamenti ogni* **6 ore**.
+- **Ricerca degli aggiornamenti dal backend del sito (connettore WP 2.41.3).** In modalità
+  firewall lo stato era quello in cache di WordPress, che WordPress aggiorna senza il backend:
+  Elementor Pro e gli altri prodotti a licenza potevano non risultare proprio, anche con una
+  versione nuova. Ora la ricerca la fa il backend del sito (`admin-ajax.php`, puntato alla
+  macchina stessa come gli aggiornamenti), ogni N ore e:
+  - **prima di ogni ciclo di aggiornamenti**: il ciclo aspetta il risultato e aggiorna su dati
+    freschi, plugin a licenza compresi;
+  - dopo "Check ora" (arriva al giro dopo).
+
+### Changed
+- In modalità firewall il connettore manda lo stato completo solo ogni N minuti; negli altri giri
+  solo la domanda, leggera. Il sito è considerato vivo finché chiama, anche solo con la domanda.
+- Valori di base: stato completo ogni 60 minuti invece di 5, cron del connettore WordPress allineato
+  all'intervallo scelto.
+
+### Fixed
+- Modalità firewall, dalla revisione del codice:
+  - con i connettori 2.41.0–2.41.2 e Joomla 1.43.0 la ricerca degli aggiornamenti non risultava mai
+    fatta e se ne sarebbe accodata una ogni 10 minuti: ora conta qualunque esito della ricerca, e
+    una ricerca resta in coda una volta sola finché il sito non la prende;
+  - più richieste di ricerca nello stesso giro: il connettore ne fa una sola;
+  - lo stato arrivato con l'esito di una ricerca viene applicato subito, e uno stato arrivato
+    mentre se n'era appena applicato un altro viene applicato dopo 10 minuti invece di perdersi;
+  - il pannello chiede lo stato completo quando non ne ha uno recente (modalità appena riaccesa,
+    Redis svuotato), invece di segnare il sito come muto mentre chiama ogni 5 minuti;
+  - lo stato viene salvato prima degli esiti nella stessa chiamata, così un ciclo che aspetta una
+    ricerca usa i dati nuovi;
+  - un ciclo lungo vede le chiamate arrivate dopo il suo inizio;
+  - tempi di attesa dei lavori legati all'intervallo scelto (mai meno di 8 minuti, sempre sotto il
+    limite dei lavori del worker); intervallo massimo delle richieste 15 minuti;
+  - "Chiama Sentinel TD ora" è veloce: chiamata e stato completo, i lavori al giro normale (dietro
+    Cloudflare una pagina oltre i 100 secondi viene interrotta);
+  - aggiornamento dal backend: se il primo indirizzo riceve la richiesta senza i dati si prova il
+    secondo; data dell'ultima chiamata anche su WordPress vecchi.
+- **"Giro degli aggiornamenti ogni N ore" non veniva mai salvato**: a ogni salvataggio delle
+  Impostazioni tornava a 1 ora. Ora si salva, e un controllo ha verificato che ogni campo della
+  pagina Impostazioni venga salvato.
+
+### Tests
+- Valori di base e limiti delle impostazioni, tempi passati al connettore, modalità spenta;
+  esito della ricerca che diventa lo stato; ciclo che aspetta la ricerca; ricerca periodica senza
+  doppioni; connettori: domanda leggera, stato completo ogni N minuti e dopo un lavoro; ricerca dal
+  backend con la scelta degli aggiornamenti automatici.
+
+## 2.49.2 — Modalità firewall subito al primo contatto, e "Chiama Sentinel TD ora" (connettore WP 2.41.2)
+
+### Fixed
+- **Un sito già bloccato dal firewall, col connettore nuovo appena installato, restava rosso fino a
+  un'ora.** Il primo ping del connettore riceveva "diretta" (il pannello sapeva solo del connettore
+  vecchio), poi il controllo accendeva la modalità firewall e il connettore la scopriva al ping
+  dopo, mezz'ora più tardi. Ora, se l'ultimo controllo ha trovato un firewall e il connettore che
+  chiama sa fare la modalità firewall, si accende **in quella stessa chiamata**: il connettore manda
+  subito lo stato e il sito torna verde in un minuto.
+
+### Added
+- **Connettore WordPress 2.41.2**: in *Impostazioni → Sentinel TD* l'ora e l'esito dell'ultima
+  chiamata a Sentinel (riuscita, modalità firewall con lavori eseguiti, oppure il motivo per cui non
+  è riuscita) e il pulsante **Chiama Sentinel TD ora**, che chiama subito senza aspettare il giro.
+- Pagina del sito nel pannello: sotto la versione del connettore, quando il connettore ha chiamato
+  Sentinel l'ultima volta.
+
+### Tests
+- `tests/test_relay.py`: primo ping di un sito bloccato dal firewall che accende subito la modalità;
+  sito normale che resta in diretta.
+- `tests/connector_relay.test.php`: pulsante che chiama subito, esito e ora salvati, esito a parole.
+
+## 2.49.1 — Modalità firewall: plugin a licenza aggiornati nel backend (connettore WP 2.41.1)
+
+### Fixed
+- **Elementor Pro, ACF Pro, Gravity Forms, WP Rocket, YOOtheme e gli altri prodotti a licenza in
+  modalità firewall finivano tra quelli "da fare a mano".** Caricano il proprio aggiornatore solo
+  nel backend di WordPress: per questo, senza firewall, Sentinel li aggiorna da `admin-ajax.php`.
+  In modalità firewall il giro gira nel cron o dopo una visita, che backend non sono, e il file di
+  quei prodotti non arrivava.
+  - **Connettore WordPress 2.41.1**: in modalità firewall plugin e temi si aggiornano nel backend
+    del sito, come senza firewall. Il connettore richiama il proprio `admin-ajax.php` puntando
+    direttamente alla macchina su cui gira (127.0.0.1, poi l'indirizzo del server): la richiesta
+    non esce dal server e non incontra il firewall. Stesso token, stessa funzione.
+  - Se il server non risponde così (vhost legato solo all'IP pubblico, cURL assente), si aggiorna
+    dentro il giro come nella 2.41.0. Core e traduzioni restano dentro il giro.
+
+### Tests
+- `tests/connector_relay_admin.test.php`: admin-ajax del sito col token, puntato a 127.0.0.1 e poi
+  all'indirizzo del server, nessun redirect; esito vero tenuto anche se negativo; risposta che non
+  è del connettore ignorata; ripiego dentro il giro; core e traduzioni dentro il giro.
+
+## 2.49.0 — Modalità firewall: se un firewall blocca Sentinel, è il sito a chiamarlo (connettori WP 2.41.0, Joomla 1.43.0). Anteprime davvero ogni N ore
+
+### Added
+- **Modalità firewall, tutta automatica.** Quando il controllo trova un firewall o un antibot
+  davanti al sito (Cloudflare, SiteGround, Sucuri, Imunify360, un IP bannato…), il sito passa da
+  solo in modalità firewall: è il connettore a chiamare Sentinel, perché il firewall filtra chi
+  entra nel sito e non quello che il sito manda fuori. Niente da configurare su Cloudflare o
+  sull'hosting.
+  - Il connettore manda lo stato del sito ogni 5 minuti e prende i lavori in coda: aggiornamenti
+    (anche quelli del ciclo automatico, con controllo della home prima e dopo), ricalcolo,
+    ripristini, installazioni in blocco e giro notturno del connettore, rimozioni, pacchetti
+    Balbooa su Joomla. Partono al contatto successivo, entro pochi minuti.
+  - Appena accesa, il sito resta "da confermare" (nessun avviso) finché il connettore non la
+    scopre al suo prossimo ping, al massimo mezz'ora. La modalità si salva subito, anche se il
+    controllo che l'ha accesa finisce in errore.
+  - Ogni 3 ore Sentinel riprova la strada diretta: se passa, la modalità si spegne da sola.
+  - Pagina del sito: avviso "Modalità firewall" con l'ultimo contatto; nell'elenco l'etichetta
+    "firewall". Registro eventi: accensione e spegnimento.
+  - Il connettore che non si fa sentire da troppo (sito giù, cron fermo) diventa "Connettore non
+    risponde", con l'avviso di sempre.
+  - Il sito con il connettore vecchio dice cosa fare: "installa a mano sul sito il connettore
+    WordPress 2.41.0 o successivo e Sentinel passerà da solo" (il giro notturno non ci arriva,
+    perché il firewall blocca anche lui).
+- **Connettore WordPress 2.41.0 e Joomla 1.43.0.** Imparano l'indirizzo del pannello dalle sue
+  chiamate (`X-Sentinel-Hub`); se Sentinel non li cerca da mezz'ora mandano un ping leggero a
+  `/api/agent/relay`, che dice in che modalità stare. WordPress usa il cron di WordPress e, se la
+  richiesta che WordPress fa a se stesso si ferma sul firewall, il giro dopo una visita a pagina
+  già consegnata. Joomla non ha un cron suo: giro dopo una visita, e gli aggiornamenti solo dove
+  PHP sa chiudere prima la risposta al visitatore (PHP-FPM, LiteSpeed). Pagina Impostazioni →
+  Sentinel TD (WordPress) e plugin (Joomla) mostrano modalità e indirizzo del pannello.
+- `POST /api/agent/relay` e `GET /api/agent/relay/file/{id}`, autenticati col token del sito. Un
+  sito clonato (staging, demo) con lo stesso token ma un altro dominio viene rifiutato.
+
+### Fixed
+- **Anteprime che non si aggiornavano per giorni, e "Aggiorna" che girava a vuoto.** Lo shooter
+  fotografa una pagina alla volta, ma riceveva fino a 4 richieste insieme, scaglionate di 12
+  secondi come se uno scatto durasse meno di così. Con video e verifiche antibot ne dura 30-60: la
+  fila cresceva, le chiamate in fondo scadevano dopo 2 minuti, l'anteprima non veniva segnata e il
+  tentativo successivo arrivava dopo l'intervallo intero. Sempre gli stessi siti in fondo alla fila
+  restavano vecchi di giorni. "Aggiorna" a mano, con una foto del sito già in coda, veniva scartato
+  in silenzio.
+  - Ora c'è **una fila sola e un solo esecutore**: uno scatto alla volta, nessuna chiamata resta in
+    attesa davanti allo shooter. "Aggiorna" a mano passa **in testa alla fila**.
+  - Ogni tentativo lascia l'esito sul sito: nella pagina del sito "foto X fa · controllata Y fa" e,
+    se l'ultimo tentativo non è riuscito, il motivo (shooter non raggiungibile, scatto oltre i 3
+    minuti…). Anche nel registro eventi, una volta per motivo.
+  - Scatto non riuscito: nuovo tentativo dopo **un'ora**, non dopo l'intervallo intero.
+  - "Aggiorna" si ferma con l'esito: aggiornata, respinta dall'antibot o non riuscita col motivo.
+  - "Rigenera tutte adesso" usa la stessa fila; la stima dei tempi è di circa 30 secondi a sito.
+
+### Changed
+- La modalità firewall parte **solo** quando risponde un firewall riconosciuto e il connettore del
+  sito sa chiamare Sentinel. Una pagina di manutenzione, un 503 o un 429 di passaggio, un server
+  lento, un token rifiutato o un connettore disattivato restano quelli di sempre. Con il connettore
+  vecchio niente modalità firewall né etichetta: solo il messaggio con cosa fare.
+- Mentre la modalità si accende, nessuna richiesta in più al firewall che blocca il pannello
+  (insistere può far bannare l'IP).
+- Il connettore che tace in modalità firewall: dopo 60 minuti senza stato (i siti con poche visite
+  di notte fanno girare il cron di rado) la controprova sulla home decide: sito giù solo se la home
+  non risponde o risponde 5xx, perché il firewall risponde 403 o 202 anche col sito giù.
+- Sicurezza: il connettore chiama solo un pannello **https**, senza seguire redirect; ogni
+  installazione ha un'impronta (cartella del sito) e una copia del sito con lo stesso token e lo
+  stesso indirizzo (vecchio server dopo un trasloco, copia locale) viene rifiutata, a meno che
+  quella nota taccia da 6 ore. Dopo un trasloco, *Modifica → Salva* sul sito fa dimenticare la
+  copia nota.
+- Il connettore comincia un lavoro solo entro 150 secondi dall'inizio del giro e ogni lavoro ha i
+  suoi 5 minuti; quelli non cominciati tornano in coda. Un giro alla volta (GET_LOCK di MySQL su
+  WordPress). Se il pannello lo rifiuta (sito tolto, token cambiato) torna al solo ping.
+- Durante un ciclo di aggiornamenti in modalità firewall il controllo normale non gira in
+  parallelo (riscriverebbe le estensioni che il ciclo sta usando); il ciclo ha 25 minuti, i lavori
+  non superano quel tempo e quelli rimasti passano al giro dopo. La pausa tra un aggiornamento e
+  l'altro è al massimo 10 secondi, così il connettore prende subito il successivo.
+- Joomla senza `fastcgi_finish_request` (PHP non sa chiudere prima la risposta al visitatore): solo
+  stato, con chiamate brevi; il pannello lo sa e dice di aggiornare dal backend invece di aspettare.
+- WordPress: cron del connettore ogni 15 minuti fuori dalla modalità firewall (ogni 5 dentro);
+  opzioni piccole caricate con le altre, nessuna query in più sulle pagine.
+- I plugin a licenza che caricano il proprio aggiornatore solo nel backend (es. Elementor Pro) in
+  modalità firewall finiscono tra quelli "da fare a mano", come quando il pacchetto non arriva.
+- Ripristino a mano su un sito in modalità firewall: va in coda e lo Storico si scrive quando
+  arriva l'esito. Rimozione in blocco: in coda. "Prendi da un sito" e l'autologin non sono
+  disponibili in modalità firewall (si apre la normale pagina di login).
+
+### Tests
+- `tests/test_screenshot_schedule.py`: fila delle anteprime, richiesta a mano in testa, un solo
+  scatto alla volta con un worker arq vero, motivo dell'errore salvato e nuovo tentativo dopo un'ora,
+  lavori della versione precedente che passano dalla fila.
+- `tests/test_relay.py`: errori normali che non accendono la modalità, nessuna richiesta al firewall
+  durante l'accensione, ping che non prende lavori, altra copia del sito rifiutata, lavoro rimesso in
+  coda, attesa che finisce se la modalità si spegne, niente controllo in parallelo agli
+  aggiornamenti, Joomla senza lavori; ping, sito clonato rifiutato, report con stato e lavori, giro completo di
+  un aggiornamento col connettore, lavoro non preso in tempo e tolto dalla coda, zip solo per il
+  suo sito, passaggio automatico alla modalità firewall, messaggi col connettore vecchio o senza
+  indirizzo del pannello, stato letto senza chiamare il sito, connettore muto, ritorno alla strada
+  diretta, server lento che non attiva la modalità.
+- `tests/connector_relay.test.php` (WordPress) e `tests/connector_relay_joomla.test.php` (Joomla):
+  indirizzo imparato, ping solo quando Sentinel tace, giro con lavori ed esiti, tempi, lucchetto.
+
+## 2.48.0 — Siti dietro Cloudflare, SiteGround e altri firewall
+
+### Fixed
+- **Le chiamate ai siti partivano con la firma della libreria, `python-httpx`**, la prima che
+  Cloudflare, l'antibot di SiteGround, Imunify360 & co. trattano da robot. Un sito messo dietro
+  uno di questi smetteva di rispondere a Sentinel, mentre ai browser rispondeva normalmente.
+  Ora controllo, aggiornamenti, installazioni, ripristini, autologin e controprova sulla home si
+  presentano come `Mozilla/5.0 (compatible; SentinelTD/<versione>; +https://www.tastieredigitali.it)`.
+  `SENTINEL_USER_AGENT` nel `.env` per usarne un'altra.
+- **Redirect fra `sito.it` e `www.sito.it`**: il token veniva tolto, come per un dominio
+  diverso, e il connettore rispondeva 401 ("accesso rifiutato… firewall che blocca Sentinel").
+  Succede spesso dopo un cambio di hosting. Le due forme ora sono lo stesso sito; verso un dominio
+  diverso il token continua a non uscire.
+
+### Added
+- **Riconoscimento del firewall davanti al sito.** Se al posto del connettore risponde la pagina di
+  Cloudflare, SiteGround, Sucuri, Imunify360, Wordfence, ModSecurity, AWS WAF, Akamai o
+  DDoS-Guard, il sito dice "Connettore: bloccato da SiteGround davanti al sito (HTTP 202): …"
+  con cosa fare, invece di "risposta senza i dati del connettore" o di un sito offline. Conta come
+  problema del connettore (avviso "Connettore non risponde", nessun episodio offline) e non
+  raddoppia la richiesta sull'altra forma dell'indirizzo REST. Anche gli aggiornamenti bloccati lo
+  dicono nello Storico, al posto di "Client error 403".
+- **Intestazioni extra per sito** (*Modifica sito → Intestazioni extra verso il connettore*), una
+  `Nome: valore` per riga: per una regola di Cloudflare che lascia passare Sentinel o per i service
+  token di Cloudflare Access. Vanno solo a quel sito, non escono mai verso un altro dominio, e come
+  il token si vedono solo nel dettaglio del sito. Intestazioni che Sentinel gestisce da sé
+  (`Authorization`, `X-Sentinel-Token`, `Host`, `Cookie`…) non si possono sovrascrivere.
+
+### Connettori
+- Nessun cambiamento: WordPress 2.40.0 e Joomla 1.42.0 restano quelli. Basta aggiornare il pannello.
+
+### Tests
+- `tests/test_firewall.py`: pagina dell'antibot di SiteGround (202 con sgcaptcha), Cloudflare per
+  intestazione e per pagina, Sucuri, Imunify360, Wordfence, ModSecurity; un 403 JSON di WordPress
+  resta "accesso rifiutato"; firma e intestazioni extra nelle richieste; token che passa da
+  `sito.it` a `www.sito.it` ma non verso un altro dominio; validazione delle intestazioni.
+
 ## 2.47.0 — Giro degli aggiornamenti ogni N ore
 
 ### Added

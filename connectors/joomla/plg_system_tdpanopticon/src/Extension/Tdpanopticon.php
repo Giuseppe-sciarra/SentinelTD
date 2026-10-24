@@ -8,6 +8,7 @@ use Joomla\CMS\Factory;
 use Joomla\CMS\Updater\Updater;
 use Joomla\CMS\Installer\Installer;
 use Joomla\CMS\Installer\InstallerHelper;
+use TastiereDigitali\Plugin\System\Tdpanopticon\Support\Relay;
 
 
 final class Tdpanopticon extends CMSPlugin
@@ -144,8 +145,185 @@ final class Tdpanopticon extends CMSPlugin
         if (!$this->checkAuth()) {
             throw new \RuntimeException('Unauthorized', 401);
         }
+        $this->relayNoteContact();
+        return $this->runTask(Factory::getApplication()->getInput()->getCmd('task', 'status'));
+    }
 
-        $task = Factory::getApplication()->getInput()->getCmd('task', 'status');
+    /* -----------------------------------------------------------------------
+     * Modalita' firewall (1.43.0, vedi Support/Relay.php): quando un firewall davanti al sito
+     * blocca Sentinel TD, e' il connettore a chiamarlo. Joomla non ha un cron che giri da solo:
+     * il giro parte dopo una visita al sito, a pagina gia' consegnata al visitatore.
+     * --------------------------------------------------------------------- */
+    private function relay(): Relay
+    {
+        $tmp = rtrim((string) Factory::getApplication()->get('tmp_path', JPATH_ROOT . '/tmp'), '/\\');
+        return new Relay($tmp . '/tdpanop_relay.json');
+    }
+
+    /** Indirizzo del pannello: imparato dalle chiamate di Sentinel, o scritto nel plugin. */
+    private function relayHub(): string
+    {
+        $hub = Relay::cleanHub((string) $this->params->get('relay_hub', ''));
+        if ($hub === '') {
+            // salvato da poco ma la cache dei plugin mostra ancora il valore vecchio
+            $saved = (string) ($this->relay()->state()['hub_saved'] ?? '');
+            $hub = Relay::cleanHub($saved);
+        }
+        return $hub;
+    }
+
+    /** Sentinel ha chiamato (token valido): appunto del contatto e dell'indirizzo del pannello. */
+    private function relayNoteContact(): void
+    {
+        try {
+            $relay = $this->relay();
+            $relay->noteContact(time());
+            $hub = Relay::cleanHub((string) ($_SERVER['HTTP_X_SENTINEL_HUB'] ?? ''));
+            if ($hub !== '' && $hub !== $this->relayHub() && !$relay->hubSaved($hub)) {
+                $this->persistParam('relay_hub', $hub);
+                $this->params->set('relay_hub', $hub);
+                $relay->markHubSaved($hub);
+                try {
+                    // cache dei plugin di Joomla: senza, il valore nuovo si vede solo quando scade
+                    Factory::getCache('com_plugins', '')->clean();
+                } catch (\Throwable $e) {
+                    // si vedra' alla scadenza della cache
+                }
+            }
+        } catch (\Throwable $e) {
+            // mai bloccare una chiamata del pannello per questo
+        }
+    }
+
+    private function persistParam(string $key, string $value): void
+    {
+        $db = Factory::getContainer()->get('DatabaseDriver');
+        $where = function ($q) use ($db) {
+            return $q->where($db->quoteName('type') . ' = ' . $db->quote('plugin'))
+                ->where($db->quoteName('folder') . ' = ' . $db->quote('system'))
+                ->where($db->quoteName('element') . ' = ' . $db->quote('tdpanopticon'));
+        };
+        $db->setQuery($where($db->getQuery(true)->select($db->quoteName('params'))->from($db->quoteName('#__extensions'))));
+        $params = json_decode((string) $db->loadResult(), true);
+        if (!is_array($params)) {
+            $params = [];
+        }
+        $params[$key] = $value;
+        $db->setQuery($where($db->getQuery(true)->update($db->quoteName('#__extensions'))
+            ->set($db->quoteName('params') . ' = ' . $db->quote(json_encode($params)))));
+        $db->execute();
+    }
+
+    public function onAfterRespond(): void
+    {
+        try {
+            $app = Factory::getApplication();
+            if (!$app->isClient('site')) {
+                return;
+            }
+            $relay = $this->relay();
+            $hub = $this->relayHub();
+            if (!$relay->due(time(), $hub)) {
+                return;
+            }
+            // il visitatore ha gia' la sua pagina: si chiude la risposta prima del giro. Dove PHP
+            // non lo sa fare, solo il ping e lo stato (veloci), mai gli aggiornamenti.
+            $finish = false;
+            if (function_exists('fastcgi_finish_request')) {
+                $finish = (bool) fastcgi_finish_request();
+            } elseif (function_exists('litespeed_finish_request')) {
+                $finish = (bool) litespeed_finish_request();
+            }
+            ignore_user_abort(true);
+            $relay->tick([
+                'hub'     => $hub,
+                'url'     => rtrim(\Joomla\CMS\Uri\Uri::root(), '/') . '/',
+                'version' => $this->connectorVersion(),
+                'fp'      => substr(sha1('joomla|' . JPATH_ROOT), 0, 16),
+                'jobs'    => $finish,
+                'post'    => function ($hub, $body, $timeout) {
+                    return $this->relayPost($hub, $body, $timeout);
+                },
+                'status'  => function ($refresh) {
+                    if ($refresh) {
+                        $this->refreshUpdates();
+                    }
+                    return $this->runTask('status');
+                },
+                'run'     => function ($job, $hub) {
+                    return $this->relayRun($job, $hub);
+                },
+            ]);
+        } catch (\Throwable $e) {
+            // mai rompere una pagina per questo
+        }
+    }
+
+    private function relayPost(string $hub, array $body, int $timeout): array
+    {
+        try {
+            $token = (string) $this->params->get('token', '');
+            // senza seguire i redirect: il token non va a un altro indirizzo
+            $resp = \Joomla\CMS\Http\HttpFactory::getHttp(['follow_location' => false])->post($hub . '/api/agent/relay', json_encode($body), [
+                'Content-Type'     => 'application/json',
+                'Accept'           => 'application/json',
+                'X-Sentinel-Token' => $token,
+                'User-Agent'       => 'SentinelTD-Agent/' . $this->connectorVersion() . ' (Joomla)',
+            ], $timeout);
+            $d = json_decode((string) $resp->body, true);
+            if ((int) $resp->code !== 200 || !is_array($d)) {
+                return ['_error' => 'HTTP ' . (int) $resp->code, '_code' => (int) $resp->code];
+            }
+            return $d;
+        } catch (\Throwable $e) {
+            return ['_error' => $e->getMessage()];
+        }
+    }
+
+    /** Un lavoro del pannello, con le stesse funzioni di com_ajax. */
+    private function relayRun(array $job, string $hub): array
+    {
+        $in = Factory::getApplication()->getInput();
+        $in->set('extype', (string) ($job['type'] ?? ''));
+        $in->set('slug', (string) ($job['slug'] ?? ''));
+        $in->set('activate', (int) ($job['activate'] ?? 1));
+        $action = (string) ($job['action'] ?? '');
+        if ($action === 'update') {
+            return $this->doUpdate();
+        }
+        if ($action === 'vendorupdate') {
+            return $this->doVendorUpdate();
+        }
+        if ($action === 'uninstall') {
+            return $this->doUninstall();
+        }
+        if ($action === 'install') {
+            $path = (string) ($job['download'] ?? '');
+            if (strpos($path, '/api/agent/relay/file/') !== 0) {
+                return ['ok' => false, 'error' => 'indirizzo del pacchetto non valido', 'new' => ''];
+            }
+            $resp = \Joomla\CMS\Http\HttpFactory::getHttp(['follow_location' => false])->get($hub . $path,
+                ['X-Sentinel-Token' => (string) $this->params->get('token', '')], 300);
+            if ((int) $resp->code !== 200 || (string) $resp->body === '') {
+                return ['ok' => false, 'error' => 'pacchetto non scaricato da Sentinel TD (HTTP ' . (int) $resp->code . ')', 'new' => ''];
+            }
+            $tmpDir = rtrim((string) Factory::getApplication()->get('tmp_path'), '/') ?: sys_get_temp_dir();
+            $tmp = $tmpDir . '/tdrelay_' . uniqid('', true) . '.zip';
+            if (@file_put_contents($tmp, (string) $resp->body) === false) {
+                return ['ok' => false, 'error' => 'impossibile scrivere il pacchetto nella tmp', 'new' => ''];
+            }
+            try {
+                $name = basename((string) ($job['filename'] ?? 'package.zip'));
+                return $this->doInstall(['name' => $name, 'tmp_name' => $tmp, 'error' => 0, 'size' => (int) @filesize($tmp)]);
+            } finally {
+                @unlink($tmp);
+            }
+        }
+        return ['ok' => false, 'error' => 'lavoro non disponibile su Joomla: ' . $action, 'new' => ''];
+    }
+
+    private function runTask(string $task)
+    {
         if ($task === 'update') {
             return $this->doUpdate();
         }
@@ -656,13 +834,14 @@ final class Tdpanopticon extends CMSPlugin
      * Usa l'Installer nativo di Joomla, quindi e' equivalente a "Estensioni > Installa > Carica".
      * Il core Joomla NON e' installabile da qui (e' un pacchetto speciale, va fatto a mano).
      */
-    private function doInstall(): array
+    private function doInstall(?array $file = null): array
     {
         $app      = Factory::getApplication();
         $activate = (int) $app->getInput()->getInt('activate', 1);
 
-        // --- recupera il file caricato (campo "package") ---
-        $file = $app->getInput()->files->get('package', null, 'raw');
+        // --- recupera il file caricato (campo "package"); in modalita' firewall lo zip
+        //     scaricato da Sentinel ---
+        $file = $file ?? $app->getInput()->files->get('package', null, 'raw');
         if (empty($file) || !is_array($file) || empty($file['tmp_name'])) {
             return ['ok' => false, 'error' => 'Nessun file ricevuto (campo "package")', 'new' => ''];
         }

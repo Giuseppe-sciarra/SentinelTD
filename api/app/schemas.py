@@ -15,6 +15,7 @@ class SiteIn(BaseModel):
     auto_update: bool = False
     poll_interval_minutes: int = 180
     notifications_silenced: bool = False
+    extra_headers: str = ""       # "Nome: valore" per riga, verso il connettore (firewall davanti al sito)
 
 
 class SiteUpdate(BaseModel):
@@ -29,6 +30,7 @@ class SiteUpdate(BaseModel):
     auto_update: bool | None = None
     poll_interval_minutes: int | None = None
     notifications_silenced: bool | None = None
+    extra_headers: str | None = None
 
 
 class ExtensionOut(BaseModel):
@@ -77,9 +79,13 @@ class SiteOut(BaseModel):
     shot_at: datetime | None
     shot_attempted_at: datetime | None = None
     shot_blocked_at: datetime | None = None
+    shot_error: str = ""          # ultimo tentativo di anteprima non riuscito: il motivo
     # versione del connettore che gira sul sito e dove gira (WP: "mu", "plugin:<cartella>", "other")
     connector_version: str = ""
     connector_mode: str = ""
+    # modalita' firewall (2.49.0): e' il sito a chiamare Sentinel
+    relay_mode: bool = False
+    relay_seen_at: datetime | None = None
 
 
 class SiteDetailOut(SiteOut):
@@ -87,6 +93,8 @@ class SiteDetailOut(SiteOut):
     # dettaglio del singolo sito, mai nella lista /api/sites: limita la superficie
     # di leak (un solo sito alla volta, e solo quando apri il pannello dettaglio).
     token: str
+    # come il token: possono contenere segreti (service token di Cloudflare Access), solo nel dettaglio
+    extra_headers: str = ""
     extensions: list[ExtensionOut] = []
     updates_unverified_at: datetime | None = None
     locked: list[str] = []   # componenti bloccati alla versione installata

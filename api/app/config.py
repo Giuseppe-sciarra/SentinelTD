@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     STATUS_CHECK_CONCURRENCY: int = Field(default=2, ge=1, le=4)
     STATUS_CHECK_SERVER_PAUSE_SECONDS: float = Field(default=2, ge=0, le=60)
     STATUS_CHECK_QUEUE_SECONDS: int = Field(default=45, ge=1, le=120)
+    # Firma delle chiamate ai siti (connettore, controprova sulla home). Vuoto = quella di
+    # Sentinel ("Mozilla/5.0 (compatible; SentinelTD/<versione>; +...)"). Prima della 2.48.0
+    # era quella della libreria, "python-httpx", bloccata da molti firewall e antibot.
+    SENTINEL_USER_AGENT: str = ""
 
     # --- Conferma offline (debounce) ---
     # Prima di marcare un sito "offline" lo si ricontrolla piu' volte a distanza, cosi'

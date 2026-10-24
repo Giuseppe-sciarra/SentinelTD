@@ -31,6 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import Site, Extension
 from .config import settings
 from .check_gate import CheckDeferred, status_slot, close as close_check_gate
+from . import relay
+from .site_http import (firewall_block, firewall_reason, same_site_host, secret_header_names,
+                        site_client, site_headers, user_agent)
 
 log = logging.getLogger("sentinel.connectors")
 
@@ -63,6 +66,50 @@ class ConnectorReplyError(ValueError):
     def __init__(self, message: str, *, ambiguous: bool = False):
         super().__init__(message)
         self.ambiguous = ambiguous
+
+
+class FirewallBlocked(ConnectorReplyError):
+    """Al posto del connettore ha risposto un firewall o un antibot davanti al sito (Cloudflare,
+    SiteGround, Sucuri...). Il sito c'e', e' Sentinel a non passare: errore "Connettore: ...",
+    mai "sito non raggiungibile", e niente secondo tentativo con l'altra forma dell'indirizzo
+    REST (davanti c'e' lo stesso firewall)."""
+
+    def __init__(self, name: str, status_code: int, hint: str = "", needed: str = ""):
+        super().__init__(firewall_reason(name, status_code, hint, needed), ambiguous=False)
+        self.firewall = name
+        self.status_code = status_code
+
+
+class RelayStarting(CheckDeferred):
+    """Modalita' firewall appena accesa: il connettore la scopre al suo prossimo ping (entro
+    mezz'ora). Non e' un errore: il sito resta "da confermare", senza avvisi."""
+
+    def __init__(self):
+        super().__init__("modalità firewall in attivazione: il connettore si farà sentire entro mezz'ora")
+
+
+class RelaySilent(ConnectorReplyError):
+    """Modalita' firewall: il connettore non manda lo stato del sito da troppo tempo. Ambiguo:
+    puo' essere il sito giu' o il suo cron fermo, decide la controprova sulla home dopo la
+    finestra di conferma (come per una pagina che non e' del connettore)."""
+
+    def __init__(self, minutes: int):
+        super().__init__(f"in modalità firewall il sito non si fa sentire da {minutes} minuti: "
+                         f"sito giù o cron del sito fermo", ambiguous=True)
+
+
+def check_firewall(r: httpx.Response) -> None:
+    """Solleva FirewallBlocked se la risposta e' la pagina di un firewall/antibot."""
+    name = firewall_block(r)
+    if name:
+        raise FirewallBlocked(name, r.status_code)
+
+
+def raise_for_site(r: httpx.Response) -> None:
+    """raise_for_status() delle chiamate al connettore, che prima riconosce i firewall: cosi'
+    un aggiornamento bloccato dice "bloccato da Cloudflare" e non "Client error 403"."""
+    check_firewall(r)
+    r.raise_for_status()
 
 
 def connector_problem(error: str | None) -> bool:
@@ -208,15 +255,18 @@ _STATUS_LIMIT_LOOP = None
 
 
 _EXPECTED_HOST: contextvars.ContextVar[str] = contextvars.ContextVar("sentinel_expected_host", default="")
+_SECRET_NAMES: contextvars.ContextVar[frozenset] = contextvars.ContextVar(
+    "sentinel_secret_names", default=frozenset({"authorization", "x-sentinel-token"}))
 
 
 async def _strip_token_offsite(request: httpx.Request) -> None:
-    """Hook di httpx: su una richiesta verso un host diverso da quello del sito (redirect altrove)
-    toglie Authorization e X-Sentinel-Token."""
+    """Hook di httpx: su una richiesta verso un host che non e' il sito (redirect altrove) toglie
+    Authorization, X-Sentinel-Token e le intestazioni extra del sito. www.sito.it e sito.it sono
+    lo stesso sito (2.48.0): prima il redirect fra le due forme toglieva il token (HTTP 401)."""
     expected = _EXPECTED_HOST.get()
-    if expected and (request.url.host or "").lower() != expected:
-        request.headers.pop("Authorization", None)
-        request.headers.pop("X-Sentinel-Token", None)
+    if expected and not same_site_host(request.url.host, expected):
+        for name in _SECRET_NAMES.get():
+            request.headers.pop(name, None)
 
 
 async def status_client():
@@ -246,7 +296,7 @@ async def close_status_client():
             pass
 
 
-async def _status_get(client, endpoint, headers, timeout):
+async def _status_get(client, endpoint, headers, timeout, secret_names=None):
     global _STATUS_LIMIT, _STATUS_LIMIT_LOOP
     loop = asyncio.get_running_loop()
     if _STATUS_LIMIT is None or _STATUS_LIMIT_LOOP is not loop:
@@ -260,6 +310,7 @@ async def _status_get(client, endpoint, headers, timeout):
     async with status_slot(endpoint, budget):
         async with _STATUS_LIMIT:
             _EXPECTED_HOST.set((httpx.URL(endpoint).host or "").lower())
+            _SECRET_NAMES.set(frozenset(secret_names or {"authorization", "x-sentinel-token"}))
             try:
                 return await asyncio.wait_for(client.get(endpoint, headers=headers, timeout=timeout), timeout=budget)
             except asyncio.TimeoutError as exc:
@@ -308,7 +359,126 @@ async def schedule_dns_recheck(redis, site_id: int):
         log.warning("Ricontrollo DNS non accodato (id=%s): %s", site_id, type(exc).__name__)
 
 
+async def _persist_relay_mode(site, on: bool) -> None:
+    """La modalita' si salva subito e da sola: il controllo che la cambia puo' finire in errore,
+    e poll_site annulla le modifiche del sito durante la finestra di conferma."""
+    try:
+        from sqlalchemy import update
+        from .db import SessionLocal
+        async with SessionLocal() as s2:
+            await s2.execute(update(Site).where(Site.id == site.id).values(relay_mode=on))
+            await s2.commit()
+    except Exception as ex:  # noqa: BLE001
+        log.warning("Modalita' firewall non salvata (id=%s): %s", getattr(site, "id", None), type(ex).__name__)
+
+
+async def _relay_switch(site, on: bool, why: str) -> None:
+    if bool(getattr(site, "relay_mode", False)) == on:
+        return
+    site.relay_mode = on
+    await _persist_relay_mode(site, on)
+    if on:
+        try:
+            await relay.mark_switch(site.id)
+        except Exception:  # noqa: BLE001
+            pass
+    log.warning("MODALITA' FIREWALL %s '%s' (id=%s): %s", "ATTIVA" if on else "SPENTA",
+                getattr(site, "name", ""), getattr(site, "id", None), why[:200])
+    try:
+        from .eventlog import record_now
+        msg = ("Modalità firewall attiva: la strada diretta è chiusa, è il sito a chiamare Sentinel" if on
+               else "Modalità firewall spenta: Sentinel raggiunge di nuovo il sito direttamente")
+        await record_now("connectors", "warn" if on else "ok", msg, site=site, details={"motivo": why[:300]})
+    except Exception:  # noqa: BLE001
+        pass
+    if not on:
+        try:
+            await relay.clear(site.id)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def fetch_status(site: Site, timeout: float = 20.0, force: bool = False) -> dict:
+    """Stato del sito: dalla strada diretta o, in modalita' firewall (vedi relay.py), da quello
+    che il connettore manda a Sentinel.
+
+    La modalita' firewall si accende SOLO quando risponde un firewall riconosciuto (pagina di
+    Cloudflare, SiteGround, Sucuri...) e il connettore del sito sa chiamare Sentinel. Una pagina
+    di manutenzione, un 503 o un 429 di passaggio, un server lento, un token rifiutato o un
+    connettore disattivato restano quelli di sempre."""
+    await relay.refresh_config()
+    if relay.active(site):
+        if not await relay.direct_retry_due(site.id):
+            return await _relay_status(site, force)
+        # ogni 3 ore si riprova la strada diretta: se passa si torna come prima
+        try:
+            data = await _fetch_status_direct(site, timeout, force)
+        except Exception as exc:  # noqa: BLE001
+            log.info("MODALITA' FIREWALL '%s' (id=%s): strada diretta ancora chiusa (%s)",
+                     site.name, site.id, str(exc)[:160])
+            return await _relay_status(site, force)
+        await _relay_switch(site, False, "controllo diretto riuscito")
+        return data
+    if relay.ENABLED and getattr(site, "relay_mode", False) and await relay.switching(site.id):
+        # appena accesa, connettore non ancora sentito: nessuna richiesta in piu' al firewall
+        # che blocca il pannello (insistere puo' far bannare l'IP)
+        raise RelayStarting()
+    try:
+        data = await _fetch_status_direct(site, timeout, force)
+    except FirewallBlocked as exc:
+        if not relay.ENABLED:
+            raise                 # modalita' firewall spenta in Impostazioni: come nella 2.48
+        needed = relay.needed_connector(site)
+        if not relay.connector_can_relay(site):
+            # il connettore non sa chiamare Sentinel: niente modalita' firewall, si dice cosa fare
+            raise FirewallBlocked(exc.firewall, exc.status_code, "connector", needed) from exc
+        if not await relay.hub_url():
+            raise FirewallBlocked(exc.firewall, exc.status_code, "hub", needed) from exc
+        await _relay_switch(site, True, str(exc))
+        if relay.seen_recently(site):
+            fresh = await relay.status_for(site)
+            if fresh is not None:
+                if force:
+                    await relay.request_refresh(site.id)
+                return fresh
+        if await relay.switching(site.id):
+            raise RelayStarting() from exc
+        # modalita' accesa da tempo, ma il connettore non chiama
+        raise FirewallBlocked(exc.firewall, exc.status_code, "nocall", needed) from exc
+    if getattr(site, "relay_mode", False):
+        # modalita' voluta ma connettore muto, e intanto la strada diretta si e' riaperta
+        await _relay_switch(site, False, "controllo diretto riuscito")
+    return data
+
+
+async def _relay_status(site: Site, force: bool) -> dict:
+    """Stato in modalita' firewall. force (ciclo degli aggiornamenti, Check ora): ricerca forzata
+    degli aggiornamenti sul sito, dal suo backend. Dentro il ciclo degli aggiornamenti si aspetta il
+    risultato, cosi' si aggiorna su dati freschi (plugin a licenza compresi); altrove (Check ora dal
+    pannello) va in coda e lo stato nuovo arriva al giro dopo. Senza force, ricerca periodica ogni
+    N ore (Impostazioni → Modalita' firewall)."""
+    if force:
+        if relay.cycle_time_left() is not None and not await relay.jobs_blocked(site.id):
+            d = await relay.call(site, "refresh", {})
+            status = d.get("status") if isinstance(d, dict) else None
+            if isinstance(status, dict) and status.get("extensions") is not None:
+                return status
+            if d is None:
+                log.warning("MODALITA' FIREWALL '%s' (id=%s): ricerca degli aggiornamenti non arrivata, uso l'ultimo stato",
+                            site.name, site.id)
+        else:
+            await relay.request_refresh(site.id)
+    elif await relay.refresh_due(site.id):
+        await relay.request_refresh(site.id)
+    data = await relay.status_for(site)
+    if data is None:
+        if await relay.switching(site.id):
+            raise RelayStarting()
+        raise RelaySilent(relay.minutes_since_seen(site))
+    return data
+
+
+async def _fetch_status_direct(site: Site, timeout: float = 20.0, force: bool = False) -> dict:
     """Tentativi configurabili distanziati solo per errori di connessione, prima di cambiare stato.
 
     Gli errori DNS non attivano l'URL REST alternativo: il dominio e' lo stesso.
@@ -367,7 +537,7 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
     else:  # joomla
         task = "refresh" if force else "status"
         endpoint = f"{site.url.rstrip('/')}/index.php?option=com_ajax&plugin=tdpanopticon&group=system&format=json&task={task}&_={cb}"
-    headers = {
+    headers = site_headers(site, {
         "Authorization": f"Bearer {site.token}",
         # copia del token in un header che nessun hosting filtra: alcuni Apache in
         # CGI/FastCGI buttano via Authorization prima di PHP (401 rest_forbidden fisso)
@@ -375,13 +545,21 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
         "Accept": "application/json",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-    }
+    })
+    # indirizzo pubblico del pannello: il connettore (WP 2.41+, Joomla 1.43+) lo impara da qui e
+    # sa dove chiamare se un firewall chiude la strada diretta (modalita' firewall)
+    hub = await relay.hub_url()
+    if hub:
+        headers["X-Sentinel-Hub"] = hub
+    secrets_ = secret_header_names(site)
     client = await status_client()
     request_timeout = httpx.Timeout(timeout, connect=min(timeout, settings.STATUS_CHECK_CONNECT_SECONDS))
     try:
-        r = await _status_get(client, endpoint, headers, request_timeout)
-        r.raise_for_status()
+        r = await _status_get(client, endpoint, headers, request_timeout, secrets_)
+        raise_for_site(r)
         payload = _connector_json(r)
+    except FirewallBlocked:
+        raise
     except (httpx.HTTPStatusError, ValueError) as exc:
         if site.cms != "wp" or (isinstance(exc, httpx.HTTPStatusError)
                                  and exc.response.status_code in (408, 429, 500, 502, 503, 504)):
@@ -391,8 +569,8 @@ async def _fetch_status_once(site: Site, timeout: float = 20.0, force: bool = Fa
         cur = _WP_REST_STYLE.get(site.id, "wpjson")
         alternate = "restroute" if cur == "wpjson" else "wpjson"
         alt = wp_rest_url(site, "status", f"_={cb}" + refresh, style=alternate)
-        r = await _status_get(client, alt, headers, request_timeout)
-        r.raise_for_status()
+        r = await _status_get(client, alt, headers, request_timeout, secrets_)
+        raise_for_site(r)
         payload = _connector_json(r)
         _WP_REST_STYLE[site.id] = alternate
 
@@ -429,7 +607,7 @@ async def probe_home(url: str, timeout: float = 45.0) -> tuple[int, float] | Non
     t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=15.0), follow_redirects=True,
-                                     headers={"User-Agent": "Mozilla/5.0 Sentinel-TD/2.31 (+availability)"}) as c:
+                                     headers={"User-Agent": user_agent()}) as c:
             r = await c.get(url)
             return r.status_code, round(time.monotonic() - t0, 1)
     except Exception:  # noqa: BLE001
@@ -493,7 +671,8 @@ def _mark_connector(site: Site, reason: str) -> None:
     site._site_answers = True
 
 
-async def _answer_not_from_connector(site: Site, connector_reason: str, plain_reason: str) -> None:
+async def _answer_not_from_connector(site: Site, connector_reason: str, plain_reason: str,
+                                     answers_below: int = 400) -> None:
     """Pagina che non e' del connettore (HTML con 4xx, oppure 200 senza JSON). Puo' essere il
     connettore tolto con l'API REST bloccata, ma anche un hosting sospeso, un sito cancellato,
     un dominio parcheggiato: dalla sola risposta non si sa.
@@ -522,7 +701,7 @@ async def _answer_not_from_connector(site: Site, connector_reason: str, plain_re
         site.error = plain_reason[:480]
         return
     probe = await probe_home(site.url)
-    if probe is not None and probe[0] < 400:
+    if probe is not None and probe[0] < answers_below:
         _mark_connector(site, f"{connector_reason} — home: HTTP {probe[0]}")
     else:
         site.error = (f"{plain_reason} — home: " + (f"HTTP {probe[0]}" if probe else "nessuna risposta"))[:480]
@@ -777,6 +956,11 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
             # Waiting in Sentinel is not evidence of a failed connection.
         elif isinstance(ex, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
             await _pending_failure(site, str(ex)[:480] or type(ex).__name__)
+        elif isinstance(ex, RelaySilent):
+            # modalita' firewall, connettore muto: la home passa dallo stesso firewall, che risponde
+            # 403 (Cloudflare) o 202 (SiteGround) anche col sito giu'. Sito giu' solo se la home non
+            # risponde affatto o risponde 5xx (il firewall non raggiunge il sito).
+            await _answer_not_from_connector(site, CONNECTOR_PREFIX + str(ex), str(ex), answers_below=500)
         elif isinstance(ex, ConnectorReplyError):
             # il sito risponde, ma senza i dati del connettore (vedi connector_http_reason)
             if ex.ambiguous:
@@ -802,13 +986,13 @@ class ConnectorTooOld(RuntimeError):
 
 
 def _auth_headers(site: Site, accept: str = "application/json") -> dict:
-    return {
+    return site_headers(site, {
         "Authorization": f"Bearer {site.token}",
         "X-Sentinel-Token": site.token,
         "Accept": accept,
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-    }
+    })
 
 
 def _rest_no_route(r: httpx.Response) -> bool:
@@ -838,12 +1022,14 @@ async def fetch_package(site: Site, kind: str, slug: str, max_size: int, timeout
     """Zip di un plugin o tema installato sul sito (solo WordPress, connettore 2.19.0)."""
     if site.cms != "wp":
         raise RuntimeError("il recupero dei pacchetti funziona solo con i siti WordPress")
+    if relay.active(site):
+        raise RuntimeError("sito in modalità firewall: Sentinel non può prendere pacchetti da questo sito")
     qs = f"type={quote(kind, safe='')}&slug={quote(slug, safe='')}&_={int(time.time())}"
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with site_client(site, timeout=timeout, follow_redirects=True) as client:
         r = await _wp_get(client, site, "package", qs, _auth_headers(site, "application/zip, application/json"))
         if _rest_no_route(r):
             raise ConnectorTooOld("il connettore di questo sito non sa ancora preparare i pacchetti: aggiornalo alla 2.19.0")
-        r.raise_for_status()
+        raise_for_site(r)
         ctype = (r.headers.get("content-type") or "").lower()
         if "zip" not in ctype:
             try:

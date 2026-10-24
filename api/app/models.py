@@ -57,6 +57,16 @@ class Site(Base):
     # versione del connettore che gira sul sito (dichiarata dal connettore dalla WP 2.23 / Joomla 1.32;
     # per i WP piu' vecchi ricavata dal plugin td-panopticon nell'elenco delle estensioni)
     connector_version: Mapped[str] = mapped_column(String(32), default="")
+    # intestazioni HTTP in piu' per le chiamate al connettore, una "Nome: valore" per riga (2.48.0):
+    # per far passare Sentinel da un firewall davanti al sito (regola di Cloudflare su
+    # un'intestazione segreta, service token di Cloudflare Access...). Restano sul dominio del sito.
+    extra_headers: Mapped[str] = mapped_column(Text, default="")
+    # modalita' firewall (2.49.0, vedi relay.py): il pannello la vuole (un firewall blocca la strada
+    # diretta) e ultimo contatto del connettore che chiama Sentinel
+    relay_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    # anteprima: motivo dell'ultimo tentativo non riuscito (vuoto se e' andato bene), 2.49.0
+    shot_error: Mapped[str] = mapped_column(Text, default="")
+    relay_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @property
     def locked_set(self) -> set[str]:

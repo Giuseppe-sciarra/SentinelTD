@@ -215,3 +215,132 @@ async def agent_register(request: Request, payload: dict = Body(...)):
 
     return {"ok": True, "existed": False, "site_id": site.id,
             "message": "Sito registrato in Panopticon."}
+
+
+# --------------------------------------------------------------------------
+# Modalita' firewall (2.49.0): il connettore chiama Sentinel (vedi relay.py)
+# --------------------------------------------------------------------------
+def _blocked_by_firewall(error: str | None) -> bool:
+    """L'ultimo controllo diretto ha trovato un firewall davanti al sito (FirewallBlocked)."""
+    e = str(error or "")
+    return "bloccato da " in e and "davanti al sito" in e
+
+
+def _relay_token(request: Request) -> str:
+    tok = (request.headers.get("x-sentinel-token") or "").strip()
+    if not tok:
+        auth = request.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            tok = auth[7:].strip()
+    return tok[:128]
+
+
+async def _relay_site(s: AsyncSession, request: Request, url: str = "", site_id: int | None = None) -> Site:
+    """Sito del connettore che chiama: token del sito e stesso dominio (o, per lo zip di un lavoro,
+    il sito a cui il lavoro e' destinato). Un sito clonato (staging, demo) ha lo stesso token ma un
+    altro dominio: non deve parlare al posto dell'originale."""
+    from urllib.parse import urlparse
+    from ..site_http import same_site_host
+    token = _relay_token(request)
+    if len(token) < 16:
+        raise HTTPException(401, "token mancante")
+    rows = (await s.execute(select(Site).where(Site.token == token, Site.enabled == True))).scalars().all()  # noqa: E712
+    host = (urlparse(url).hostname or "") if url else ""
+    for site in rows:
+        if site_id is not None:
+            if site.id == site_id:
+                return site
+        elif url and same_site_host(host, urlparse(site.url).hostname or ""):
+            return site
+    raise HTTPException(403, "sito sconosciuto, disattivato o con un altro indirizzo")
+
+
+@router.post("/relay")
+@limiter.limit("120/minute")
+async def agent_relay(request: Request, payload: dict = Body(...)):
+    """Il connettore si fa sentire. Body: {url, connector, kind: "ping"|"report", status?,
+    results?: [{id, result}], wait?}. Risposta: {mode, tick, ping, jobs, wp_auto_updates}.
+
+    "ping": fuori dalla modalita' firewall, solo per sapere in che modalita' stare.
+    "report": in modalita' firewall, con lo stato del sito e gli esiti dei lavori fatti; la
+    risposta porta i lavori in coda (con wait, aspetta qualche secondo il prossimo)."""
+    from datetime import datetime, timezone
+    from .. import relay
+    from ..connectors import _wp_auto_updates_choice
+    url = str(payload.get("url") or "")[:255]
+    if not url:
+        raise HTTPException(422, "url mancante")
+    await relay.refresh_config()
+    async with SessionLocal() as s:
+        site = await _relay_site(s, request, url)
+        if not await relay.fingerprint_ok(site.id, str(payload.get("fp") or "")):
+            from ..eventlog import record_now as evlog_now
+            await evlog_now("connectors", "warn", "Modalità firewall: rifiutata un'altra copia del sito con lo stesso token",
+                            site=site, details={"ip": request.client.host if request.client else ""})
+            raise HTTPException(409, "un'altra copia di questo sito parla già con Sentinel")
+        site.relay_seen_at = datetime.now(timezone.utc)
+        ver = str(payload.get("connector") or "").strip()[:32]
+        if ver and ver != (site.connector_version or ""):
+            site.connector_version = ver
+        switched = False
+        if (relay.ENABLED and not site.relay_mode and _blocked_by_firewall(site.error)
+                and relay.connector_can_relay(site) and await relay.hub_url()):
+            # il controllo diretto ha trovato un firewall e il connettore che chiama sa fare la
+            # modalita' firewall: si accende subito, in questa chiamata, invece di aspettare il
+            # controllo e il ping successivi (fino a un'ora)
+            site.relay_mode = True
+            switched = True
+        await s.commit()
+        site_id, mode, site_name = site.id, ("relay" if (site.relay_mode and relay.ENABLED) else "direct"), site.name
+    if switched:
+        await relay.mark_switch(site_id)
+        from ..eventlog import record_now as evlog_now
+        await evlog_now("connectors", "warn", "Modalità firewall attiva: la strada diretta è chiusa, è il sito a chiamare Sentinel",
+                        site_id=site_id, site_name=site_name,
+                        details={"motivo": "primo contatto del connettore con il sito bloccato dal firewall"})
+
+    await relay.note_seen(site_id)
+    status = payload.get("status")
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    jobs: list = []
+    reporting = mode == "relay" and payload.get("kind") == "report"
+    if reporting and isinstance(status, dict) and status.get("extensions") is not None:
+        # prima lo stato, poi gli esiti: chi aspetta l'esito di una ricerca trova gia' lo stato nuovo
+        await relay.save_status(site_id, status)
+        # il controllo normale applica lo stato; non mentre il ciclo degli aggiornamenti lavora
+        # sul sito (riscriverebbe le estensioni che il ciclo sta usando)
+        if not await relay.busy(site_id):
+            await relay.enqueue_apply(site_id)
+    # gli esiti valgono sempre: un lavoro preso prima che la modalita' si spegnesse va chiuso
+    for item in results[:50]:
+        if isinstance(item, dict):
+            await relay.post_result(site_id, str(item.get("id") or ""), item.get("result"))
+    if reporting:
+        if "jobs_ok" in payload:
+            await relay.set_jobs_ok(site_id, bool(payload.get("jobs_ok")))
+        # lavori solo a chi manda il report (un ping non li esegue) e ha ancora tempo
+        if not payload.get("nojobs"):
+            wait = relay.WAIT_SECONDS if (payload.get("wait") and results) else 0
+            jobs = await relay.take_jobs(site_id, wait=wait)
+    return {"mode": mode, "tick": relay.TICK_SECONDS, "ping": relay.PING_SECONDS,
+            "status_every": relay.STATUS_SECONDS, "jobs": jobs,
+            # il pannello non ha uno stato recente (modalita' appena riaccesa, Redis svuotato): subito
+            "need_status": bool(mode == "relay" and await relay.need_status(site_id)),
+            "wp_auto_updates": await _wp_auto_updates_choice()}
+
+
+@router.get("/relay/file/{job_id}")
+@limiter.limit("30/minute")
+async def agent_relay_file(request: Request, job_id: str):
+    """Zip di un lavoro di installazione, per il connettore del sito a cui e' destinato."""
+    from fastapi import Response
+    from .. import relay
+    sid = relay.job_site(job_id)
+    if sid is None:
+        raise HTTPException(404)
+    async with SessionLocal() as s:
+        await _relay_site(s, request, site_id=sid)
+    data = await relay.load_file(job_id)
+    if not data:
+        raise HTTPException(404)
+    return Response(content=data, media_type="application/zip")

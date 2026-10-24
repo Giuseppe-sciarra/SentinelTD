@@ -38,8 +38,10 @@ I dati mostrati sono un parco di prova con nomi inventati (interfaccia in ingles
 - **Anteprima visiva di ogni sito**, rigenerata a intervalli, con le miniature nell'elenco
   (timer autonomo verificato ogni minuto; frequenza da Impostazioni, anche se la pagina non cambia).
   I siti abilitati senza anteprima o con anteprima scaduta vengono accodati anche all'avvio.
-  Dopo un errore o un blocco antibot si ritenta all'intervallo impostato; l'ultima immagine
-  riuscita conserva la propria data. L'esecuzione può slittare per l'attesa in coda
+  Una fila sola, uno scatto alla volta; "Aggiorna" a mano passa in testa. Nella pagina del sito
+  l'ora della foto, l'ora dell'ultimo controllo e, se non è riuscito, il motivo. Dopo un errore si
+  ritenta entro un'ora, dopo un blocco antibot all'intervallo impostato; l'ultima immagine
+  riuscita conserva la propria data
 - Cartelle (clienti), tag, filtri rapidi, ricerca ed esportazione CSV
 - **Spazio e log sotto controllo**: la diagnostica notturna scrive una prova da 50 MB su ogni sito ed
   elenca i log oltre i 10 MB, dentro il sito e nella cartella dell'account accanto (dove cPanel
@@ -335,6 +337,24 @@ con loro storico e impostazioni.
 
 ## Se qualcosa non va
 
+- **Un sito dietro Cloudflare, SiteGround o un altro firewall non risponde più a Sentinel** — dalla
+  2.49 si sistema da solo: con il connettore WordPress 2.41 / Joomla 1.43 il sito passa in
+  *modalità firewall* ed è lui a chiamare Sentinel (avviso nella pagina del sito). Se la pagina dice
+  "installa a mano sul sito il connettore…", il connettore è vecchio e il giro notturno non ci
+  arriva: scaricalo da *Impostazioni → Connettori* e installalo una volta dal backend del sito (su
+  Joomla scrivi anche l'indirizzo del pannello nelle impostazioni del plugin). Dopo un trasloco del
+  sito, *Modifica → Salva* fa accettare la copia nuova.
+  Se invece preferisci far passare Sentinel dal firewall:
+  - *Cloudflare*: in *Security → WAF → Custom rules* crea una regola con azione **Skip** e
+    l'espressione `any(http.request.headers["x-sentinel-pass"][*] eq "valore-segreto")`, poi nella
+    scheda del sito, in *Intestazioni extra verso il connettore*, scrivi
+    `X-Sentinel-Pass: valore-segreto`. In alternativa consenti l'IP del pannello in
+    *Security → WAF → Tools → IP Access Rules*. Il *Bot Fight Mode* del piano gratuito non si
+    salta con le regole: su quel dominio va spento. Con Cloudflare Access usa i service token
+    (`CF-Access-Client-Id` e `CF-Access-Client-Secret`) come intestazioni extra.
+  - *SiteGround*: l'antibot non si configura dal pannello del sito; chiedi al supporto di escludere
+    l'IP del pannello.
+  - *Sucuri, Imunify360, Wordfence, ModSecurity*: consenti l'IP del pannello nella loro whitelist.
 - **Un sito risulta offline ma funziona (HTTP 401 `rest_forbidden`)** — il sito risponde ma il
   connettore rifiuta il token, di solito perché è stato rimosso e reinstallato. Sul sito,
   *Impostazioni → Sentinel TD → Collega questo sito a Sentinel TD* riallinea il token da solo;
