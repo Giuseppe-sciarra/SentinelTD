@@ -233,6 +233,41 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         for sid in ids:
             self.assertEqual((await self.read_site(sid)).shot_at, NOW.replace(tzinfo=None))
 
+    async def test_busy_shooter_is_not_a_failure_and_the_site_keeps_its_place(self):
+        # caso reale (2.49.4): lo shooter era fermo su una pagina, ogni anteprima scadeva dopo 3
+        # minuti e il pannello segnava "Ultimo controllo non riuscito" su tutti i siti
+        before_try = NOW - timedelta(hours=9)
+        first = await self.add_site(shot_attempted_at=before_try, shot_error="")
+        second = await self.add_site()
+        await request_shots(self.redis, [first, second])
+        sent = []
+        client_type = httpx.AsyncClient
+
+        async def handler(request):
+            sent.append(json.loads(request.content))
+            return httpx.Response(503, json={"detail": "busy"})
+        with patch.object(worker.httpx, "AsyncClient",
+                          lambda **kwargs: client_type(transport=httpx.MockTransport(handler), **kwargs)):
+            await worker.shot_runner({"redis": self.redis})
+        self.assertEqual(len(sent), 1)                          # occupato: niente altri tentativi ora
+        self.assertEqual(sent[0]["max_wait"], worker.PREVIEW_WAIT_S)
+        self.assertEqual(await self.queue(), [first, second])   # stesso posto nella fila
+        site = await self.read_site(first)
+        self.assertEqual(site.shot_error, "")                   # nessun errore mostrato
+        self.assertEqual(site.shot_attempted_at, before_try.replace(tzinfo=None))
+
+    async def test_shooter_reason_is_shown(self):
+        sid = await self.add_site(shot_path="site_1.jpg", shot_at=NOW - timedelta(days=1))
+        client_type = httpx.AsyncClient
+
+        async def handler(request):
+            return httpx.Response(504, json={"detail": "la pagina non ha finito di caricarsi entro 120 secondi"})
+        with patch.object(worker.httpx, "AsyncClient",
+                          lambda **kwargs: client_type(transport=httpx.MockTransport(handler), **kwargs)), \
+                patch.object(worker, "evlog", AsyncMock()):
+            await worker._shoot_one(sid)
+        self.assertEqual((await self.read_site(sid)).shot_error, "la pagina non ha finito di caricarsi entro 120 secondi")
+
     async def test_jobs_left_by_the_previous_version_go_through_the_queue(self):
         sid = await self.add_site()
         await worker.shoot_site({"redis": self.redis}, sid)

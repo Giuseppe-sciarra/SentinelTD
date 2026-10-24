@@ -35,6 +35,7 @@ services:
       SHOT_SETTLE_MS: ${SHOT_SETTLE_MS:-1800}
       SHOT_VIDEO_WAIT_MS: ${SHOT_VIDEO_WAIT_MS:-6000}
       SHOT_CHALLENGE_WAIT_MS: ${SHOT_CHALLENGE_WAIT_MS:-15000}   # attesa massima di una verifica antibot, per tentativo
+      SHOT_MAX_SECONDS: ${SHOT_MAX_SECONDS:-120}   # tetto di una foto intera: oltre si chiude e si passa alla prossima
       SHOT_USER_AGENT: ${SHOT_USER_AGENT:-}   # vuoto = Chrome vero con la versione del browser in uso
     volumes: [screenshots:/data/screenshots]
   api:

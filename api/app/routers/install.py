@@ -64,7 +64,7 @@ async def _install_one(site: Site, content: bytes, filename: str, kind: str, act
         d = await relay.call(site, "install", {"kind": kind, "activate": "1" if activate else "0",
                                                "filename": filename}, file=content)
         if d is None:
-            return {"ok": False, "error": relay.not_taken_message()}
+            return {"ok": False, "error": await relay.not_taken_text(site)}
         return {"ok": bool(d.get("ok")), "error": str(d.get("error", "")), "name": str(d.get("name", "")),
                 "slug": str(d.get("slug", "")), "new": str(d.get("new", "")), "type": str(d.get("type", "")),
                 "activated": bool(d.get("activated", False))}

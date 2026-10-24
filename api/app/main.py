@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
-from .db import engine, run_migrations
+from .db import migrate
 from . import models  # noqa: F401  (registra i modelli)
 from .rate_limit import limiter
 from .routers import sites, auth, media, install, security, connectors, agent, history, notifications, expiries, branding, preferences, reports, stats, packages, clients, client_cards, server_credentials, changes, plugins, dashboard, availability, eventlog
@@ -16,8 +16,7 @@ async def lifespan(app: FastAPI):
     # Con gunicorn -w 2 il lifespan gira in ENTRAMBI i worker al boot, in parallelo.
     # run_migrations prende un advisory lock di transazione, quindi i processi si
     # serializzano: il primo crea/migra, gli altri rieseguono gli ALTER idempotenti.
-    async with engine.begin() as conn:
-        await run_migrations(conn)
+    await migrate()
     try:
         yield
     finally:

@@ -32,6 +32,11 @@ CHALLENGE_WAIT_MS = int(os.getenv("SHOT_CHALLENGE_WAIT_MS", "15000"))   # attesa
 STATE_DIR = os.path.join(os.getenv("SHOTS_DIR", "/data/screenshots"), ".state")   # "lasciapassare" degli antibot per sito (cartella nascosta)
 USER_AGENT = os.getenv("SHOT_USER_AGENT", "").strip()   # se vuoto: Chrome vero, con la versione del browser in uso
 VIDEO_FRAME_AT = float(os.getenv("SHOT_VIDEO_FRAME_AT", "0.5"))   # secondo del video fotografato, uguale prima e dopo
+# Tetto di una foto intera, verifiche antibot e secondo tentativo compresi. Lo shooter fa una foto
+# alla volta: senza tetto una pagina che non finiva (un video che non partiva, uno script appeso)
+# teneva fermo il servizio, e tutte le foto in fila dopo di lei scadevano "oltre i 3 minuti".
+SHOT_MAX_S = max(30.0, float(os.getenv("SHOT_MAX_SECONDS", "120")))
+SCRIPT_MAX_S = 10.0       # tetto di ogni script eseguito nella pagina (page.evaluate non ne ha)
 
 # Zone che cambiano da sole: escluse dal confronto prima/dopo, altrimenti un video o uno
 # slider risultano "cambiamento" a ogni aggiornamento
@@ -46,27 +51,71 @@ DYNAMIC_SELECTORS = ", ".join([
 app = FastAPI(title="Sentinel shooter")
 
 _browser = None
+_pw = None
+_restart = False            # il browser non ha chiuso una pagina: si riavvia prima della foto dopo
 _lock = asyncio.Lock()      # una cattura per volta: Chromium in container e' pesante
 
 
-@app.on_event("startup")
-async def _startup():
+async def _launch():
     global _browser
-    os.makedirs(SHOTS_DIR, exist_ok=True)
-    pw = await async_playwright().start()
     # --autoplay-policy: senza, i video di sfondo non partono in automatico e restano neri
     args = ["--no-sandbox", "--disable-dev-shm-usage",
             "--autoplay-policy=no-user-gesture-required",
             "--disable-blink-features=AutomationControlled"]   # il browser non si dichiara "automatizzato"
     try:
         # Chrome ha i codec H.264/AAC: indispensabile per i video di sfondo in MP4
-        _browser = await pw.chromium.launch(channel="chrome", args=args)
+        _browser = await _pw.chromium.launch(channel="chrome", args=args)
         engine = "Google Chrome (codec H.264 disponibili)"
     except Exception as ex:  # noqa: BLE001
-        _browser = await pw.chromium.launch(args=args)
+        _browser = await _pw.chromium.launch(args=args)
         engine = "Chromium senza codec proprietari: i video MP4 resteranno vuoti"
         log.warning("Chrome non disponibile (%s)", str(ex)[:160])
-    log.info("shooter pronto (%sx%s, q=%s) - %s", WIDTH, HEIGHT, QUALITY, engine)
+    return engine
+
+
+async def _ensure_browser():
+    """Browser caduto (memoria finita, crash) o rimasto appeso su una pagina: si riavvia. Prima
+    restava morto e ogni foto finiva in errore fino al riavvio a mano del container."""
+    global _browser, _restart
+    if _browser is not None and _browser.is_connected() and not _restart:
+        return
+    log.warning("browser da riavviare (%s)", "pagina rimasta appesa" if _restart else "chiuso o caduto")
+    old, _browser, _restart = _browser, None, False
+    if old is not None:
+        try:
+            await asyncio.wait_for(old.close(), 15)
+        except Exception:  # noqa: BLE001
+            pass
+    await _launch()
+
+
+@app.on_event("startup")
+async def _startup():
+    global _pw
+    os.makedirs(SHOTS_DIR, exist_ok=True)
+    _pw = await async_playwright().start()
+    engine = await _launch()
+    log.info("shooter pronto (%sx%s, q=%s, max %ss a foto) - %s", WIDTH, HEIGHT, QUALITY, int(SHOT_MAX_S), engine)
+
+
+async def _js(page, script, arg=None, default=None, limit: float = SCRIPT_MAX_S):
+    """Uno script nella pagina, con un tetto di tempo e senza far fallire la foto: un video che
+    non parte o la pagina che si ricarica (verifica antibot) non devono costare l'anteprima."""
+    try:
+        run = page.evaluate(script) if arg is None else page.evaluate(script, arg)
+        return await asyncio.wait_for(run, limit)
+    except Exception as ex:  # noqa: BLE001
+        log.info("script nella pagina saltato (%s): %s", type(ex).__name__, str(ex)[:120])
+        return default
+
+
+async def _close(page, ctx):
+    global _restart
+    for what in (page, ctx):
+        try:
+            await asyncio.wait_for(what.close(), 10)
+        except Exception:  # noqa: BLE001
+            _restart = True
 
 
 def _user_agent() -> str:
@@ -120,8 +169,22 @@ def _state_path(site_id: int) -> str:
     return os.path.join(STATE_DIR, f"site_{site_id}.json")
 
 
-async def _open_page(url: str, state_path: str | None):
+_LIGHT_SKIP = {"image", "media", "font", "stylesheet"}
+
+
+async def _skip_heavy(route):
+    try:
+        if route.request.resource_type in _LIGHT_SKIP:
+            await route.abort()
+        else:
+            await route.continue_()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _open_page(url: str, state_path: str | None, light: bool = False):
     """Apre il sito e, se c'e' una verifica antibot, aspetta che venga superata.
+    light: senza immagini, video, font e fogli di stile (la sveglia non fotografa: meno peso sul sito).
     Ritorna (contesto, pagina, stato http, respinto, c'era_una_verifica)."""
     kwargs = {}
     if state_path and os.path.isfile(state_path):
@@ -137,6 +200,8 @@ async def _open_page(url: str, state_path: str | None):
     # un browser comandato da un programma dichiara navigator.webdriver: gli antibot lo leggono
     await ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
     page = await ctx.new_page()
+    if light:
+        await page.route("**/*", _skip_heavy)
     last_doc = {"s": 0}   # stato dell'ultima pagina caricata: dopo una verifica non e' piu' il 202 iniziale
     page.on("response", lambda r: last_doc.update(s=r.status)
             if r.request.resource_type == "document" and r.frame == page.main_frame else None)
@@ -166,6 +231,7 @@ async def healthz():
 
 @app.post("/shot")
 async def shot(payload: dict = Body(...)):
+    global _restart
     url = str(payload.get("url", "")).strip()
     site_id = int(payload.get("site_id") or 0)
     if not url.startswith(("http://", "https://")) or site_id <= 0:
@@ -180,6 +246,133 @@ async def shot(payload: dict = Body(...)):
     if variant:
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}sentinel_check={int(time.time())}"
+
+    await _take_turn(payload.get("max_wait"))
+    try:
+        await _ensure_browser()
+        try:
+            return await asyncio.wait_for(_capture(url, site_id, variant), SHOT_MAX_S)
+        except asyncio.TimeoutError:
+            log.warning("foto di %s interrotta: oltre %ss", url, int(SHOT_MAX_S))
+            raise HTTPException(504, f"la pagina non ha finito di caricarsi entro {int(SHOT_MAX_S)} secondi")
+    except HTTPException:
+        raise
+    except Exception as ex:  # noqa: BLE001
+        if "closed" in str(ex).lower() or "crash" in str(ex).lower():
+            _restart = True
+        log.warning("foto di %s non riuscita: %s: %s", url, type(ex).__name__, str(ex)[:200])
+        raise HTTPException(500, f"{type(ex).__name__}: {str(ex)[:200]}")
+    finally:
+        await _end_turn()
+
+
+async def _take_turn(max_wait) -> None:
+    """Attesa massima del proprio turno (secondi). Chi la indica riceve 503 "busy" se lo shooter e'
+    occupato piu' a lungo: non e' un problema del sito, si riprova dopo. Senza: si aspetta."""
+    try:
+        if max_wait is None:
+            await _lock.acquire()
+        else:
+            await asyncio.wait_for(_lock.acquire(), max(0.5, min(600.0, float(max_wait))))
+    except asyncio.TimeoutError:
+        raise HTTPException(503, "busy")
+
+
+async def _end_turn() -> None:
+    global _restart
+    # un lavoro interrotto a meta' puo' lasciare aperta la sua scheda: si chiude prima del prossimo
+    try:
+        for leftover in list(_browser.contexts if _browser is not None else []):
+            try:
+                await asyncio.wait_for(leftover.close(), 10)
+            except Exception:  # noqa: BLE001
+                _restart = True
+    except Exception:  # noqa: BLE001
+        pass
+    _lock.release()
+
+
+@app.post("/wake")
+async def wake(payload: dict = Body(...)):
+    """Sveglia di un sito in modalita' firewall il cui cron non parte (pagine servite dalla cache
+    dell'hosting, poche visite: su quel sito PHP non gira mai e il connettore non chiama Sentinel).
+    Il browser apre la home come un visitatore, superando la verifica antibot, e poi wp-cron.php:
+    WordPress esegue il suo cron e con lui il giro del connettore. Joomla: basta la visita.
+    Niente immagini, video, font e stili: pochi KB per il sito."""
+    global _restart
+    url = str(payload.get("url", "")).strip()
+    site_id = int(payload.get("site_id") or 0)
+    cms = str(payload.get("cms") or "wp").strip().lower()
+    if not url.startswith(("http://", "https://")) or site_id <= 0:
+        raise HTTPException(422, "url e site_id obbligatori")
+    await _take_turn(payload.get("max_wait"))
+    try:
+        await _ensure_browser()
+        try:
+            return await asyncio.wait_for(_wake(url, site_id, cms), SHOT_MAX_S)
+        except asyncio.TimeoutError:
+            raise HTTPException(504, f"il sito non ha risposto entro {int(SHOT_MAX_S)} secondi")
+    except HTTPException:
+        raise
+    except Exception as ex:  # noqa: BLE001
+        if "closed" in str(ex).lower() or "crash" in str(ex).lower():
+            _restart = True
+        log.warning("sveglia di %s non riuscita: %s: %s", url, type(ex).__name__, str(ex)[:200])
+        raise HTTPException(500, f"{type(ex).__name__}: {str(ex)[:200]}")
+    finally:
+        await _end_turn()
+
+
+async def _wake(url: str, site_id: int, cms: str) -> dict:
+    state_path = _state_path(site_id)
+    page = ctx = None
+    try:
+        ctx, page, http_status, blocked, had_challenge = await _open_page(url, state_path, light=True)
+        if blocked:
+            log.warning("sveglia di %s: respinta dall'antibot (http=%s)", url, http_status)
+            return {"ok": False, "blocked": True, "http_status": http_status}
+        if had_challenge:
+            try:
+                os.makedirs(STATE_DIR, exist_ok=True)
+                await asyncio.wait_for(ctx.storage_state(path=state_path), SCRIPT_MAX_S)
+            except Exception:  # noqa: BLE001
+                pass
+        cron_status = admin_status = 0
+        if cms != "joomla":
+            base = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+            stamp = int(time.time())
+            # 1) una pagina di WordPress che non passa mai dalla cache dell'hosting: alla fine della
+            #    richiesta il connettore fa il suo giro se e' in ritardo (come una visita all'admin).
+            #    wp-cron.php da solo non basta: WordPress esegue l'evento del connettore solo quando
+            #    e' in scadenza nel suo calendario, e una sveglia nel momento sbagliato andava a vuoto
+            #    (primapiuma, 24 ottobre 2026). admin-post.php senza azione risponde subito e basta.
+            # 2) wp-cron.php: senza doing_wp_cron e' la chiamata "da un cron esterno"; il parametro
+            #    in piu' evita solo le cache. Risponde subito e lavora dopo (fastcgi_finish_request).
+            for name, target in (("admin", f"{base}/wp-admin/admin-post.php?sentinel_wake={stamp}"),
+                                 ("cron", f"{base}/wp-cron.php?sentinel_wake={stamp}")):
+                try:
+                    resp = await page.goto(target, wait_until="domcontentloaded", timeout=20000)
+                    code = resp.status if resp else 0
+                    if not await _wait_challenge(page):
+                        log.warning("sveglia di %s: %s respinto dall'antibot", url, target)
+                        return {"ok": False, "blocked": True, "http_status": code}
+                except Exception as ex:  # noqa: BLE001
+                    # anche se la risposta tarda, WordPress ha gia' ricevuto la richiesta e lavora
+                    code = 0
+                    log.info("sveglia di %s: %s senza risposta (%s)", url, target, type(ex).__name__)
+                if name == "admin":
+                    admin_status = code
+                else:
+                    cron_status = code
+        log.info("sveglia ok: %s (home http=%s, admin-post http=%s, cron http=%s)", url, http_status, admin_status, cron_status)
+        return {"ok": True, "blocked": False, "http_status": http_status, "admin_status": admin_status,
+                "cron_status": cron_status}
+    finally:
+        if page is not None:
+            await _close(page, ctx)
+
+
+async def _capture(url: str, site_id: int, variant: str) -> dict:
     name = f"site_{site_id}_{variant}.jpg" if variant else f"site_{site_id}.jpg"
     dest = os.path.join(SHOTS_DIR, name)
     tmp = dest + ".tmp"
@@ -189,14 +382,15 @@ async def shot(payload: dict = Body(...)):
     blocked = False        # il sito ha respinto l'accesso automatico (verifica non superata, 403, 429)
 
     state_path = _state_path(site_id)
-    async with _lock:
+    page = ctx = None
+    try:
         ctx, page, http_status, blocked, had_challenge = await _open_page(url, state_path)
         if blocked:
             # un secondo tentativo da zero: il lasciapassare salvato puo' essere scaduto e la verifica
             # degli antibot e' a volte instabile (dipende anche dalla reputazione dell'IP)
             log.warning("accesso automatico respinto da %s (http=%s): secondo tentativo", url, http_status)
-            await page.close()
-            await ctx.close()
+            await _close(page, ctx)
+            page = ctx = None
             try:
                 os.remove(state_path)
             except OSError:
@@ -205,135 +399,125 @@ async def shot(payload: dict = Body(...)):
             ctx, page, http_status, blocked, had_challenge = await _open_page(url, None)
             if blocked:
                 log.warning("accesso automatico respinto da %s anche al secondo tentativo (http=%s)", url, http_status)
+        if blocked and not variant and os.path.isfile(dest):
+            # il sito ha respinto l'accesso: si tiene l'ultima anteprima buona invece di sostituirla
+            # con una pagina di errore o di verifica (e senza lavorare su una pagina che non e' il sito)
+            return {"path": name, "blocked": True, "kept_previous": True}
+
+        # banner cookie piu' diffusi: tolgono meta' pagina all'anteprima
         try:
-            # banner cookie piu' diffusi: tolgono meta' pagina all'anteprima
-            await page.add_style_tag(content="""
+            await asyncio.wait_for(page.add_style_tag(content="""
                 #cookie-law-info-bar, .cli-modal, #CybotCookiebotDialog, #onetrust-consent-sdk,
                 .iubenda-cs-container, #iubenda-cs-banner, .cmplz-cookiebanner, #cmplz-cookiebanner-container,
                 .moove_gdpr_cookie_modal, #moove_gdpr_cookie_info_bar, .cc-window, #usercentrics-root
                 { display: none !important; }
                 html { scroll-behavior: auto !important; }
-            """)
-
-            # 1) sveglia le immagini lazy: molti temi le caricano solo allo scroll
-            await page.evaluate("""() => {
-                window.scrollTo(0, window.innerHeight);
-                window.scrollTo(0, 0);
-                document.querySelectorAll('img[loading="lazy"]').forEach(i => { i.loading = 'eager'; });
-            }""")
-
-            # 2) VIDEO: senza questo passaggio l'area del video resta BIANCA nello
-            # screenshot, perche' al momento dello scatto non e' ancora stato disegnato
-            # nessun frame. Li avviamo muti, aspettiamo che abbiano dati, e forziamo un
-            # frame spostando leggermente currentTime.
-            await page.evaluate("""async () => {
-                const vids = Array.from(document.querySelectorAll('video'));
-                await Promise.all(vids.map(async v => {
-                    try {
-                        v.muted = true; v.defaultMuted = true; v.playsInline = true;
-                        v.setAttribute('playsinline', '');
-                        if (v.preload === 'none') { v.preload = 'auto'; v.load(); }
-                        await v.play().catch(() => {});
-                    } catch (e) {}
-                }));
-            }""")
-            try:
-                # aspetta che ogni video abbia almeno un frame disponibile (o sia in errore)
-                await page.wait_for_function(
-                    """() => Array.from(document.querySelectorAll('video'))
-                            .every(v => v.readyState >= 2 || v.error || v.networkState === 3)""",
-                    timeout=VIDEO_WAIT_MS)
-            except Exception:  # noqa: BLE001
-                pass
-            await page.evaluate("""() => {
-                document.querySelectorAll('video').forEach(v => {
-                    try {
-                        // un piccolo salto costringe il browser a disegnare il frame
-                        if (v.readyState >= 2 && v.currentTime < 0.05) v.currentTime = 0.1;
-                        // ripieghi se il video resta senza frame (codec mancante, rete, formato):
-                        if (v.readyState < 2) {
-                            if (v.poster) {
-                                // 1) usa il poster dichiarato
-                                v.style.background = 'url("' + v.poster + '") center center / cover no-repeat';
-                            } else {
-                                // 2) niente poster: nascondi il video e lascia emergere lo sfondo
-                                //    della sezione (immagine o colore), meglio di un rettangolo vuoto
-                                v.style.visibility = 'hidden';
-                            }
-                        }
-                    } catch (e) {}
-                });
-            }""")
-
-            # 3) respiro finale per font, animazioni d'ingresso e frame video
-            await page.wait_for_timeout(SETTLE_MS)
-
-            # 4) VIDEO FERMI SULLO STESSO FOTOGRAMMA: prima e dopo l'aggiornamento il video
-            # veniva fotografato in un istante diverso e risultava "cambiamento". Pausa e
-            # sempre lo stesso secondo (VIDEO_FRAME_AT), aspettando che il frame sia disegnato.
-            try:
-                await page.evaluate("""async (at) => {
-                    const vids = Array.from(document.querySelectorAll('video')).filter(v => v.readyState >= 1);
-                    await Promise.all(vids.map(v => new Promise(res => {
-                        try {
-                            v.pause();
-                            const t = Math.min(at, Math.max(0, (v.duration || at) - 0.05));
-                            const done = () => { v.removeEventListener('seeked', done); res(); };
-                            v.addEventListener('seeked', done);
-                            v.currentTime = t;
-                            setTimeout(done, 2500);
-                        } catch (e) { res(); }
-                    })));
-                }""", VIDEO_FRAME_AT)
-                await page.wait_for_timeout(250)
-            except Exception:  # noqa: BLE001
-                pass
-
-            # 5) zone che cambiano da sole (video, iframe, slider): annotate per il confronto
-            masks = []
-            if variant:
-                try:
-                    masks = await page.evaluate("""(sel) => {
-                        const W = window.innerWidth, H = window.innerHeight, out = [];
-                        document.querySelectorAll(sel).forEach(el => {
-                            const r = el.getBoundingClientRect();
-                            const x = Math.max(0, r.left), y = Math.max(0, r.top);
-                            const w = Math.min(W, r.right) - x, h = Math.min(H, r.bottom) - y;
-                            if (w >= 40 && h >= 40) out.push([Math.round(x), Math.round(y), Math.round(w), Math.round(h)]);
-                        });
-                        return { w: W, h: H, masks: out.slice(0, 60) };
-                    }""", DYNAMIC_SELECTORS)
-                except Exception:  # noqa: BLE001
-                    masks = []
-
-            # segni inequivocabili di sito rotto nel testo della pagina
-            if variant:
-                try:
-                    body_text = await page.evaluate("document.body ? document.body.innerText.slice(0, 30000) : ''")
-                    error_text = _find_error_text(body_text or "")
-                except Exception:  # noqa: BLE001
-                    pass
-            await page.screenshot(path=tmp, type="jpeg", quality=QUALITY, full_page=False,
-                                  animations="disabled")
-            if had_challenge and not blocked:
-                # verifica superata: si tiene il lasciapassare (cookie) cosi' i prossimi scatti non la rifanno
-                try:
-                    os.makedirs(STATE_DIR, exist_ok=True)
-                    await ctx.storage_state(path=state_path)
-                except Exception:  # noqa: BLE001
-                    pass
-        finally:
-            await page.close()
-            await ctx.close()
-
-    if blocked and not variant and os.path.isfile(dest):
-        # il sito ha respinto l'accesso: si tiene l'ultima anteprima buona invece di sostituirla
-        # con una pagina di errore o di verifica
-        try:
-            os.remove(tmp)
-        except OSError:
+            """), SCRIPT_MAX_S)
+        except Exception:  # noqa: BLE001
             pass
-        return {"path": name, "blocked": True, "kept_previous": True}
+
+        # 1) sveglia le immagini lazy: molti temi le caricano solo allo scroll
+        await _js(page, """() => {
+            window.scrollTo(0, window.innerHeight);
+            window.scrollTo(0, 0);
+            document.querySelectorAll('img[loading="lazy"]').forEach(i => { i.loading = 'eager'; });
+        }""")
+
+        # 2) VIDEO: senza questo passaggio l'area del video resta BIANCA nello
+        # screenshot, perche' al momento dello scatto non e' ancora stato disegnato
+        # nessun frame. Li avviamo muti, aspettiamo che abbiano dati, e forziamo un
+        # frame spostando leggermente currentTime. play() puo' non rispondere mai (video che non
+        # arriva): al massimo 3 secondi, poi si va avanti.
+        await _js(page, """async () => {
+            const vids = Array.from(document.querySelectorAll('video'));
+            await Promise.all(vids.map(async v => {
+                try {
+                    v.muted = true; v.defaultMuted = true; v.playsInline = true;
+                    v.setAttribute('playsinline', '');
+                    if (v.preload === 'none') { v.preload = 'auto'; v.load(); }
+                    await Promise.race([v.play().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
+                } catch (e) {}
+            }));
+        }""")
+        try:
+            # aspetta che ogni video abbia almeno un frame disponibile (o sia in errore)
+            await page.wait_for_function(
+                """() => Array.from(document.querySelectorAll('video'))
+                        .every(v => v.readyState >= 2 || v.error || v.networkState === 3)""",
+                timeout=VIDEO_WAIT_MS)
+        except Exception:  # noqa: BLE001
+            pass
+        await _js(page, """() => {
+            document.querySelectorAll('video').forEach(v => {
+                try {
+                    // un piccolo salto costringe il browser a disegnare il frame
+                    if (v.readyState >= 2 && v.currentTime < 0.05) v.currentTime = 0.1;
+                    // ripieghi se il video resta senza frame (codec mancante, rete, formato):
+                    if (v.readyState < 2) {
+                        if (v.poster) {
+                            // 1) usa il poster dichiarato
+                            v.style.background = 'url("' + v.poster + '") center center / cover no-repeat';
+                        } else {
+                            // 2) niente poster: nascondi il video e lascia emergere lo sfondo
+                            //    della sezione (immagine o colore), meglio di un rettangolo vuoto
+                            v.style.visibility = 'hidden';
+                        }
+                    }
+                } catch (e) {}
+            });
+        }""")
+
+        # 3) respiro finale per font, animazioni d'ingresso e frame video
+        await page.wait_for_timeout(SETTLE_MS)
+
+        # 4) VIDEO FERMI SULLO STESSO FOTOGRAMMA: prima e dopo l'aggiornamento il video
+        # veniva fotografato in un istante diverso e risultava "cambiamento". Pausa e
+        # sempre lo stesso secondo (VIDEO_FRAME_AT), aspettando che il frame sia disegnato.
+        await _js(page, """async (at) => {
+            const vids = Array.from(document.querySelectorAll('video')).filter(v => v.readyState >= 1);
+            await Promise.all(vids.map(v => new Promise(res => {
+                try {
+                    v.pause();
+                    const t = Math.min(at, Math.max(0, (v.duration || at) - 0.05));
+                    const done = () => { v.removeEventListener('seeked', done); res(); };
+                    v.addEventListener('seeked', done);
+                    v.currentTime = t;
+                    setTimeout(done, 2500);
+                } catch (e) { res(); }
+            })));
+        }""", VIDEO_FRAME_AT)
+        await page.wait_for_timeout(250)
+
+        # 5) zone che cambiano da sole (video, iframe, slider): annotate per il confronto
+        masks = []
+        if variant:
+            masks = await _js(page, """(sel) => {
+                const W = window.innerWidth, H = window.innerHeight, out = [];
+                document.querySelectorAll(sel).forEach(el => {
+                    const r = el.getBoundingClientRect();
+                    const x = Math.max(0, r.left), y = Math.max(0, r.top);
+                    const w = Math.min(W, r.right) - x, h = Math.min(H, r.bottom) - y;
+                    if (w >= 40 && h >= 40) out.push([Math.round(x), Math.round(y), Math.round(w), Math.round(h)]);
+                });
+                return { w: W, h: H, masks: out.slice(0, 60) };
+            }""", DYNAMIC_SELECTORS, default=[])
+
+        # segni inequivocabili di sito rotto nel testo della pagina
+        if variant:
+            body_text = await _js(page, "document.body ? document.body.innerText.slice(0, 30000) : ''", default="")
+            error_text = _find_error_text(body_text or "")
+        await page.screenshot(path=tmp, type="jpeg", quality=QUALITY, full_page=False,
+                              animations="disabled", timeout=30000)
+        if had_challenge and not blocked:
+            # verifica superata: si tiene il lasciapassare (cookie) cosi' i prossimi scatti non la rifanno
+            try:
+                os.makedirs(STATE_DIR, exist_ok=True)
+                await asyncio.wait_for(ctx.storage_state(path=state_path), SCRIPT_MAX_S)
+            except Exception:  # noqa: BLE001
+                pass
+    finally:
+        if page is not None:
+            await _close(page, ctx)
 
     os.replace(tmp, dest)                        # scrittura atomica: mai un file mezzo scritto
 

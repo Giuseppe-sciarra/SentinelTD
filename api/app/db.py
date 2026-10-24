@@ -1,7 +1,13 @@
+import asyncio
+import logging
+import re
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 from .config import settings
+
+log = logging.getLogger("sentinel.db")
 
 
 class Base(DeclarativeBase):
@@ -16,6 +22,72 @@ SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=
 _MIGRATION_LOCK = 841020260529
 
 
+class _OnlyNeeded:
+    """Esegue solo le modifiche allo schema che servono davvero (2.50.1).
+
+    "ALTER TABLE ... ADD COLUMN IF NOT EXISTS" su una colonna che c'e' gia' non cambia niente ma
+    prende comunque il lucchetto esclusivo della tabella, e aspetta che finisca ogni transazione
+    aperta su quella tabella. Un ciclo di aggiornamenti in modalita' firewall tiene aperta la sua
+    per minuti mentre aspetta il sito: all'avvio il pannello restava fermo su "Waiting for
+    application startup" e non si apriva (24 ottobre 2026). Ora le colonne, gli indici e i
+    "DROP NOT NULL" gia' a posto si saltano, senza toccare la tabella."""
+
+    _ADD = re.compile(r"^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+(\w+)", re.I)
+    _NULL = re.compile(r"^\s*ALTER\s+TABLE\s+(\w+)\s+ALTER\s+COLUMN\s+(\w+)\s+DROP\s+NOT\s+NULL\s*$", re.I)
+    _INDEX = re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)", re.I)
+
+    def __init__(self, conn, columns: set, nullable: set, indexes: set):
+        self._conn = conn
+        self.columns, self.nullable, self.indexes = columns, nullable, indexes
+        self.skipped = 0
+
+    def needed(self, sql: str) -> bool:
+        m = self._ADD.match(sql)
+        if m:
+            return (m.group(1).lower(), m.group(2).lower()) not in self.columns
+        m = self._NULL.match(sql)
+        if m:
+            return (m.group(1).lower(), m.group(2).lower()) not in self.nullable
+        m = self._INDEX.match(sql)
+        if m:
+            return m.group(1).lower() not in self.indexes
+        return True
+
+    async def execute(self, stmt, *args, **kw):
+        if not self.needed(str(stmt)):
+            self.skipped += 1
+            return None
+        return await self._conn.execute(stmt, *args, **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def _lock_busy(ex: Exception) -> bool:
+    orig = getattr(ex, "orig", None)
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return code == "55P03" or "lock timeout" in str(ex).lower() or "LockNotAvailable" in type(orig).__name__
+
+
+async def migrate(eng=None, attempts: int = 360, pause: float = 5.0) -> None:
+    """run_migrations con la sua transazione. Se una tabella da modificare e' occupata (un ciclo di
+    aggiornamenti in corso), si riprova ogni 5 secondi, fino a 30 minuti, scrivendolo nel log:
+    prima l'avvio restava appeso senza dire niente."""
+    eng = eng or engine
+    for attempt in range(1, attempts + 1):
+        try:
+            async with eng.begin() as conn:
+                await run_migrations(conn)
+            return
+        except Exception as ex:  # noqa: BLE001
+            if not _lock_busy(ex) or attempt == attempts:
+                raise
+            if attempt == 1 or attempt % 12 == 0:
+                log.warning("Avvio: una tabella del database e' occupata da un lavoro in corso (di solito un ciclo "
+                            "di aggiornamenti in modalita' firewall); riprovo ogni %d secondi", int(pause))
+            await asyncio.sleep(pause)
+
+
 async def run_migrations(conn) -> None:
     """
     Crea le tabelle mancanti e applica gli ALTER idempotenti (ADD COLUMN IF NOT EXISTS).
@@ -27,7 +99,20 @@ async def run_migrations(conn) -> None:
 
     # serializza i processi concorrenti (gunicorn -w 2 + worker) sul boot
     await conn.execute(text(f"SELECT pg_advisory_xact_lock({_MIGRATION_LOCK})"))
+    # nessuna attesa infinita su un lucchetto: oltre, migrate() riprova (e lo dice nel log)
+    await conn.execute(text("SET LOCAL lock_timeout = '30s'"))
     await conn.run_sync(Base.metadata.create_all)
+
+    # cosa c'e' gia': gli ALTER che non cambiano niente non devono toccare le tabelle
+    schema = "current_schema()"
+    rows = (await conn.execute(text(
+        f"SELECT table_name, column_name, is_nullable FROM information_schema.columns WHERE table_schema = {schema}"
+    ))).all()
+    idx = (await conn.execute(text(f"SELECT indexname FROM pg_indexes WHERE schemaname = {schema}"))).all()
+    conn = _OnlyNeeded(conn,
+                       {(str(t).lower(), str(c).lower()) for t, c, _ in rows},
+                       {(str(t).lower(), str(c).lower()) for t, c, n in rows if str(n).upper() == "YES"},
+                       {str(i).lower() for (i,) in idx})
 
     # contatori per categoria
     for col in ("upd_plugins", "tot_plugins", "upd_themes", "tot_themes", "upd_other", "tot_other"):

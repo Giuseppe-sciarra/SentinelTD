@@ -355,6 +355,16 @@ con loro storico e impostazioni.
   - *SiteGround*: l'antibot non si configura dal pannello del sito; chiedi al supporto di escludere
     l'IP del pannello.
   - *Sucuri, Imunify360, Wordfence, ModSecurity*: consenti l'IP del pannello nella loro whitelist.
+- **In modalità firewall il sito non prende i lavori ("non preso dal sito in tempo")** — il
+  connettore parte solo quando sul sito gira PHP: se l'hosting serve le pagine dalla sua cache
+  (SiteGround, LiteSpeed…) e le visite sono poche, il cron di WordPress non parte. Dalla 2.50
+  Sentinel sveglia il sito da solo con il browser delle anteprime (*Impostazioni → Modalità
+  firewall*). Se il registro dice che anche la sveglia viene respinta, e hai accesso all'hosting,
+  aggiungi un cron vero ogni 5 minuti: `cd /percorso/del/sito; wp cron event run --due-now`
+  (su SiteGround: *Site Tools → Devs → Cron Jobs*).
+- **Anteprima: "Ultimo controllo non riuscito"** — il testo dopo i due punti dice il motivo. Se lo
+  dice su tutti i siti insieme, `docker compose logs --since 2h shooter` mostra cosa sta facendo il
+  servizio delle anteprime; `docker compose restart shooter` lo riparte.
 - **Un sito risulta offline ma funziona (HTTP 401 `rest_forbidden`)** — il sito risponde ma il
   connettore rifiuta il token, di solito perché è stato rimosso e reinstallato. Sul sito,
   *Impostazioni → Sentinel TD → Collega questo sito a Sentinel TD* riallinea il token da solo;
