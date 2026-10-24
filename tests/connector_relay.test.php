@@ -187,10 +187,22 @@ check(count(array_filter($statusCalls, function ($c) { return $c[0] === true; })
 check(count($GLOBALS['sent'][1]['body']['results']) === 2, 'esito per entrambe');
 
 // 10e) pulsante: solo chiamata e stato, nessun lavoro (pagina veloce)
+update_option(TDPANOP_RELAY_STATE, array_merge(tdpanop_relay_state(), ['tick_at' => $T + 15000]));   // giro con lavori di 13 minuti fa
 $GLOBALS['sent'] = []; $ran = [];
 $GLOBALS['replies'] = [['mode' => 'relay', 'jobs' => [['id' => '7-x', 'action' => 'update', 'type' => 'plugin', 'slug' => 'c']]], ['mode' => 'relay', 'jobs' => []]];
 tdpanop_relay_tick($deps($T + 15810, ['force' => true, 'nojobs' => true, 'status_now' => true]));
 check($ran === [] && $GLOBALS['sent'][0]['body']['nojobs'] === true && isset($GLOBALS['sent'][0]['body']['status']), 'pulsante: stato subito, lavori al giro normale');
+// caso reale (primapiuma, 24 ottobre 2026): dopo il pulsante il cron trovava "non e' ora" e i lavori
+// in coda aspettavano altri 5 minuti; il giro normale deve partire subito
+$GLOBALS['options'][TDPANOP_RELAY_LOCK] = 0;
+delete_option(TDPANOP_RELAY_LOCK);
+check(tdpanop_relay_due($T + 15830), 'dopo il pulsante il giro con i lavori resta da fare');
+$GLOBALS['sent'] = []; $ran = [];
+$GLOBALS['replies'] = [['mode' => 'relay', 'jobs' => [['id' => '7-x', 'action' => 'update', 'type' => 'plugin', 'slug' => 'c']]], ['mode' => 'relay', 'jobs' => []]];
+tdpanop_relay_tick($deps($T + 15830));
+check(count($ran) === 1, 'e il cron subito dopo prende il lavoro');
+$GLOBALS['options'][TDPANOP_RELAY_LOCK] = 0;
+delete_option(TDPANOP_RELAY_LOCK);
 
 // 11) pulsante "Chiama Sentinel TD ora": parte anche se non e' ora, e l'esito resta
 update_option(TDPANOP_RELAY_SEEN, $T + 20000);

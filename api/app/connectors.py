@@ -464,10 +464,12 @@ async def _relay_status(site: Site, force: bool) -> dict:
             if isinstance(status, dict) and status.get("extensions") is not None:
                 return status
             if d is None:
-                log.warning("MODALITA' FIREWALL '%s' (id=%s): ricerca degli aggiornamenti non arrivata, uso l'ultimo stato",
-                            site.name, site.id)
+                log.warning("MODALITA' FIREWALL '%s' (id=%s): ricerca degli aggiornamenti non arrivata, uso l'ultimo stato "
+                            "(ultima chiamata del sito %s min fa)", site.name, site.id,
+                            await relay._minutes_since_seen_live(site))
         else:
             await relay.request_refresh(site.id)
+            await relay.maybe_wake(site)       # "Check ora": se il cron del sito e' fermo lo si sveglia
     elif await relay.refresh_due(site.id):
         await relay.request_refresh(site.id)
     data = await relay.status_for(site)

@@ -26,7 +26,7 @@ function sentinel() {
     exp: { domains: [], components: [], loadingDomains: false, loadingComponents: false, dFolder: '', dRenew: '', dFilter: '', dSel: [], busy: false, whoisProgress: null, dSort: 'folder' },
     expiryForm: { id: null, platform: 'both', name: '', provider: '', notes: '', date: '', recur: 12, recurCustom: 0 }, expiryEdit: false, expiryErr: '',
     prefsLoaded: false,
-    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 1, domain_pause_seconds: 30, domain_source_attempts: 3, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, status_check_attempts: 3, status_check_retry_seconds: 15, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], relay_enabled: true, relay_poll_minutes: 5, relay_status_minutes: 60, relay_ping_minutes: 30, relay_silent_minutes: 60, relay_refresh_hours: 6, update_every_hours: 1, busy: false, msg: '', err: '' },
+    prefs: { domain_alert_days: [30,14,7], component_alert_days: [30,14,7], domain_alert_text: '30, 14, 7', component_alert_text: '30, 14, 7', domain_scan_days: 7, domain_parallel_lookups: 1, domain_pause_seconds: 30, domain_source_attempts: 3, expiry_warning_days: 30, expiry_critical_days: 7, screenshot_every_hours: 12, history_retention_days: 400, domain_decision_days: 60, domain_alert_norenew: 1, status_check_attempts: 3, status_check_retry_seconds: 15, offline_alert_minutes: 5, email_report_mode: 'site', server_parallel: 1, server_pause_seconds: 30, server_item_pause_seconds: 5, server_limited: [], relay_enabled: true, relay_poll_minutes: 5, relay_status_minutes: 60, relay_ping_minutes: 30, relay_silent_minutes: 60, relay_refresh_hours: 6, relay_wake_minutes: 15, update_every_hours: 1, busy: false, msg: '', err: '' },
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
@@ -447,6 +447,13 @@ function sentinel() {
     },
     fmtDate(d) { if (!d) return '—'; const x = new Date(d); return x.toLocaleString(I18n.locale, { dateStyle: 'short', timeStyle: 'short' }); },
     fmtDay(d) { if (!d) return '—'; const x = new Date(d); return Number.isNaN(x.getTime()) ? '—' : x.toLocaleDateString(I18n.locale); },
+    // modalita' firewall, WordPress: il sito non chiama da molto piu' del suo giro (cron del sito fermo)
+    relayQuiet(s) {
+      if (!s || !s.relay_mode || !s.relay_seen_at || s.cms === 'joomla') return false;
+      const every = Math.max(1, Number(this.prefs && this.prefs.relay_poll_minutes) || 5);
+      const mins = (Date.now() - new Date(s.relay_seen_at)) / 60000;
+      return mins > Math.max(15, every * 3);
+    },
     ago(d) {
       if (!d) return 'mai'; const s = Math.floor((Date.now() - new Date(d)) / 1000);
       if (s < 60) return 'adesso'; if (s < 3600) return Math.floor(s / 60) + ' min fa'; if (s < 86400) return Math.floor(s / 3600) + ' h fa'; return Math.floor(s / 86400) + ' g fa';
@@ -1140,7 +1147,7 @@ function sentinel() {
                           'expiry_critical_days', 'screenshot_every_hours', 'history_retention_days', 'log_retention_days', 'log_max_rows',
                           'domain_decision_days', 'domain_alert_norenew', 'status_check_attempts', 'status_check_retry_seconds', 'offline_alert_minutes',
                           'server_parallel', 'server_pause_seconds', 'server_item_pause_seconds',
-                          'relay_poll_minutes', 'relay_status_minutes', 'relay_ping_minutes', 'relay_silent_minutes', 'relay_refresh_hours',
+                          'relay_poll_minutes', 'relay_status_minutes', 'relay_ping_minutes', 'relay_silent_minutes', 'relay_refresh_hours', 'relay_wake_minutes',
                           'update_every_hours'];
         const body = { domain_alert_days: da, component_alert_days: ca, email_report_mode: this.prefs.email_report_mode === 'cycle' ? 'cycle' : 'site',
                        server_limited: this.prefs.server_limited || [], auto_rollback: this.prefs.auto_rollback !== false, pre_update_backup: this.prefs.pre_update_backup !== false, wp_block_auto_updates: this.prefs.wp_block_auto_updates !== false, connector_auto_update: this.prefs.connector_auto_update !== false, server_labels: this.prefs.server_labels || {}, server_panels: this.prefs.server_panels || {}, server_split: this.prefs.server_split || [],

@@ -23,7 +23,7 @@ from sqlalchemy import select, delete, func, update, or_
 
 from .config import settings
 from .check_gate import updating_server
-from .db import SessionLocal, engine, run_migrations
+from .db import SessionLocal, engine, migrate
 from .models import UpdateHistory, UpdateMonthly, Site, Extension, SiteExpiry, Package
 from .connectors import SLOW_PREFIX, apply_status, fetch_status, _category, wp_rest_url, ConnectorTooOld, schedule_dns_recheck, schedule_pending_recheck, raise_for_site
 from .site_http import site_client, site_headers
@@ -923,10 +923,14 @@ async def shot_runner(ctx):
             item = await redis.zpopmin(SHOT_QUEUE, 1)
             if not item:
                 break
-            raw = item[0][0]
+            raw, score = item[0]
             site_id = int(raw.decode() if isinstance(raw, bytes) else raw)
             await redis.pexpire(RUNNER_LOCK, 900_000)
-            await _shoot_one(site_id)
+            if await _shoot_one(site_id) == "busy":
+                # shooter occupato con le istantanee degli aggiornamenti: il sito torna in fila al
+                # suo posto e il timer del minuto dopo riparte da li'. Nessun errore sul sito.
+                await redis.zadd(SHOT_QUEUE, {str(site_id): score}, nx=True)
+                break
     finally:
         try:
             cur = await redis.get(RUNNER_LOCK)
@@ -941,31 +945,67 @@ async def shoot_site(ctx, site_id: int):
     await request_shots(ctx["redis"], [site_id], manual=True)
 
 
+# Turno massimo davanti allo shooter per un'anteprima: oltre, lo shooter risponde "occupato" e il
+# sito resta in fila. Lo shooter chiude ogni foto entro SHOT_MAX_SECONDS (120 s): 45 + 120 + margine
+# stanno nei 180 secondi della chiamata.
+PREVIEW_WAIT_S = 45
+VISUAL_WAIT_S = 90
+
+
+def _shooter_busy(r: httpx.Response) -> bool:
+    if r.status_code != 503:
+        return False
+    try:
+        return (r.json() or {}).get("detail") == "busy"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _shot_error_text(ex: Exception) -> str:
     if isinstance(ex, httpx.TimeoutException):
         return "lo scatto ha superato i 3 minuti (sito molto lento o verifica antibot che non finisce)"
     if isinstance(ex, (httpx.ConnectError, httpx.NetworkError)):
         return "servizio delle anteprime non raggiungibile"
     if isinstance(ex, httpx.HTTPStatusError):
+        detail = ""
+        try:
+            detail = (ex.response.json() or {}).get("detail") or ""
+        except Exception:  # noqa: BLE001
+            pass
+        if isinstance(detail, str) and detail.strip():
+            # lo shooter dice il motivo: "la pagina non ha finito di caricarsi entro 120 secondi"...
+            if ex.response.status_code == 504:
+                return detail.strip()[:300]
+            return f"servizio delle anteprime in errore: {detail.strip()[:300]}"
         return f"servizio delle anteprime in errore (HTTP {ex.response.status_code})"
     return f"{type(ex).__name__}: {str(ex)[:200]}"
 
 
-async def _shoot_one(site_id: int) -> None:
+async def _shoot_one(site_id: int) -> str:
+    """Una foto. Torna "busy" se lo shooter era occupato (nessun tentativo fatto), altrimenti "done"."""
     async with SessionLocal() as s:
         site = await s.get(Site, site_id)
         if not site or not site.enabled:
-            return
+            return "done"
         # Persistito prima della chiamata HTTP, anche se fallisce o il worker
         # riparte. Non modifica la data dell'ultima immagine riuscita.
         prev_error = site.shot_error or ""
+        prev_attempt = site.shot_attempted_at
         site.shot_attempted_at = datetime.now(timezone.utc)
         site.shot_error = ""          # tentativo in corso: l'errore di prima non vale piu'
         await s.commit()
         try:
             # una foto alla volta: il tempo e' tutto per questo sito (video e verifiche antibot)
             async with httpx.AsyncClient(timeout=180.0) as client:
-                r = await client.post(f"{settings.SHOOTER_URL}/shot", json={"url": site.url, "site_id": site.id})
+                r = await client.post(f"{settings.SHOOTER_URL}/shot",
+                                      json={"url": site.url, "site_id": site.id, "max_wait": PREVIEW_WAIT_S})
+                if _shooter_busy(r):
+                    # non e' stato un tentativo: tutto come prima, il sito resta in fila
+                    site.shot_attempted_at = prev_attempt
+                    site.shot_error = prev_error
+                    await s.commit()
+                    log.info("Anteprima di '%s' (id=%s) rimandata: shooter occupato", site.name, site.id)
+                    return "busy"
                 r.raise_for_status()
                 res = r.json()
                 now = datetime.now(timezone.utc)
@@ -997,6 +1037,60 @@ async def _shoot_one(site_id: int) -> None:
                 await s.commit()
             except Exception:  # noqa: BLE001
                 pass
+    return "done"
+
+
+async def relay_wake(ctx, site_id: int):
+    """Sveglia di un sito in modalita' firewall che tace: il browser delle anteprime apre il sito come
+    un visitatore (supera l'antibot) e chiama wp-cron.php, cosi' il connettore fa il suo giro."""
+    async with SessionLocal() as s:
+        site = await s.get(Site, site_id)
+        if not site or not site.enabled or not site.relay_mode:
+            return
+        name, url, cms = site.name, site.url, site.cms or "wp"
+    try:
+        async with httpx.AsyncClient(timeout=VISUAL_WAIT_S + 135.0) as client:
+            r = await client.post(f"{settings.SHOOTER_URL}/wake",
+                                  json={"url": url, "site_id": site_id, "cms": cms, "max_wait": 60})
+            if _shooter_busy(r):
+                await relay.client().delete(relay._k("wake", site_id))   # si riprova al giro dopo
+                log.info("SVEGLIA '%s' (id=%s) rimandata: shooter occupato", name, site_id)
+                return
+            r.raise_for_status()
+            res = r.json()
+    except Exception as ex:  # noqa: BLE001
+        res = {"ok": False, "error": _shot_error_text(ex)}
+    if res.get("ok"):
+        log.info("SVEGLIA '%s' (id=%s): sito aperto, admin-post http %s, cron http %s", name, site_id,
+                 res.get("admin_status"), res.get("cron_status"))
+        return
+    why = ("il sito respinge anche il browser di Sentinel (antibot)" if res.get("blocked")
+           else res.get("error") or "il sito non ha risposto")
+    log.warning("SVEGLIA '%s' (id=%s) non riuscita: %s", name, site_id, why)
+    try:
+        # nel registro al massimo una volta ogni 6 ore per sito
+        if await relay.client().set(relay._k("wake_warned", site_id), "1", nx=True, ex=6 * 3600):
+            async with SessionLocal() as s:
+                site = await s.get(Site, site_id)
+                if site:
+                    await evlog(s, "connectors", "warn",
+                                f"Modalità firewall: sveglia del sito non riuscita ({why}). Il sito prende i lavori "
+                                "solo quando qualcuno lo visita: fai consentire l'IP del pannello all'hosting o "
+                                "aggiungi un cron vero sul server", site=site)
+                    await s.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def relay_wake_tick(ctx):
+    """Ogni 5 minuti: sveglia i siti in modalita' firewall che tacciono da troppo (vedi relay.maybe_wake)."""
+    await relay.refresh_config()
+    if not relay.ENABLED or relay.WAKE_SECONDS <= 0:
+        return
+    async with SessionLocal() as s:
+        rows = (await s.execute(select(Site).where(Site.enabled == True, Site.relay_mode == True))).scalars().all()  # noqa: E712
+    for site in rows:
+        await relay.maybe_wake(site, periodic=True)
 
 
 async def tick(ctx):
@@ -1061,9 +1155,11 @@ async def _visual_shot(site: Site, variant: str) -> dict | None:
     """Istantanea della home ('before'/'after'). None se lo shooter non risponde:
     il controllo visivo non deve mai bloccare gli aggiornamenti."""
     try:
-        async with httpx.AsyncClient(timeout=150.0) as client:   # lo shooter fa una cattura alla volta
+        # lo shooter fa una cattura alla volta, ciascuna entro 120 s: turno al massimo VISUAL_WAIT_S
+        async with httpx.AsyncClient(timeout=VISUAL_WAIT_S + 135.0) as client:
             r = await client.post(f"{settings.SHOOTER_URL}/shot",
-                                  json={"site_id": site.id, "url": site.url, "variant": variant})
+                                  json={"site_id": site.id, "url": site.url, "variant": variant,
+                                        "max_wait": VISUAL_WAIT_S})
             r.raise_for_status()
             return r.json()
     except Exception as ex:  # noqa: BLE001
@@ -1269,7 +1365,7 @@ async def rollback_item(site: Site, ext_type: str, slug: str, backup_file: str) 
     if relay.active(site):
         d = await relay.call(site, "rollback", {"type": ext_type, "slug": slug, "file": backup_file})
         if d is None:
-            return {"ok": False, "error": relay.not_taken_message(), "from": "", "to": ""}
+            return {"ok": False, "error": await relay.not_taken_text(site), "from": "", "to": ""}
         return {"ok": bool(d.get("ok")), "error": clean_error(d.get("error", "")), "from": str(d.get("from", "")), "to": str(d.get("to", ""))}
     try:
         async with site_client(site, timeout=180.0, follow_redirects=True) as client:
@@ -1395,7 +1491,7 @@ async def _relay_update(site: Site, action: str, params: dict) -> dict:
         return {"ok": False, "error": relay.no_jobs_message(), "new": "", "relay_timeout": True}
     d = await relay.call(site, action, params)
     if d is None:
-        return {"ok": False, "error": relay.not_taken_message(), "new": "", "relay_timeout": True}
+        return {"ok": False, "error": await relay.not_taken_text(site), "new": "", "relay_timeout": True}
     return _result_of(d)
 
 
@@ -1655,9 +1751,20 @@ async def update_site(ctx, site_id: int, manual: bool = False):
         _site = await s.get(Site, site_id)
         _url = _site.url if _site else ""
         _relay_cycle = bool(_site is not None and relay.active(_site))
+    _owner = str(ctx.get("job_id") or "")
+    if _relay_cycle and not await relay.start_cycle(site_id, _owner):
+        # modalita' firewall: c'e' gia' un ciclo su questo sito (Aggiorna premuto di nuovo,
+        # Aggiorna tutto, giro automatico): fa lui anche questo, il suo esito arriva al pannello
+        log.info("MODALITA' FIREWALL (id=%s): ciclo di aggiornamenti gia' in corso, questo non parte", site_id)
+        if manual:
+            await _set_upd_status(redis, site_id, "running",
+                                  "già in corso: in modalità firewall il sito fa un ciclo alla volta")
+        return
     server = await server_of(redis, _url) if _url else ""
     slot, wait = await srv_acquire(redis, server)
     if slot is None:
+        if _relay_cycle:
+            await relay.end_cycle(site_id, _owner)
         if manual:
             await _set_upd_status(redis, site_id, "running", "in attesa: sullo stesso server sta lavorando un altro sito")
         await redis.enqueue_job("update_site", site_id, manual, _defer_by=wait)
@@ -1691,6 +1798,7 @@ async def update_site(ctx, site_id: int, manual: bool = False):
             relay.reset_cycle_deadline(deadline_token)
             try:
                 await relay.clear_busy(site_id)
+                await relay.end_cycle(site_id, _owner)
             except Exception:  # noqa: BLE001
                 pass
         updating_server.reset(owned_context)
@@ -2372,13 +2480,16 @@ async def mass_update_now(ctx):
                 Site.auto_update == True,       # noqa: E712
             )
         )).scalars().all()
-        # filtro pending: core update oppure contatori estensioni > 0
+        # filtro pending: core update oppure contatori estensioni > 0. I siti in modalita' firewall
+        # sempre: i loro dati li manda il sito e possono non mostrare ancora gli aggiornamenti (i
+        # plugin a licenza rispondono solo alla ricerca dal backend, che il ciclo fa per primo)
         pending = [
             site for site in rows
             if site.core_update
             or (site.upd_plugins or 0) > 0
             or (site.upd_themes or 0) > 0
             or (site.upd_other or 0) > 0
+            or bool(getattr(site, "relay_mode", False))
         ]
 
     # reset contatori del riepilogo Telegram (nuovo "ciclo" manuale)
@@ -2733,8 +2844,7 @@ async def _mark_alerts_notified(new_alerts):
 async def _startup(ctx):
     """Allinea lo schema DB anche quando parte (o riparte) solo il worker, senza
     dipendere dal boot dell'API. Stessi ALTER idempotenti del lifespan API."""
-    async with engine.begin() as conn:
-        await run_migrations(conn)
+    await migrate()
 
 
 async def _shutdown(ctx):
@@ -2912,11 +3022,13 @@ class WorkerSettings:
     functions = [arq_func(poll_site, keep_result=0), arq_func(shoot_site, keep_result=0), arq_func(shot_runner, keep_result=0), update_site, cycle_summary, mass_update_now, eventlog_purge,
                  mass_update_selected, security_scan, vendor_scan, arq_func(domain_expiry_scan, timeout=21600, keep_result=0), monthly_report,
                  arq_func(retired_diagnostics_job, name="diag_site", keep_result=0), connector_rollout, plugin_catalog_scan, install_site,
-                 arq_func(client_dns_check, keep_result=0), arq_func(relay_rollback, keep_result=0)]
+                 arq_func(client_dns_check, keep_result=0), arq_func(relay_rollback, keep_result=0),
+                 arq_func(relay_wake, keep_result=0)]
     cron_jobs = [
         cron(tick, minute=set(range(0, 60, max(1, settings.SCHEDULER_TICK_MINUTES))), run_at_startup=True),
         cron(screenshot_tick, minute=set(range(60)), run_at_startup=True),
         cron(vendor_scan, minute={50}, run_at_startup=True),   # rileva update Balbooa (ogni ora)
+        cron(relay_wake_tick, minute=set(range(2, 60, 5)), run_at_startup=False),
         cron(auto_update_cycle, minute={0}),   # ogni ora al minuto 0; gira davvero ogni N ore (Impostazioni)
         cron(security_scan, hour={6}, minute={30}),   # scansione sicurezza giornaliera 06:30
         cron(domain_expiry_scan, hour={7}, minute={15}, run_at_startup=True, timeout=21600),  # reminder giornalieri; registro secondo i giorni impostati; errori ritentati ogni giorno

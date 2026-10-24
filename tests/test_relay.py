@@ -52,6 +52,7 @@ class RelayBase(unittest.IsolatedAsyncioTestCase):
         self.patches = [
             patch.object(agent, "SessionLocal", self.sessions),
             patch.object(relay, "enqueue_apply", AsyncMock()),
+            patch.object(relay, "_enqueue", AsyncMock()),
             patch.object(relay, "POLL", 0.05),
             patch("app.connectors._wp_auto_updates_choice", AsyncMock(return_value="block")),
         ]
@@ -572,6 +573,198 @@ class ThirdReviewTests(RelayBase):
             relay.apply_config({})
 
 
+class MassUpdateTests(RelayBase):
+    async def test_update_all_includes_firewall_sites_even_with_nothing_pending(self):
+        # caso reale: "Aggiorna tutto" saltava primapiuma perche' nel pannello risultava "0 da
+        # aggiornare", e la ricerca dal backend (plugin a licenza) non partiva mai
+        await self.set_site(relay_mode=True, relay_seen_at=NOW(), auto_update=True)
+        async with self.sessions() as s:
+            s.add(Site(name="Normale", url="https://normale.test", cms="wp", token="n" * 48, auto_update=True))
+            await s.commit()
+        queued = []
+
+        class Redis:
+            async def enqueue_job(self, name, *args, **kw):
+                queued.append((name, args))
+        with patch.object(worker, "SessionLocal", self.sessions):
+            await worker.mass_update_now({"redis": Redis()})
+        self.assertEqual([(n, a[0]) for n, a in queued if n == "update_site"], [("update_site", self.site_id)])
+
+
+class WakeTests(RelayBase):
+    """Sito in modalita' firewall con il cron fermo (SiteGround: pagine dalla cache, PHP non gira):
+    il browser di Sentinel lo sveglia (caso reale primapiuma, 24 ottobre 2026)."""
+
+    async def asyncTearDown(self):
+        relay.apply_config({})
+        await super().asyncTearDown()
+
+    def woken(self):
+        return [c.args for c in relay._enqueue.call_args_list if c.args and c.args[0] == "relay_wake"]
+
+    async def test_job_for_a_quiet_site_wakes_it_once(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=40))
+        site = await self.site()
+        self.assertIsNone(await relay.call(site, "refresh", {}, pickup=0.1))
+        self.assertEqual(self.woken(), [("relay_wake", self.site_id)])
+        self.assertIsNone(await relay.call(site, "update", {"type": "plugin", "slug": "x"}, pickup=0.1))
+        self.assertEqual(len(self.woken()), 1)                  # al massimo ogni 4 minuti
+
+    async def test_second_wake_while_the_job_waits(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=40))
+        with patch.object(relay, "WAKE_JOB_GAP", 0.2), patch.object(relay, "REWAKE_AFTER", 0.3):
+            self.assertIsNone(await relay.call(await self.site(), "refresh", {}, pickup=0.8))
+        self.assertEqual(len(self.woken()), 2)
+
+    async def test_site_that_calls_regularly_is_never_woken(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=40))
+        await relay.note_seen(self.site_id)                     # chiamata appena arrivata
+        site = await self.site()
+        await relay.call(site, "refresh", {}, pickup=0.1)
+        self.assertFalse(await relay.maybe_wake(site, periodic=True))
+        self.assertEqual(self.woken(), [])
+
+    async def test_periodic_wake_follows_settings(self):
+        relay.apply_config({"relay_wake_minutes": 15})
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=10))
+        self.assertFalse(await relay.maybe_wake(await self.site(), periodic=True))
+        await self.set_site(relay_seen_at=NOW() - timedelta(minutes=20))
+        self.assertTrue(await relay.maybe_wake(await self.site(), periodic=True))
+        self.assertFalse(await relay.maybe_wake(await self.site(), periodic=True))   # gia' svegliato ora
+        relay.apply_config({"relay_wake_minutes": 0})
+        await self.redis.delete(relay._k("wake", self.site_id))
+        self.assertFalse(await relay.maybe_wake(await self.site(), periodic=True))   # 0 = mai
+
+    async def test_wake_tick_only_for_firewall_sites(self):
+        relay.apply_config({"relay_wake_minutes": 15})
+        relay._CFG_AT = 10**12
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=30))
+        async with self.sessions() as s:
+            s.add(Site(name="Diretto", url="https://diretto.test", cms="wp", token="d" * 48))
+            await s.commit()
+        try:
+            with patch.object(worker, "SessionLocal", self.sessions):
+                await worker.relay_wake_tick({})
+        finally:
+            relay._CFG_AT = 0.0
+        self.assertEqual(self.woken(), [("relay_wake", self.site_id)])
+
+    async def shooter(self, response):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=30))
+        sent = []
+        client_type = httpx.AsyncClient
+
+        async def handler(request):
+            sent.append((request.url.path, json.loads(request.content)))
+            return response
+        with patch.object(worker.httpx, "AsyncClient",
+                          lambda **kw: client_type(transport=httpx.MockTransport(handler), **kw)), \
+                patch.object(worker, "SessionLocal", self.sessions):
+            await worker.relay_wake({}, self.site_id)
+        return sent
+
+    async def events(self):
+        from sqlalchemy import select
+        from app.models import EventLog
+        async with self.sessions() as s:
+            return [e.message for e in (await s.execute(select(EventLog))).scalars().all()]
+
+    async def test_wake_job_calls_the_browser_with_site_and_cms(self):
+        sent = await self.shooter(httpx.Response(200, json={"ok": True, "cron_status": 200}))
+        self.assertEqual(sent, [("/wake", {"url": "https://www.primapiuma.test", "site_id": self.site_id,
+                                            "cms": "wp", "max_wait": 60})])
+        self.assertEqual(await self.events(), [])
+
+    async def test_wake_refused_by_antibot_is_logged_once(self):
+        await self.shooter(httpx.Response(200, json={"ok": False, "blocked": True}))
+        await self.shooter(httpx.Response(200, json={"ok": False, "blocked": True}))
+        msgs = await self.events()
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("respinge anche il browser di Sentinel", msgs[0])
+
+    async def test_busy_shooter_leaves_the_wake_for_the_next_round(self):
+        await self.redis.set(relay._k("wake", self.site_id), "123")
+        await self.shooter(httpx.Response(503, json={"detail": "busy"}))
+        self.assertIsNone(await self.redis.get(relay._k("wake", self.site_id)))
+        self.assertEqual(await self.events(), [])
+
+    async def test_not_taken_message_says_why(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=50))
+        text = await relay.not_taken_text(await self.site())
+        self.assertIn("non chiama Sentinel da 50 minuti invece che ogni 5", text)
+        self.assertIn("cron di WordPress non parte", text)
+        await relay.note_seen(self.site_id)
+        self.assertEqual(await relay.not_taken_text(await self.site()), relay.not_taken_message())
+
+
+class ManualCallAndCycleTests(RelayBase):
+    """Caso reale (24 ottobre 2026): dopo ogni "Chiama Sentinel TD ora" il sito risultava sveglio
+    ("ultima chiamata 0 min fa") e la sveglia non partiva, mentre i lavori restavano in coda; e
+    piu' cicli di aggiornamento giravano insieme sullo stesso sito."""
+
+    def woken(self):
+        return [c.args for c in relay._enqueue.call_args_list if c.args and c.args[0] == "relay_wake"]
+
+    async def test_manual_call_does_not_count_as_awake(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=40))
+        await self.connector(kind="report", connector="2.41.3", jobs_ok=True, nojobs=True)   # il pulsante
+        await self.redis.set(relay._k("jobseen", self.site_id), str(relay.time.time() - 2400))
+        self.assertTrue(await relay.maybe_wake(await self.site()))
+        self.assertEqual(self.woken(), [("relay_wake", self.site_id)])
+
+    async def test_a_call_that_takes_jobs_counts(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW() - timedelta(minutes=40))
+        await self.connector(kind="report", connector="2.41.3", jobs_ok=True)
+        self.assertFalse(await relay.maybe_wake(await self.site()))
+
+    async def test_one_cycle_per_site(self):
+        self.assertTrue(await relay.start_cycle(self.site_id, "job-a"))
+        self.assertFalse(await relay.start_cycle(self.site_id, "job-b"))
+        self.assertTrue(await relay.start_cycle(self.site_id, "job-a"))   # lo stesso lavoro dopo un riavvio
+        await relay.end_cycle(self.site_id, "job-b")                       # non e' suo: non lo toglie
+        self.assertFalse(await relay.start_cycle(self.site_id, "job-c"))
+        await relay.end_cycle(self.site_id, "job-a")
+        self.assertTrue(await relay.start_cycle(self.site_id, "job-c"))
+
+    async def test_second_update_does_not_start_while_a_cycle_runs(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW(), auto_update=True)
+        await relay.start_cycle(self.site_id, "primo")
+        statuses = []
+
+        async def status(redis, sid, state, text, parts=None):
+            statuses.append((state, text))
+        inner = AsyncMock()
+        with patch.object(worker, "SessionLocal", self.sessions), patch.object(worker, "_update_site", inner), \
+                patch.object(worker, "_set_upd_status", status):
+            await worker.update_site({"redis": self.redis, "job_id": "secondo"}, self.site_id, True)
+        inner.assert_not_called()
+        self.assertEqual(statuses, [("running", "già in corso: in modalità firewall il sito fa un ciclo alla volta")])
+
+
+class StaleJobTests(RelayBase):
+    """Caso reale: dopo i riavvii del worker in coda restavano cinque ricerche, due volte lo stesso
+    aggiornamento e un'installazione, di cicli che nessuno aspettava piu'."""
+
+    async def test_expired_jobs_are_not_delivered(self):
+        old = await relay.push_job(self.site_id, "refresh", {}, expires=relay.time.time() - 1)
+        live = await relay.push_job(self.site_id, "update", {"slug": "x"}, expires=relay.time.time() + 60)
+        plain = await relay.push_job(self.site_id, "refresh", {})          # "Check ora": senza scadenza
+        jobs = await relay.take_jobs(self.site_id)
+        self.assertEqual([j["id"] for j in jobs], [live, plain])
+        self.assertNotIn("exp", jobs[0])
+        self.assertIsNone(await self.redis.get(relay._k("raw", old)))
+
+    async def test_call_sets_the_expiry(self):
+        await self.set_site(relay_mode=True, relay_seen_at=NOW())
+        await relay.note_seen(self.site_id)
+        await relay.call(await self.site(), "refresh", {}, pickup=0.1)
+        self.assertEqual(await self.redis.llen(relay._k("jobs", self.site_id)), 0)   # tolto alla scadenza
+        jid = await relay.push_job(self.site_id, "refresh", {}, expires=relay.time.time() + 30)
+        raw = json.loads((await self.redis.lrange(relay._k("jobs", self.site_id), 0, -1))[0])
+        self.assertEqual(raw["id"], jid)
+        self.assertIn("exp", raw)
+
+
 class SettingsTests(RelayBase):
     async def asyncTearDown(self):
         relay.apply_config({})
@@ -589,6 +782,9 @@ class SettingsTests(RelayBase):
         self.assertEqual((defaults["relay_poll_minutes"], defaults["relay_status_minutes"], defaults["relay_ping_minutes"],
                           defaults["relay_silent_minutes"], defaults["relay_refresh_hours"]), (5, 60, 30, 60, 6))
         self.assertFalse(out["relay_enabled"])
+        self.assertEqual(defaults["relay_wake_minutes"], 15)
+        self.assertEqual(normalize({"relay_wake_minutes": 2})["relay_wake_minutes"], 5)
+        self.assertEqual(normalize({"relay_wake_minutes": 0})["relay_wake_minutes"], 0)
 
     async def test_times_from_settings_reach_the_connector(self):
         relay.apply_config({"relay_poll_minutes": 2, "relay_status_minutes": 45, "relay_ping_minutes": 60,

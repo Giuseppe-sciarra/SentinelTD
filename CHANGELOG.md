@@ -1,5 +1,100 @@
 # Changelog
 
+## 2.50.3 — Sveglia che fa partire davvero il connettore, niente lavori scaduti
+
+Caso reale (primapiuma, 24 ottobre 2026): sveglia riuscita ("cron http 200") ma nessun giro del
+connettore; il giro è partito solo con una visita alla Bacheca di wp-admin.
+
+### Fixed
+- **La sveglia apriva wp-cron.php a vuoto.** WordPress esegue l'evento del connettore solo quando è
+  in scadenza nel suo calendario: una sveglia nel momento sbagliato non faceva partire niente. Ora
+  la sveglia apre anche `wp-admin/admin-post.php`, una pagina di WordPress che non passa mai dalla
+  cache dell'hosting: alla fine della richiesta il connettore fa il suo giro se è in ritardo, come
+  dopo una visita all'admin. Funziona con i connettori già installati. Richiede di ricostruire lo
+  shooter (`docker compose up -d --build`).
+- **Lavori scaduti consegnati al sito.** I lavori dei cicli interrotti da un riavvio del worker
+  restavano in coda (cinque ricerche, lo stesso aggiornamento due volte, un'installazione) e il
+  sito li avrebbe eseguiti tutti appena ripartito. Ora ogni lavoro ha una scadenza: se nessuno ne
+  aspetta più l'esito, non viene consegnato.
+
+## 2.50.2 — Modalità firewall: il pulsante del sito non blocca più i lavori, un ciclo alla volta (connettore WP 2.41.4)
+
+Caso reale (primapiuma, 24 ottobre 2026): sveglie riuscite, sito che chiama ("ultima chiamata 0
+min fa"), ma ricerca e aggiornamenti mai presi.
+
+### Fixed
+- **"Chiama Sentinel TD ora" rimandava i lavori di 5 minuti.** Il pulsante nella pagina del sito
+  chiama Sentinel senza prendere lavori (la pagina deve rispondere subito), ma faceva ripartire il
+  timer del giro: il cron o la sveglia subito dopo trovavano "non è ancora ora". Connettore
+  WordPress 2.41.4: il pulsante non sposta più il giro che prende i lavori.
+- **La sveglia non partiva dopo il pulsante.** Sentinel contava ogni chiamata del sito, anche quella
+  del pulsante, e lo considerava sveglio. Ora per la sveglia contano solo le chiamate che possono
+  prendere lavori. Funziona anche con i connettori già installati.
+- **Più cicli di aggiornamento insieme sullo stesso sito in modalità firewall** ("Aggiorna"
+  premuto di nuovo, "Aggiorna tutto", giro automatico, lavori ripresi dopo un riavvio del worker):
+  mettevano in coda gli stessi lavori più volte e si contendevano il sito. Ora ne gira uno per
+  sito; gli altri non partono e il pannello dice "già in corso".
+
+## 2.50.1 — Il pannello non resta più fermo all'avvio
+
+### Fixed
+- **Dopo l'aggiornamento il pannello non si apriva** (fermo su "Waiting for application startup").
+  All'avvio il pannello riallinea il database con decine di "ALTER TABLE … ADD COLUMN IF NOT
+  EXISTS": anche quando la colonna c'è già, Postgres prende il lucchetto esclusivo della tabella e
+  aspetta che finisca ogni transazione aperta su di essa. Il worker, durante un ciclo di
+  aggiornamenti in modalità firewall, ne tiene aperta una sulla tabella dei siti per minuti mentre
+  aspetta il sito: il pannello aspettava con lui, senza dire niente. Ora:
+  - colonne, indici e "DROP NOT NULL" già a posto si saltano: un avvio normale non blocca nessuna
+    tabella (provato su Postgres 16 con un ciclo in corso: avvio in 0,01 s, prima fermo);
+  - ogni attesa su un lucchetto ha un tetto di 30 secondi;
+  - se una versione nuova deve davvero aggiungere una colonna mentre un ciclo è in corso, l'avvio
+    riprova ogni 5 secondi (fino a 30 minuti) e lo scrive nel log; il worker fa lo stesso.
+
+## 2.50.0 — Sveglia dei siti col cron fermo, anteprime che non si bloccano più, "Aggiorna tutto" coi siti in modalità firewall
+
+Caso reale (24 ottobre 2026, primapiuma su SiteGround): in modalità firewall il sito non prendeva
+i lavori ("Media Cleaner non preso dal sito in tempo") e le anteprime dicevano "Ultimo controllo non
+riuscito" da ore. Connettori invariati: la sveglia funziona con quelli già installati.
+
+### Added
+- **Sveglia del sito (modalità firewall).** Il connettore parte solo quando sul sito gira PHP. Su
+  SiteGround, LiteSpeed e simili le pagine arrivano dalla cache dell'hosting: con poche visite il
+  cron di WordPress non parte mai e nessuno passa a prendere i lavori. Senza accesso all'hosting
+  non si può mettere un cron vero, e da fuori l'antibot respinge tutto quello che non è un browser
+  (Sentinel, Uptime Kuma: HTTP 202). Ora, se il sito tace, il browser delle anteprime lo apre come
+  un visitatore, supera la verifica antibot e chiama `wp-cron.php`: WordPress esegue il suo cron e
+  il connettore chiama Sentinel e prende i lavori. Parte subito quando c'è un lavoro in coda
+  (aggiornamenti, "Check ora", installazioni, ripristini) e il sito non chiama da più di un giro;
+  altrimenti ogni 15 minuti finché il sito tace. Niente immagini, video, font e fogli di stile:
+  pochi KB per il sito. Se anche il browser viene respinto, una riga nel registro (al massimo ogni
+  6 ore) dice cosa fare. *Impostazioni → Modalità firewall → se il sito tace, Sentinel lo sveglia
+  ogni* **15 minuti** (0 = mai).
+- **Il motivo, quando un lavoro non viene preso**: "non chiama Sentinel da 50 minuti invece che
+  ogni 5 — il cron di WordPress non parte…", nel registro e nell'esito dell'aggiornamento. Nella
+  scheda del sito, un avviso quando il connettore chiama di rado.
+
+### Fixed
+- **Anteprime bloccate per ore: "Ultimo controllo non riuscito" su tutti i siti.** Lo shooter fa
+  una foto alla volta e alcune operazioni nella pagina non avevano un tetto (un video che non
+  partiva, una pagina che si piantava, la verifica antibot che ricaricava la pagina): una sola
+  foto appesa teneva fermo il servizio e tutte quelle dopo scadevano "oltre i 3 minuti". Ora:
+  - ogni foto ha un tetto (**120 secondi**, `SHOT_MAX_SECONDS`): oltre si chiude e si passa alla
+    prossima, con il motivo ("la pagina non ha finito di caricarsi entro 120 secondi");
+  - ogni script nella pagina ha il suo tetto (10 s), e un video che non parte si salta dopo 3 s;
+  - il browser si riavvia da solo se cade o resta appeso su una pagina;
+  - se lo shooter è occupato (foto prima/dopo degli aggiornamenti), l'anteprima resta al suo
+    posto nella fila e riprova il minuto dopo, senza segnare un errore;
+  - un sito che respinge l'accesso automatico tiene l'ultima anteprima buona senza lavorare sulla
+    pagina di verifica (prima poteva finire in errore).
+  Provato con Chrome vero su un video che non arriva mai (foto in 15 s), una pagina che blocca il
+  browser (chiusa al tetto, la foto dopo in 1,5 s) e un antibot tipo SiteGround.
+- **"Aggiorna tutto" saltava i siti in modalità firewall.** Mette in coda solo i siti che nel
+  pannello risultano già avere aggiornamenti; un sito dietro firewall ha nel pannello i dati che
+  manda lui, e i plugin a licenza compaiono solo dopo la ricerca dal backend, che parte proprio
+  dal ciclo degli aggiornamenti. Con "0 da aggiornare" il sito veniva saltato in silenzio. Ora i
+  siti in modalità firewall (con l'aggiornamento automatico acceso) entrano sempre: il ciclo prima
+  cerca gli aggiornamenti dal backend del sito, poi aggiorna quello che trova.
+
 ## 2.49.3 — Modalità firewall regolabile, più leggera, e ricerca aggiornamenti dei plugin a licenza (connettori WP 2.41.3, Joomla 1.43.1)
 
 ### Added

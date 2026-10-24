@@ -333,6 +333,16 @@ with them your history and settings.
   - *SiteGround*: the anti-bot is not configurable from the site panel; ask support to exclude the
     panel's IP.
   - *Sucuri, Imunify360, Wordfence, ModSecurity*: allow the panel's IP in their allowlist.
+- **In firewall mode the site does not pick up jobs ("not taken by the site in time")** — the
+  connector only runs when PHP runs on the site: if the host serves pages from its cache
+  (SiteGround, LiteSpeed…) and visits are few, WordPress cron does not run. Since 2.50 Sentinel
+  wakes the site by itself with the preview browser (*Settings → Firewall mode*). If the event log
+  says the wake-up is refused too and you have access to the hosting, add a real cron job every 5
+  minutes: `cd /path/to/site; wp cron event run --due-now` (SiteGround: *Site Tools → Devs → Cron
+  Jobs*).
+- **Preview: "Last check failed"** — the text after the colon gives the reason. If every site shows
+  it at once, `docker compose logs --since 2h shooter` shows what the preview service is doing;
+  `docker compose restart shooter` restarts it.
 - **A site shows as offline but it works (HTTP 401 `rest_forbidden`)** — the site answers but the
   connector rejects the token, usually because the connector was removed and reinstalled. On
   the site, *Settings → Sentinel TD → Connect this site to Sentinel TD* realigns the token by

@@ -49,6 +49,7 @@ DEFAULTS = {
     "relay_ping_minutes": 30,       # fuori modalita': ping del connettore se Sentinel non lo cerca da tanto
     "relay_silent_minutes": 60,     # in modalita': avviso se il sito non manda lo stato da tanto
     "relay_refresh_hours": 6,       # in modalita': ricerca forzata degli aggiornamenti (dal backend del sito)
+    "relay_wake_minutes": 15,       # in modalita': sito che tace (cron fermo) svegliato dal browser di Sentinel; 0 = mai
 }
 
 
@@ -90,6 +91,7 @@ def normalize(data: dict | None) -> dict:
         ("relay_ping_minutes", 15, 240),
         ("relay_silent_minutes", 15, 1440),
         ("relay_refresh_hours", 1, 48),
+        ("relay_wake_minutes", 0, 240),
     ):
         try:
             out[key] = max(lo, min(hi, int(src.get(key, out[key]))))
@@ -107,6 +109,8 @@ def normalize(data: dict | None) -> dict:
     out["relay_enabled"] = bool(src.get("relay_enabled", out["relay_enabled"]))
     # "il sito tace" conta ogni chiamata, anche la domanda leggera: almeno tre giri mancati
     out["relay_silent_minutes"] = max(out["relay_silent_minutes"], 3 * out["relay_poll_minutes"])
+    if out["relay_wake_minutes"]:
+        out["relay_wake_minutes"] = max(5, out["relay_wake_minutes"])
     try:
         out["visual_after_delay"] = max(0, min(180, int(src.get("visual_after_delay", out["visual_after_delay"]))))
     except (TypeError, ValueError):

@@ -320,6 +320,8 @@ async def agent_relay(request: Request, payload: dict = Body(...)):
             await relay.set_jobs_ok(site_id, bool(payload.get("jobs_ok")))
         # lavori solo a chi manda il report (un ping non li esegue) e ha ancora tempo
         if not payload.get("nojobs"):
+            if payload.get("jobs_ok", True):
+                await relay.note_jobs_seen(site_id)
             wait = relay.WAIT_SECONDS if (payload.get("wait") and results) else 0
             jobs = await relay.take_jobs(site_id, wait=wait)
     return {"mode": mode, "tick": relay.TICK_SECONDS, "ping": relay.PING_SECONDS,

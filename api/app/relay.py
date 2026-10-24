@@ -44,6 +44,12 @@ DIRECT_RETRY_SECONDS = 3 * 3600   # ogni quanto si riprova la strada diretta
 WAIT_SECONDS = 45             # attesa del lavoro successivo, quando il sito ha appena finito il primo
 BUSY_SECONDS = 120            # dopo un lavoro: niente controllo normale in parallelo (vedi mark_busy)
 CYCLE_SECONDS = 1500          # un ciclo di aggiornamenti in modalita' firewall resta sotto il job_timeout di arq
+# Sveglia: se il sito tace (pagine servite dalla cache dell'hosting e poche visite, quindi PHP non
+# gira e il cron di WordPress non parte), il browser delle anteprime lo apre come un visitatore e
+# chiama wp-cron.php. Ogni WAKE_SECONDS se tace; con un lavoro in coda subito (al massimo ogni 4 min).
+WAKE_SECONDS = 900            # 0 = mai
+WAKE_JOB_GAP = 240
+REWAKE_AFTER = WAKE_JOB_GAP + 5   # lavoro ancora non preso: seconda sveglia
 
 # scadenza del ciclo degli aggiornamenti in corso (time.monotonic()): i lavori non la superano
 _DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("relay_deadline", default=None)
@@ -63,8 +69,9 @@ _loop = None
 def apply_config(prefs: dict) -> None:
     """Tempi della modalita' firewall dalle Impostazioni (gia' normalizzate da settings_store)."""
     global ENABLED, TICK_SECONDS, STATUS_SECONDS, PING_SECONDS, STALE_MINUTES, PICKUP_SECONDS, SEEN_WINDOW
-    global REFRESH_SECONDS
+    global REFRESH_SECONDS, WAKE_SECONDS
     ENABLED = bool(prefs.get("relay_enabled", True))
+    WAKE_SECONDS = 60 * int(prefs.get("relay_wake_minutes", 15))
     REFRESH_SECONDS = 3600 * int(prefs.get("relay_refresh_hours", 6))
     TICK_SECONDS = 60 * int(prefs.get("relay_poll_minutes", 5))
     STATUS_SECONDS = 60 * int(prefs.get("relay_status_minutes", 60))
@@ -190,6 +197,11 @@ async def note_seen(site_id: int) -> None:
     await client().set(_k("seen", site_id), str(time.time()), ex=7 * 86400)
 
 
+async def note_jobs_seen(site_id: int) -> None:
+    """Chiamata che puo' prendere lavori (non il pulsante "Chiama Sentinel TD ora", non un ping)."""
+    await client().set(_k("jobseen", site_id), str(time.time()), ex=7 * 86400)
+
+
 async def _minutes_since_seen_live(site) -> int:
     """Come minutes_since_seen, ma anche con le chiamate arrivate dopo che il sito e' stato letto
     dal database (un ciclo degli aggiornamenti lungo tiene il sito letto all'inizio)."""
@@ -287,9 +299,15 @@ def job_site(job_id: str) -> int | None:
     return int(head) if head.isdigit() else None
 
 
-async def push_job(site_id: int, action: str, params: dict, file: bytes | None = None) -> str:
+async def push_job(site_id: int, action: str, params: dict, file: bytes | None = None,
+                   expires: float | None = None) -> str:
+    """expires: momento (time.time()) oltre il quale nessuno aspetta piu' l'esito. Un lavoro non
+    preso entro quel momento non si consegna: prima i lavori dei cicli interrotti (riavvio del
+    worker) restavano in coda e il sito li avrebbe eseguiti tutti, anche cinque ricerche di fila."""
     job_id = f"{site_id}-{uuid.uuid4().hex}"
     job = {"id": job_id, "action": action, **params}
+    if expires:
+        job["exp"] = int(expires)
     r = client()
     if file is not None:
         await r.set(_k("file", job_id), file, ex=TTL)
@@ -317,6 +335,12 @@ async def take_jobs(site_id: int, wait: float = 0.0) -> list[dict]:
                 job = json.loads(raw)
             except Exception:  # noqa: BLE001
                 continue
+            if job.get("exp") and time.time() > float(job["exp"]):
+                # nessuno aspetta piu' questo lavoro: non si fa
+                await r.delete(_k("raw", job["id"]), _k("file", job["id"]))
+                log.info("MODALITA' FIREWALL (id=%s): lavoro scaduto non consegnato (%s)", site_id, job.get("action"))
+                continue
+            job.pop("exp", None)
             await r.set(_k("taken", job["id"]), "1", ex=TTL)
             if job.get("action") == "refresh":
                 await r.delete(_k("refresh", site_id))
@@ -466,12 +490,45 @@ async def call(site, action: str, params: dict, file: bytes | None = None,
         pickup = min(PICKUP_SECONDS if pickup is None else pickup, left * 0.7)
         run = min(RUN_SECONDS, max(5.0, left - pickup))
     await mark_busy(site.id, int((PICKUP_SECONDS if pickup is None else pickup) + (RUN_SECONDS if run is None else run)) + 60)
-    job_id = await push_job(site.id, action, params, file)
+    job_id = await push_job(site.id, action, params, file,
+                            expires=time.time() + (PICKUP_SECONDS if pickup is None else pickup) + 5)
     log.info("MODALITA' FIREWALL '%s' (id=%s): %s in coda (%s)", getattr(site, "name", ""), site.id, action, job_id)
+    await maybe_wake(site)
+    # se la prima sveglia non basta (sito lento, antibot instabile), un'altra a meta' attesa
+    rewake = asyncio.create_task(_wake_again(site))
     try:
         return await wait_result(site.id, job_id, pickup=pickup, run=run)
     finally:
+        rewake.cancel()
         await mark_busy(site.id)       # copre anche la pausa prima del lavoro successivo
+
+
+async def _wake_again(site) -> None:
+    try:
+        await asyncio.sleep(REWAKE_AFTER)
+        await maybe_wake(site)         # solo se il sito tace ancora (non ha preso il lavoro)
+    except asyncio.CancelledError:
+        pass
+
+
+async def start_cycle(site_id: int, owner: str) -> bool:
+    """Un solo ciclo di aggiornamenti in modalita' firewall per sito. Due cicli insieme mettevano
+    in coda gli stessi lavori due volte e si contendevano il sito. Lo stesso lavoro arq ripreso
+    dopo un riavvio del worker (stesso owner) puo' ripartire."""
+    key = _k("cycle", site_id)
+    if await client().set(key, owner or "?", nx=True, ex=CYCLE_SECONDS + 300):
+        return True
+    cur = await client().get(key)
+    cur = cur.decode() if isinstance(cur, bytes) else cur
+    return bool(owner) and cur == owner
+
+
+async def end_cycle(site_id: int, owner: str) -> None:
+    key = _k("cycle", site_id)
+    cur = await client().get(key)
+    cur = cur.decode() if isinstance(cur, bytes) else cur
+    if cur == (owner or "?"):
+        await client().delete(key)
 
 
 def set_cycle_deadline(seconds: float = CYCLE_SECONDS):
@@ -488,8 +545,100 @@ def cycle_time_left() -> float | None:
     return None if d is None else d - time.monotonic()
 
 
+# --------------------------------------------------------------------------
+# Sveglia del sito (cron fermo)
+# --------------------------------------------------------------------------
+async def quiet_seconds(site, jobs: bool = False) -> float:
+    """Da quanto il connettore non chiama (anche le chiamate arrivate dopo la lettura del sito).
+    jobs: solo le chiamate che possono prendere lavori. Il pulsante "Chiama Sentinel TD ora" chiama
+    senza prendere lavori: contandolo, il sito sembrava sveglio e la sveglia non partiva."""
+    if jobs:
+        try:
+            raw = await client().get(_k("jobseen", site.id))
+            if raw:
+                return max(0.0, time.time() - float(raw))
+        except Exception:  # noqa: BLE001
+            pass
+    secs = float("inf")
+    seen = _aware(getattr(site, "relay_seen_at", None))
+    if seen is not None:
+        secs = (datetime.now(timezone.utc) - seen).total_seconds()
+    try:
+        raw = await client().get(_k("seen", site.id))
+        if raw:
+            secs = min(secs, time.time() - float(raw))
+    except Exception:  # noqa: BLE001
+        pass
+    return max(0.0, secs)
+
+
+async def _enqueue(name: str, *args, **kw) -> None:
+    from arq import create_pool
+    from arq.connections import RedisSettings
+    pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+    try:
+        await pool.enqueue_job(name, *args, **kw)
+    finally:
+        await pool.close()
+
+
+async def maybe_wake(site, periodic: bool = False) -> bool:
+    """Chiede la sveglia del sito se tace. Con un lavoro in coda: se non chiama da piu' di un giro
+    (piu' 90 s), al massimo ogni 4 minuti. Giro periodico (relay_wake_tick): se tace da
+    WAKE_SECONDS, al massimo ogni WAKE_SECONDS. Torna True se la sveglia e' partita."""
+    try:
+        if not ENABLED or WAKE_SECONDS <= 0 or not str(getattr(site, "url", "") or "").startswith(("http://", "https://")):
+            return False
+        quiet = await quiet_seconds(site, jobs=not await jobs_blocked(site.id))
+        if periodic:
+            need = gap = max(WAKE_SECONDS, 2 * TICK_SECONDS + 60)
+        else:
+            need, gap = TICK_SECONDS + 90, WAKE_JOB_GAP
+        if quiet < need:
+            return False
+        r = client()
+        key = _k("wake", site.id)
+        now = time.time()
+        try:
+            last = float(await r.get(key) or 0)
+        except (TypeError, ValueError):
+            last = 0.0
+        if now - last < gap:
+            return False
+        await r.set(key, str(now), ex=86400)
+        await _enqueue("relay_wake", site.id, _job_id=f"relay-wake:{site.id}:{int(now)}")
+        log.info("MODALITA' FIREWALL '%s' (id=%s): il sito tace da %d min, sveglia col browser di Sentinel",
+                 getattr(site, "name", ""), site.id, int(quiet // 60) if quiet != float("inf") else -1)
+        return True
+    except Exception as ex:  # noqa: BLE001
+        log.warning("Sveglia del sito non richiesta (id=%s): %s", getattr(site, "id", "?"), type(ex).__name__)
+        return False
+
+
 def not_taken_message() -> str:
     return "il sito non ha preso il lavoro in tempo (modalità firewall): si riprova al prossimo giro"
+
+
+async def not_taken_text(site) -> str:
+    """Come not_taken_message, con il motivo quando e' chiaro: il sito non chiama da molto piu' del
+    suo giro. Succede quando sul sito PHP non gira (pagine servite dalla cache dell'hosting, poche
+    visite): il cron di WordPress non parte e nessuno passa a prendere i lavori."""
+    every = max(1, round(TICK_SECONDS / 60))
+    try:
+        quiet = await _minutes_since_seen_live(site)
+    except Exception:  # noqa: BLE001
+        quiet = None
+    if quiet is None or quiet >= 10**5 or quiet < max(15, 3 * every):
+        return not_taken_message()
+    if getattr(site, "cms", "wp") == "joomla":
+        return (f"il sito non ha preso il lavoro in tempo (modalità firewall): non chiama Sentinel da {quiet} minuti "
+                f"invece che ogni {every}; il connettore Joomla parte dopo una visita al sito: si riprova al prossimo giro")
+    wake = (" Sentinel ha provato a svegliarlo col suo browser: se continua, guarda nel registro se la sveglia "
+            "viene respinta dall'antibot." if WAKE_SECONDS > 0 else
+            " Accendi la sveglia in Impostazioni → Modalità firewall.")
+    return (f"il sito non ha preso il lavoro in tempo (modalità firewall): non chiama Sentinel da {quiet} minuti "
+            f"invece che ogni {every}. Sul sito il cron di WordPress non parte (pagine servite dalla cache "
+            f"dell'hosting, ad esempio SiteGround).{wake} Si riprova al prossimo giro.")
 
 
 def no_jobs_message() -> str:

@@ -489,8 +489,11 @@ async def screenshot_now(site_id: int, s: AsyncSession = Depends(get_session)):
     site.shot_attempted_at = datetime.now(timezone.utc)
     await s.commit()
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:   # video e verifiche antibot: serve margine
-            r = await client.post(f"{settings.SHOOTER_URL}/shot", json={"url": site.url, "site_id": site.id})
+        async with httpx.AsyncClient(timeout=170.0) as client:   # turno (30 s) + foto (max 120 s)
+            r = await client.post(f"{settings.SHOOTER_URL}/shot",
+                                  json={"url": site.url, "site_id": site.id, "max_wait": 30})
+            if r.status_code == 503:
+                raise HTTPException(503, "Il servizio delle anteprime è occupato: riprova tra un minuto")
             r.raise_for_status()
             res = r.json()
             now = datetime.now(timezone.utc)
@@ -503,6 +506,8 @@ async def screenshot_now(site_id: int, s: AsyncSession = Depends(get_session)):
             await s.refresh(site)
     except httpx.TimeoutException:
         raise HTTPException(504, "Shooter timeout: il sito ci mette troppo a rispondere")
+    except HTTPException:
+        raise
     except Exception as ex:  # noqa: BLE001
         raise HTTPException(502, f"Shooter error: {ex}")
     if blocked:
