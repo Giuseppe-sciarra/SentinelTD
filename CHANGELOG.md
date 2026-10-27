@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.50.8 — Librerie del repository allineate a quelle in produzione
+
+### Changed
+- **Versioni delle librerie aggiornate** in `api/requirements.txt`, `shooter/requirements.txt` e
+  `tests/requirements.txt`, alle stesse che l'aggiornamento notturno aveva già installato e provato
+  sul server: fastapi 0.162.0, uvicorn 0.54.0, gunicorn 26.2.0, sqlalchemy 2.1.6, asyncpg 0.32.0,
+  arq 0.28.0, redis 5.3.1, pydantic 2.14.1, pydantic-settings 2.16.1, python-jose 3.5.0,
+  aiosmtplib 5.1.3, bcrypt 5.0.0, pyotp 2.10.0, qrcode 8.2, webauthn 3.0.1, slowapi 0.1.10,
+  python-multipart 0.0.32, dnspython 2.9.0; nello shooter pillow 13.0.0. Prima un redeploy
+  rimetteva le versioni vecchie fino al giro della notte, e un'installazione nuova partiva da lì.
+
+### Tests
+- Tutti i test passano con le versioni nuove (Python 3.12, come nell'immagine).
+
 ## 2.50.7 — Traduzioni di WordPress: date giuste nei messaggi (connettore WP 2.41.5)
 
 ### Fixed
