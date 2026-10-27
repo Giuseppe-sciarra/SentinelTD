@@ -35,7 +35,7 @@ NOME="Sentinel TD"
 APP="api"                           # le prove e l'email partono da qui
 SERVIZI_APP="api worker shooter"    # i servizi costruiti da questa cartella (gli altri sono immagini scaricate)
 TIENI_DEF=2
-AGG_MAIL_A_DEF="tuo@indirizzo.it"   # chi riceve l'email di riepilogo se nel .env non c'è AGG_MAIL_A
+AGG_MAIL_A_DEF=""   # chi riceve l'email se nel .env non c'è AGG_MAIL_A (vuoto = REPORT_TO, come i report)
 
 dentro() {   # $1 URL → la risposta, letta dal container dell'api (che non ha curl)
   docker compose exec -T "$APP" python -c 'import sys, urllib.request as u; print(u.urlopen(sys.argv[1], timeout=30).read().decode())' "$1" 2>/dev/null

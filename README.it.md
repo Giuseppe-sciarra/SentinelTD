@@ -214,6 +214,9 @@ nano .env        # almeno: POSTGRES_PASSWORD, JWT_SECRET, ADMIN_PASSWORD, TZ
 # 2. Avvio
 docker compose up -d --build
 docker compose logs -f api worker
+
+# 3. Aggiornamento automatico ogni notte (da root, vedi «Aggiornamenti»)
+bash installa-aggiornamento.sh
 ```
 
 Genera i segreti con:
@@ -336,26 +339,21 @@ Il codice nuovo di Sentinel TD non arriva da solo: per quello resta `git pull` (
 Il passaggio a una versione maggiore di PostgreSQL o Redis non lo fa mai: si fa a mano, con
 backup e ripristino.
 
-Cosa serve:
+Cosa serve: il server di posta nel `.env` (`SMTP_HOST` e gli altri `SMTP_*`) e `REPORT_TO`, gli
+stessi dei report. Il riepilogo va a `REPORT_TO`; per mandarlo a un altro indirizzo metti
+`AGG_MAIL_A=indirizzo` nel `.env`.
 
-- il server di posta nel `.env` (`SMTP_HOST` e gli altri `SMTP_*`), lo stesso dei report;
-- nel `.env` l'indirizzo che riceve il riepilogo: `AGG_MAIL_A=tuo@indirizzo.it`. Se il tuo
-  `.env` viene da una versione prima della 2.50.4 la riga non c'è: aggiungila.
-
-Prima la prova a vuoto, che dice cosa farebbe senza toccare niente. Dalla cartella di Sentinel TD:
-
-```bash
-bash aggiorna-tutto.sh --dry-run
-```
-
-**Deve comparire**, alla fine, `── fine ──`. Poi pianificalo, da root:
+Su un'installazione nuova si attiva col passo 3 dell'installazione. Su un Sentinel TD già
+installato, dalla sua cartella e da root:
 
 ```bash
-bash installa-aggiornamento.sh
+git pull --ff-only                  # porta i due script, se non ci sono ancora (dalla 2.50.4)
+bash aggiorna-tutto.sh --dry-run    # prova a vuoto: dice cosa farebbe, non tocca niente
+bash installa-aggiornamento.sh      # lo pianifica ogni notte
 ```
 
-**Deve comparire:** `✅ Timer systemd installato: ogni notte alle 02:30` (senza systemd usa cron:
-`✅ Cron installato`). Le 02:30 stanno lontane dal giro degli aggiornamenti dei siti (ogni ora) e
+**Deve comparire**, alla fine della prova a vuoto, `── fine ──`, e dopo l'ultimo comando
+`✅ Timer systemd installato: ogni notte alle 02:30` (senza systemd usa cron: `✅ Cron installato`). Le 02:30 stanno lontane dal giro degli aggiornamenti dei siti (ogni ora) e
 prima della pulizia del registro eventi (03:10). Con un numero cambia l'ora:
 `bash installa-aggiornamento.sh 3` per le 03:00, `bash installa-aggiornamento.sh 1:30` per l'01:30.
 Il timer è *Persistent*: se all'ora stabilita il server era spento, l'aggiornamento parte appena

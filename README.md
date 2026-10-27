@@ -198,6 +198,9 @@ nano .env        # at least: POSTGRES_PASSWORD, JWT_SECRET, ADMIN_PASSWORD, TZ
 # 2. Start
 docker compose up -d --build
 docker compose logs -f api worker
+
+# 3. Nightly automatic update (as root, see "Updates")
+bash installa-aggiornamento.sh
 ```
 
 Generate the secrets with:
@@ -313,27 +316,22 @@ something to update.
 New Sentinel TD code does not arrive by itself: that is still `git pull` (above). It never moves
 to a new major version of PostgreSQL or Redis: do that by hand, with backup and restore.
 
-What it needs:
+What it needs: the mail server in `.env` (`SMTP_HOST` and the other `SMTP_*`) and `REPORT_TO`, the
+same ones used for reports. The summary goes to `REPORT_TO`; to send it somewhere else put
+`AGG_MAIL_A=address` in `.env`.
 
-- the mail server in `.env` (`SMTP_HOST` and the other `SMTP_*`), the same one used for reports;
-- in `.env`, the address that gets the summary: `AGG_MAIL_A=you@example.com`. If your `.env` comes
-  from a version before 2.50.4 the line is missing: add it.
-
-First a dry run, which says what it would do without touching anything. From the Sentinel TD
-folder:
+On a new installation it is turned on by step 3 of the installation. On a Sentinel TD that is
+already installed, from its folder and as root:
 
 ```bash
-bash aggiorna-tutto.sh --dry-run
+git pull --ff-only                  # brings the two scripts, if they are not there yet (since 2.50.4)
+bash aggiorna-tutto.sh --dry-run    # dry run: says what it would do, touches nothing
+bash installa-aggiornamento.sh      # schedules it every night
 ```
 
-**You should see** `── fine ──` at the end. Then schedule it, as root:
-
-```bash
-bash installa-aggiornamento.sh
-```
-
-**You should see:** `✅ Timer systemd installato: ogni notte alle 02:30` (without systemd it uses
-cron: `✅ Cron installato`). 02:30 keeps clear of the site update round (every hour) and comes
+**You should see** `── fine ──` at the end of the dry run, and after the last command
+`✅ Timer systemd installato: ogni notte alle 02:30` (without systemd it uses cron:
+`✅ Cron installato`). 02:30 keeps clear of the site update round (every hour) and comes
 before the event log clean-up (03:10). A number changes the time: `bash installa-aggiornamento.sh 3`
 for 03:00, `bash installa-aggiornamento.sh 1:30` for 01:30. The timer is *Persistent*: if the server
 was off at that time, the update starts as soon as it is back on. Then:

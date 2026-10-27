@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.50.5 — Riepilogo dell'aggiornamento notturno all'indirizzo giusto
+
+### Fixed
+- **Il riepilogo dell'aggiornamento notturno andava a `tuo@indirizzo.it`** quando nel `.env` mancava
+  `AGG_MAIL_A` o era rimasto quello di esempio. Ora va ad `AGG_MAIL_A` se c'è, altrimenti a
+  `REPORT_TO`, come i report. Nel `.env.example` la riga è vuota: chi l'ha copiata con
+  `tuo@indirizzo.it` la svuota o ci mette il suo indirizzo.
+
+### Docs
+- README: l'aggiornamento automatico è il passo 3 dell'installazione, con i comandi per attivarlo
+  su un'installazione che c'è già.
+
 ## 2.50.4 — Shooter con Playwright 1.64.1 (correzioni di sicurezza di Node)
 
 ### Added
