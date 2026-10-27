@@ -103,6 +103,13 @@ HEALTH_TRIES="${AGG_HEALTH_TRIES:-36}"                         # x5 s = 3 minuti
 START_TS=$(date +%s)
 STAMP="$(date '+%Y%m%d-%H%M')"
 mkdir -p backups logs
+# Tetto al log: il timer/cron lo allunga a ogni giro (>>). Oltre 1 MB tiene l'ultimo mezzo MB.
+# cat > riscrive lo stesso file, così chi ci sta già scrivendo in coda continua a scriverci.
+if [[ -f logs/aggiorna-tutto.log ]] && (( $(stat -c %s logs/aggiorna-tutto.log) > 1048576 )); then
+  tail -c 524288 logs/aggiorna-tutto.log | tail -n +2 > logs/.aggiorna-tutto.taglio &&
+    cat logs/.aggiorna-tutto.taglio > logs/aggiorna-tutto.log
+  rm -f logs/.aggiorna-tutto.taglio
+fi
 RIEPILOGO=""        # righe dell'email
 ESITO="nessuno"     # nessuno | ok | rollback | errore
 aggiungi() { RIEPILOGO+="$*"$'\n'; }

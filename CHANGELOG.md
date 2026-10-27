@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.50.6 — Tetto al log dell'aggiornamento notturno
+
+### Changed
+- **`logs/aggiorna-tutto.log` non supera più 1 MB**: a ogni giro, se è più grande, `aggiorna-tutto.sh`
+  tiene l'ultimo mezzo MB (righe intere). Gli altri log di `logs/` si riscrivono già a ogni giro.
+
 ## 2.50.5 — Riepilogo dell'aggiornamento notturno all'indirizzo giusto
 
 ### Fixed
