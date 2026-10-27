@@ -316,6 +316,75 @@ usare Git, ricostruisci entrambi i servizi che condividono il contesto di build:
 docker compose up -d --build api worker
 ```
 
+### Aggiornamento automatico ogni notte
+
+`aggiorna-tutto.sh` aggiorna da solo, ogni notte, quello su cui gira Sentinel TD:
+
+- **api e worker**: l'ultima versione di Python 3.12 con i pacchetti Debian della sua immagine e
+  tutte le librerie di `api/requirements.txt` all'ultima versione;
+- **shooter**: Playwright all'ultima versione insieme alla sua immagine (Chromium e Node compresi)
+  e le altre librerie di `shooter/requirements.txt`;
+- **PostgreSQL 16 e Redis 7**: l'immagine nuova della stessa versione, se è uscita.
+
+Dopo ogni passo prova che tutto risponda: l'api su `/healthz`, lo shooter con Chrome avviato,
+PostgreSQL e Redis col loro controllo di salute. Se qualcosa non va torna da solo ai file e alle
+immagini di prima. Alla fine manda un'email di riepilogo, solo se ha aggiornato qualcosa o se
+qualcosa è andato storto. Sentinel resta fermo 10-30 secondi, e solo quando c'è qualcosa da
+aggiornare.
+
+Il codice nuovo di Sentinel TD non arriva da solo: per quello resta `git pull` (qui sopra).
+Il passaggio a una versione maggiore di PostgreSQL o Redis non lo fa mai: si fa a mano, con
+backup e ripristino.
+
+Cosa serve:
+
+- il server di posta nel `.env` (`SMTP_HOST` e gli altri `SMTP_*`), lo stesso dei report;
+- nel `.env` l'indirizzo che riceve il riepilogo: `AGG_MAIL_A=tuo@indirizzo.it`. Se il tuo
+  `.env` viene da una versione prima della 2.50.4 la riga non c'è: aggiungila.
+
+Prima la prova a vuoto, che dice cosa farebbe senza toccare niente. Dalla cartella di Sentinel TD:
+
+```bash
+bash aggiorna-tutto.sh --dry-run
+```
+
+**Deve comparire**, alla fine, `── fine ──`. Poi pianificalo, da root:
+
+```bash
+bash installa-aggiornamento.sh
+```
+
+**Deve comparire:** `✅ Timer systemd installato: ogni notte alle 02:30` (senza systemd usa cron:
+`✅ Cron installato`). Le 02:30 stanno lontane dal giro degli aggiornamenti dei siti (ogni ora) e
+prima della pulizia del registro eventi (03:10). Con un numero cambia l'ora:
+`bash installa-aggiornamento.sh 3` per le 03:00, `bash installa-aggiornamento.sh 1:30` per l'01:30.
+Il timer è *Persistent*: se all'ora stabilita il server era spento, l'aggiornamento parte appena
+si riaccende. Poi:
+
+| Per | Comando |
+|---|---|
+| vedere se è attivo e com'è andata l'ultima volta | `bash installa-aggiornamento.sh --status` |
+| leggere il log | `tail -f logs/aggiorna-tutto.log` |
+| aggiornare subito | `bash aggiorna-tutto.sh` |
+| togliere la pianificazione | `bash installa-aggiornamento.sh --remove` |
+
+Valori facoltativi nel `.env`: `AGG_MAIL_SEMPRE=1` (email anche quando era già tutto aggiornato) e
+`AGG_TIENI_ROLLBACK=2` (quante immagini di prima tenere per tornare indietro: quella dello shooter
+pesa circa 2,5 GB).
+
+Per tenere ferma una libreria scrivi un limite nella sua riga di `requirements.txt`, con il motivo,
+per esempio `httpx<1  # motivo`: le righe con un limite restano come sono.
+
+Lo script riscrive `api/requirements.txt`, `shooter/requirements.txt` e `shooter/Dockerfile`, con
+una copia di riserva in `backups/`. Se `git pull` si ferma perché questi file sono cambiati sul
+server, rimettili come su GitHub, aggiorna e lascia che lo script riporti tutto all'ultima versione:
+
+```bash
+git checkout -- api/requirements.txt shooter/requirements.txt shooter/Dockerfile
+git pull --ff-only
+bash aggiorna-tutto.sh
+```
+
 ---
 
 ## Backup

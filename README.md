@@ -294,6 +294,74 @@ Git, rebuild both services that share the same build context:
 docker compose up -d --build api worker
 ```
 
+### Nightly automatic update
+
+Every night `aggiorna-tutto.sh` updates by itself what Sentinel TD runs on:
+
+- **api and worker**: the latest Python 3.12 with the Debian packages of its image, and every
+  library in `api/requirements.txt` at its latest version;
+- **shooter**: the latest Playwright together with its image (Chromium and Node included), and the
+  other libraries in `shooter/requirements.txt`;
+- **PostgreSQL 16 and Redis 7**: the new image of the same version, when there is one.
+
+After each step it checks that everything answers: the api on `/healthz`, the shooter with Chrome
+started, PostgreSQL and Redis through their health checks. If something breaks it goes back to the
+previous files and images by itself. At the end it emails a summary, only when it updated
+something or something went wrong. Sentinel is down for 10-30 seconds, and only when there is
+something to update.
+
+New Sentinel TD code does not arrive by itself: that is still `git pull` (above). It never moves
+to a new major version of PostgreSQL or Redis: do that by hand, with backup and restore.
+
+What it needs:
+
+- the mail server in `.env` (`SMTP_HOST` and the other `SMTP_*`), the same one used for reports;
+- in `.env`, the address that gets the summary: `AGG_MAIL_A=you@example.com`. If your `.env` comes
+  from a version before 2.50.4 the line is missing: add it.
+
+First a dry run, which says what it would do without touching anything. From the Sentinel TD
+folder:
+
+```bash
+bash aggiorna-tutto.sh --dry-run
+```
+
+**You should see** `── fine ──` at the end. Then schedule it, as root:
+
+```bash
+bash installa-aggiornamento.sh
+```
+
+**You should see:** `✅ Timer systemd installato: ogni notte alle 02:30` (without systemd it uses
+cron: `✅ Cron installato`). 02:30 keeps clear of the site update round (every hour) and comes
+before the event log clean-up (03:10). A number changes the time: `bash installa-aggiornamento.sh 3`
+for 03:00, `bash installa-aggiornamento.sh 1:30` for 01:30. The timer is *Persistent*: if the server
+was off at that time, the update starts as soon as it is back on. Then:
+
+| To | Command |
+|---|---|
+| see whether it is active and how the last run went | `bash installa-aggiornamento.sh --status` |
+| read the log | `tail -f logs/aggiorna-tutto.log` |
+| update right now | `bash aggiorna-tutto.sh` |
+| remove the schedule | `bash installa-aggiornamento.sh --remove` |
+
+Optional values in `.env`: `AGG_MAIL_SEMPRE=1` (email even when everything was already up to date)
+and `AGG_TIENI_ROLLBACK=2` (how many previous images to keep for rollback: the shooter one is about
+2.5 GB).
+
+To hold a library back, write a limit on its line in `requirements.txt`, with the reason, for
+example `httpx<1  # reason`: lines with a limit are left as they are.
+
+The script rewrites `api/requirements.txt`, `shooter/requirements.txt` and `shooter/Dockerfile`,
+with a backup copy in `backups/`. If `git pull` stops because these files changed on the server,
+put them back as they are on GitHub, pull, and let the script bring everything up to date again:
+
+```bash
+git checkout -- api/requirements.txt shooter/requirements.txt shooter/Dockerfile
+git pull --ff-only
+bash aggiorna-tutto.sh
+```
+
 ---
 
 ## Backups
