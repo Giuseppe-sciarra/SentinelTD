@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.50.4 — Shooter con Playwright 1.64.1 (correzioni di sicurezza di Node)
+
+### Added
+- **Aggiornamento automatico notturno** (`aggiorna-tutto.sh` + `installa-aggiornamento.sh`, come il CRM):
+  librerie Python all'ultima versione, Playwright con la sua immagine, immagini base, Postgres e
+  Redis; prova dopo ogni passo e rollback se qualcosa non risponde; email di riepilogo a
+  `REPORT_TO` col server SMTP del .env. `bash installa-aggiornamento.sh` lo pianifica alle 02:30.
+
+### Security
+- **Node vulnerabile dentro lo shooter.** Playwright 1.49.1 porta con sé Node 22.11.0, toccato dalle
+  correzioni di sicurezza di Node del 21 ottobre 2026 (CVE-2026-111497, decompressione Brotli, e le
+  altre). Playwright 1.64.1 ha Node 24.22.1. Immagine di base e pacchetto pip salgono insieme: devono
+  avere la stessa versione. Richiede di ricostruire lo shooter (`docker compose up -d --build`), poi
+  `docker rmi mcr.microsoft.com/playwright/python:v1.49.1-noble` per liberare circa 2 GB.
+
 ## 2.50.3 — Sveglia che fa partire davvero il connettore, niente lavori scaduti
 
 Caso reale (primapiuma, 24 ottobre 2026): sveglia riuscita ("cron http 200") ma nessun giro del

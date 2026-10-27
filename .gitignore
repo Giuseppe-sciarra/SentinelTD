@@ -34,3 +34,8 @@ Thumbs.db
 
 # Connector builds (may contain the registration key)
 dist/
+
+# Aggiornamento automatico (aggiorna-tutto.sh): log e stato sul server
+logs/
+.agg-*
+*.nuovo

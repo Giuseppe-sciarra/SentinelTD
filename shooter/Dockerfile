@@ -1,5 +1,5 @@
 # Immagine ufficiale Playwright: Chromium + tutte le librerie di sistema gia' dentro.
-FROM mcr.microsoft.com/playwright/python:v1.49.1-noble
+FROM mcr.microsoft.com/playwright/python:v1.64.1-noble
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
