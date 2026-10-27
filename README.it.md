@@ -335,7 +335,8 @@ immagini di prima. Alla fine manda un'email di riepilogo, solo se ha aggiornato 
 qualcosa è andato storto. Sentinel resta fermo 10-30 secondi, e solo quando c'è qualcosa da
 aggiornare.
 
-Il codice nuovo di Sentinel TD non arriva da solo: per quello resta `git pull` (qui sopra).
+Il codice di Sentinel TD non lo tocca e GitHub non lo guarda: la versione nuova la installi tu, con
+`git pull` (qui sopra), quando decidi.
 Il passaggio a una versione maggiore di PostgreSQL o Redis non lo fa mai: si fa a mano, con
 backup e ripristino.
 

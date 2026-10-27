@@ -313,7 +313,8 @@ previous files and images by itself. At the end it emails a summary, only when i
 something or something went wrong. Sentinel is down for 10-30 seconds, and only when there is
 something to update.
 
-New Sentinel TD code does not arrive by itself: that is still `git pull` (above). It never moves
+It never touches the Sentinel TD code and never looks at GitHub: you install a new version yourself,
+with `git pull` (above), when you decide. It never moves
 to a new major version of PostgreSQL or Redis: do that by hand, with backup and restore.
 
 What it needs: the mail server in `.env` (`SMTP_HOST` and the other `SMTP_*`) and `REPORT_TO`, the
