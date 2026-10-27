@@ -8,6 +8,8 @@
 // - non installata (download fallito)          -> fallito col motivo dell'installatore
 // - wordpress.org non risponde al ricontrollo  -> si giudica dai file scritti
 // - memoria del 2.39 rimasta sul sito          -> cancellata, la traduzione torna visibile
+// - WordPress (core): quattro file .po; vale il piu' recente (spesso il backend), sia per dire
+//   se e' gia' a posto sia per la data nel messaggio; date nel fuso del sito, non in UTC
 // Uso: php tests/connector_translations.test.php   (si rilancia da solo per gli altri casi)
 $case = $argv[1] ?? 'installata';
 $root = sys_get_temp_dir() . '/sentinel-qa-tr-' . bin2hex(random_bytes(4));
@@ -28,6 +30,8 @@ $GLOBALS['installs'] = 0;
 $GLOBALS['afters'] = [];          // cosa propone WordPress dopo la 1a, 2a installazione
 $GLOBALS['refresh_fails'] = false;
 $GLOBALS['cache_deleted'] = [];
+$GLOBALS['installed'] = [];       // wp_get_installed_translations(): tipo -> dominio -> lingua -> intestazioni
+$GLOBALS['core_po'] = [];         // pacchetto del core scaricato: file .po -> PO-Revision-Date
 function add_action(...$u) {} function add_filter(...$u) { return true; } function remove_filter(...$u) { return true; }
 function register_activation_hook(...$u) {} function register_rest_route(...$u) {}
 function apply_filters($t, $v, ...$a) { return $v; }
@@ -48,7 +52,8 @@ function wp_update_plugins() {
 }
 function wp_update_themes() {} function wp_version_check() {} function wp_clean_update_cache() {}
 function wp_get_translation_updates() { return array_map(fn($t) => (object) $t, $GLOBALS['transient']); }
-function wp_get_installed_translations($dom) { return []; }
+function wp_get_installed_translations($dom) { return $GLOBALS['installed'][$dom] ?? []; }
+function wp_date($f, $ts) { return gmdate($f, $ts + 3600); }   // sito in Europe/Rome (ora solare)
 function wp_get_pomo_file_data($f) {
     preg_match('/PO-Revision-Date: (.+)/', (string) @file_get_contents($f), $m);
     return ['PO-Revision-Date' => $m[1] ?? ''];
@@ -66,6 +71,13 @@ class Language_Pack_Upgrader {
         $GLOBALS['installs']++;
         if ($GLOBALS['case'] === 'fallita') { $this->skin->messages[] = 'Download non riuscito. <b>cURL error 28</b>'; return [null]; }
         foreach ($updates as $u) {
+            if ($u->type === 'core') {
+                file_put_contents(WP_LANG_DIR . "/{$u->language}.mo", 'mo');
+                foreach ($GLOBALS['core_po'] as $po => $date) {
+                    file_put_contents(WP_LANG_DIR . "/$po", "PO-Revision-Date: $date\n");
+                }
+                continue;
+            }
             $base = WP_LANG_DIR . "/plugins/{$u->slug}-{$u->language}";
             file_put_contents("$base.mo", 'mo');
             // il pacchetto scaricato dichiara una data piu' vecchia di quella annunciata
@@ -94,7 +106,8 @@ if ($case === 'installata') {
     $r = run_update();
     check($r['ok'] === false, 'riproposta subito dopo: non e\' un aggiornamento riuscito: ' . json_encode($r));
     check(strpos($r['error'], 'WP Mail Logging (it_IT): installata, ma WordPress la ripropone subito') !== false, 'motivo: ' . $r['error']);
-    check(strpos($r['error'], 'sul sito è del 01/10/2026 10:00') !== false && strpos($r['error'], 'wordpress.org la dà del 12/10/2026 08:00') !== false, 'date nel messaggio: ' . $r['error']);
+    // nel fuso del sito (qui un'ora avanti rispetto a UTC)
+    check(strpos($r['error'], 'sul sito è del 01/10/2026 11:00') !== false && strpos($r['error'], 'wordpress.org la dà del 12/10/2026 09:00') !== false, 'date nel messaggio: ' . $r['error']);
     check($GLOBALS['installs'] === 2, 'riprovata una volta col pacchetto proposto dopo il ricontrollo');
     check(count(tdpanop_pending_translations()) === 1, 'resta visibile da aggiornare, come nel backend');
     echo "Traduzione riproposta subito: fallito con le date, resta da aggiornare.\n";
@@ -115,6 +128,31 @@ if ($case === 'installata') {
     $r = run_update();
     check($r['ok'] === true && strpos($r['new'], 'traduzioni aggiornate (1/1): WP Mail Logging (it_IT) — non ricontrollate') === 0, 'file scritti, ricontrollo mancato: ' . json_encode($r));
     echo "Ricontrollo non riuscito: giudicata dai file scritti, e lo dice.\n";
+} elseif ($case === 'core-riproposta') {
+    // WordPress de_DE annunciata alle 20:55 UTC; il pacchetto scaricato e' quello di prima: il
+    // backend e' delle 20:00, il sito del 25/10. La data giusta e' quella del backend.
+    $core = ['type' => 'core', 'slug' => 'default', 'language' => 'de_DE', 'version' => '7.1.3',
+             'updated' => '2026-10-27 20:55:50', 'package' => 'https://downloads.wordpress.org/de.zip'];
+    $GLOBALS['transient'] = [$core];
+    $GLOBALS['afters'] = [[$core], [$core]];
+    $GLOBALS['core_po'] = ['de_DE.po' => '2026-10-25 05:15:43+0000', 'admin-de_DE.po' => '2026-10-27 20:00:00+0000',
+                           'admin-network-de_DE.po' => '2026-10-21 02:48:47+0000', 'continents-cities-de_DE.po' => '2026-10-14 20:19:24+0000'];
+    $r = run_update();
+    check($r['ok'] === false && strpos($r['error'], 'WordPress (de_DE): installata, ma WordPress la ripropone subito (sul sito è del 27/10/2026 21:00, wordpress.org la dà del 27/10/2026 21:55)') !== false,
+          'data del file piu\' recente, ora del sito: ' . json_encode($r));
+    echo "WordPress riproposto: data del file piu' recente dei quattro, nell'ora del sito.\n";
+} elseif ($case === 'core-installata') {
+    // WordPress de_DE gia' installata col pacchetto annunciato (backend delle 20:55): WordPress la
+    // ripropone lo stesso, ma non e' da aggiornare. Prima il core non risultava mai installato.
+    $core = ['type' => 'core', 'slug' => 'default', 'language' => 'de_DE', 'version' => '7.1.3',
+             'updated' => '2026-10-27 20:55:50', 'package' => 'https://downloads.wordpress.org/de.zip'];
+    $GLOBALS['transient'] = [$core];
+    $GLOBALS['installed']['core'] = ['default' => ['de_DE' => ['PO-Revision-Date' => '2026-10-25 05:15:43+0000']],
+                                     'admin' => ['de_DE' => ['PO-Revision-Date' => '2026-10-27 20:55:50+0000']]];
+    check(count(tdpanop_pending_translations()) === 0, 'gia\' a posto: non e\' da aggiornare');
+    $GLOBALS['transient'] = [array_merge($core, ['updated' => '2026-10-28 09:00:00'])];
+    check(count(tdpanop_pending_translations()) === 1, 'pacchetto piu\' nuovo: da aggiornare');
+    echo "WordPress gia' a posto: non risulta da aggiornare; con un pacchetto nuovo si'.\n";
 } elseif ($case === 'memoria239') {
     $GLOBALS['options']['tdpanop_trans_ghosts'] = ['plugin|wp-mail-logging|it_IT' => $offer['updated']];
     check(count(tdpanop_pending_translations()) === 1, 'la traduzione nascosta dal 2.39 torna visibile');
@@ -122,7 +160,7 @@ if ($case === 'installata') {
     echo "Memoria del 2.39 cancellata: Sentinel mostra quello che mostra WordPress.\n";
 }
 if ($case === 'installata') {
-    foreach (['riproposta', 'secondo', 'fallita', 'nonverificata', 'memoria239'] as $next) {
+    foreach (['riproposta', 'secondo', 'fallita', 'nonverificata', 'core-riproposta', 'core-installata', 'memoria239'] as $next) {
         passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' ' . $next, $code);
         if ($code !== 0) { exit($code); }
     }

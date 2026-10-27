@@ -4,7 +4,7 @@ Sentinel TD talks to each website through a small connector installed on the sit
 
 | Platform | Source | Current version |
 |---|---|---|
-| WordPress | `wordpress/td-panopticon/` | 2.41.4 |
+| WordPress | `wordpress/td-panopticon/` | 2.41.5 |
 | Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.43.1 |
 
 The internal identifiers (`td-panopticon` folder, `tdpanopticon` Joomla element, REST
@@ -77,6 +77,9 @@ what the site sends *out*.
   panel, *Settings → Firewall mode*), after every job and after an update search. It runs the jobs
   (update, rollback, install, uninstall, vendor update, update search) with the same functions as
   the REST/com_ajax handlers and sends the results in the same session.
+- WordPress 2.41.5: WordPress's own translation (four files: site, admin, network, city names)
+  counts as installed and up to date from its newest file, and the dates in "translations not
+  applied" use the site's time zone instead of UTC.
 - WordPress 2.41.4: the "Chiama Sentinel TD ora" button no longer postpones the next round that
   picks up jobs (before, queued updates waited 5 more minutes after every press).
 - WordPress 2.41.3: the update search runs in the site's admin context too (`admin-ajax.php`

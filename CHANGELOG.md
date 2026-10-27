@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.50.7 — Traduzioni di WordPress: date giuste nei messaggi (connettore WP 2.41.5)
+
+### Fixed
+- **"Traduzioni non applicate" con la data sbagliata per la traduzione di WordPress.** La
+  traduzione di WordPress sono quattro file: sito, backend, multisito e nomi delle città.
+  wordpress.org la annuncia con la data del file cambiato per ultimo, spesso il backend. Il
+  connettore guardava solo il file del sito, e scriveva "sul sito è del 25/10" anche quando sul
+  sito c'era già il pacchetto nuovo. Ora vale il file più recente dei quattro.
+- **La traduzione di WordPress non risultava mai installata.** Il connettore la cercava nel posto
+  sbagliato. Se WordPress riproponeva una sua traduzione già a posto, Sentinel la segnalava da
+  aggiornare invece di scartarla, come fa con quelle dei plugin e dei temi.
+- **Le date di "sul sito è del … / wordpress.org la dà del …" sono nell'ora del sito**
+  (Impostazioni → Generali di WordPress), non più in UTC, che d'inverno è un'ora indietro.
+
+### Tests
+- `tests/connector_translations.test.php`: traduzione di WordPress riproposta con la data del
+  file più recente nell'ora del sito; già a posto non risulta da aggiornare, con un pacchetto più
+  nuovo sì.
+
 ## 2.50.6 — Tetto al log dell'aggiornamento notturno
 
 ### Changed

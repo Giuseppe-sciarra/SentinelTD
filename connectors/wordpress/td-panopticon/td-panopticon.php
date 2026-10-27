@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.41.4
+ * Version: 2.41.5
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -1152,11 +1152,16 @@ function tdpanop_pending_translations(): array
     }
     $installedTrans = [];
     if (function_exists('wp_get_installed_translations')) {
-        foreach (['plugin' => 'plugins', 'theme' => 'themes', 'core' => 'default'] as $trType => $dom) {
+        // per il core si chiede 'core' (prima 'default', che non esiste: il core non risultava
+        // mai installato e una sua traduzione gia' a posto restava "da aggiornare")
+        foreach (['plugin' => 'plugins', 'theme' => 'themes', 'core' => 'core'] as $trType => $dom) {
             foreach ((array) wp_get_installed_translations($dom) as $islug => $langs) {
                 foreach ((array) $langs as $lang => $meta) {
                     $rev = isset($meta['PO-Revision-Date']) ? strtotime((string) $meta['PO-Revision-Date']) : 0;
-                    $installedTrans[$trType . '|' . $islug . '|' . $lang] = $rev ?: 0;
+                    // il core sono piu' file (sito, backend, multisito, citta'): vale il piu' recente,
+                    // come la data con cui wordpress.org annuncia il pacchetto
+                    $k = ($trType === 'core') ? 'core|default|' . $lang : $trType . '|' . $islug . '|' . $lang;
+                    $installedTrans[$k] = max($installedTrans[$k] ?? 0, $rev ?: 0);
                 }
             }
         }
@@ -1246,20 +1251,59 @@ function tdpanop_translation_names(array $labels): string
     return count($labels) > 5 ? $txt . ' e altre ' . (count($labels) - 5) : $txt;
 }
 
-/** Data della traduzione installata (PO-Revision-Date del .po sul disco), 0 se non c'e'. */
-function tdpanop_translation_installed_ts($u): int
+/**
+ * File .po di una traduzione. Quella di WordPress sono quattro: sito, backend, multisito e nomi
+ * delle citta' (de_DE.po, admin-de_DE.po, admin-network-de_DE.po, continents-cities-de_DE.po).
+ */
+function tdpanop_translation_po_files($u): array
 {
     $mo = tdpanop_translation_file($u);
-    if ($mo === '' || !function_exists('wp_get_pomo_file_data')) {
+    if ($mo === '') {
+        return [];
+    }
+    $u = (object) $u;
+    if ((string) ($u->type ?? '') === 'core') {
+        $lang = (string) ($u->language ?? '');
+        $dir = dirname($mo);
+        return [$dir . '/' . $lang . '.po', $dir . '/admin-' . $lang . '.po',
+                $dir . '/admin-network-' . $lang . '.po', $dir . '/continents-cities-' . $lang . '.po'];
+    }
+    return [substr($mo, 0, -3) . '.po'];
+}
+
+/**
+ * Data della traduzione installata (PO-Revision-Date dei .po sul disco), 0 se non c'e'.
+ * Per WordPress vale il file piu' recente dei quattro: la data con cui wordpress.org annuncia il
+ * pacchetto e' quella del file cambiato per ultimo (spesso il backend). Prima si leggeva solo il
+ * file del sito, e la data poteva sembrare vecchia anche col pacchetto giusto installato.
+ */
+function tdpanop_translation_installed_ts($u): int
+{
+    if (!function_exists('wp_get_pomo_file_data')) {
         return 0;
     }
-    $po = substr($mo, 0, -3) . '.po';
-    if (!file_exists($po)) {
-        return 0;
+    $best = 0;
+    foreach (tdpanop_translation_po_files($u) as $po) {
+        if (!file_exists($po)) {
+            continue;
+        }
+        $h = (array) wp_get_pomo_file_data($po);
+        $ts = isset($h['PO-Revision-Date']) ? strtotime((string) $h['PO-Revision-Date']) : 0;
+        $best = max($best, $ts ?: 0);
     }
-    $h = (array) wp_get_pomo_file_data($po);
-    $ts = isset($h['PO-Revision-Date']) ? strtotime((string) $h['PO-Revision-Date']) : 0;
-    return $ts ?: 0;
+    return $best;
+}
+
+/** Data e ora per i messaggi, nel fuso del sito (Impostazioni → Generali): non in UTC. */
+function tdpanop_translation_when(int $ts): string
+{
+    if (function_exists('wp_date')) {
+        $out = wp_date('d/m/Y H:i', $ts);
+        if (is_string($out) && $out !== '') {
+            return $out;
+        }
+    }
+    return gmdate('d/m/Y H:i', $ts) . ' UTC';
 }
 
 /**
@@ -1523,8 +1567,8 @@ function tdpanop_update(WP_REST_Request $req)
                 $inst  = tdpanop_translation_installed_ts($t);
                 $offer = isset($t['updated']) ? strtotime((string) $t['updated']) : 0;
                 $parts[] = $label . ': installata, ma WordPress la ripropone subito'
-                    . ($inst ? ' (sul sito è del ' . gmdate('d/m/Y H:i', $inst) : ' (WordPress non la vede installata')
-                    . ($offer ? ', wordpress.org la dà del ' . gmdate('d/m/Y H:i', $offer) . ')' : ')');
+                    . ($inst ? ' (sul sito è del ' . tdpanop_translation_when($inst) : ' (WordPress non la vede installata')
+                    . ($offer ? ', wordpress.org la dà del ' . tdpanop_translation_when($offer) . ')' : ')');
             }
             $head = $done ? 'traduzioni aggiornate ' . count($done) . ' di ' . $total . ' (' . tdpanop_translation_names($done) . '); ' : '';
             return new WP_REST_Response(['ok' => false, 'new' => '',
