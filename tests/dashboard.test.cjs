@@ -111,3 +111,10 @@ test('offline times use Rome daylight saving even when browser timezone differs'
  assert.equal(a.outageUtc('2026-07-01T22:30:00.123Z'),'2026-07-01 22:30:00 UTC');
  assert.equal(a.outageDuration({ended_at:'2026-01-01T01:00:00Z',duration_seconds:3661}),'1 h 1 min 1 s');
 });
+test('the Extensions tab counts only the table rows, not the core update',()=>{
+  const {a}=app();
+  const d={core_update:true,updates_count:1,extensions:[{slug:'td-forms',update_available:false},{slug:'yootheme',update_available:false}]};
+  assert.equal(a.extUpdates(d),0);                       // core 7.1.3 -> 7.1.4: sta in Panoramica
+  d.extensions.push({slug:'two-factor',update_available:true});
+  assert.equal(a.extUpdates(d),1);assert.equal(a.extUpdates({}),0);
+});

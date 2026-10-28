@@ -652,7 +652,7 @@
             </div>
             <div class="tabs">
               <button :class="route.tab==='overview'?'on':''" @click="go('site/'+detail.id)">Panoramica</button>
-              <button :class="route.tab==='ext'?'on':''" @click="go('site/'+detail.id+'/ext')">Estensioni <span class="badge warn" x-show="detail.updates_count" x-text="detail.updates_count"></span></button>
+              <button :class="route.tab==='ext'?'on':''" @click="go('site/'+detail.id+'/ext')">Estensioni <span class="badge warn" x-show="extUpdates(detail)" x-text="extUpdates(detail)"></span></button>
               <button :class="route.tab==='history'?'on':''" @click="go('site/'+detail.id+'/history')">Storico</button>
             </div>
 

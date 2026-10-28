@@ -424,6 +424,9 @@ function sentinel() {
     // ---------- helpers ----------
     siteTags(s) { return (s.tags || '').split(',').map(t => t.trim()).filter(Boolean); },
     hasUpd(s) { return s.core_update || (s.updates_count || 0) > 0; },
+    // aggiornamenti nella scheda Estensioni: solo le righe della tabella. Il core (WordPress/Joomla) e'
+    // in Panoramica; contato qui, la scheda diceva "1" con la tabella tutta "ok".
+    extUpdates(d) { return ((d && d.extensions) || []).filter(e => e.update_available).length; },
     isDnsIssue(s) { return s.status === 'dns_error'; },
     isCheckPending(s) { return s.status === 'check_pending'; },
     isSlow(s) { return s.status === 'slow'; },

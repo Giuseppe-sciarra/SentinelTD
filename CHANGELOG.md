@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.51.2 — Scheda Estensioni: il numero conta solo le estensioni
+
+### Fixed
+- **La scheda "Estensioni" del sito contava anche l'aggiornamento del core.** Con WordPress
+  7.1.3 → 7.1.4 da installare, la scheda mostrava "1" ma la tabella era tutta "ok", perché il core
+  non è una riga della tabella: sta in Panoramica ("disponibile 7.1.4"). Ora il numero sulla scheda
+  conta solo le righe della tabella da aggiornare. Il numero nell'elenco dei siti resta quello di
+  sempre, core compreso.
+
+### Tests
+- `tests/dashboard.test.cjs`: la scheda Estensioni non conta il core.
+
 ## 2.51.1 — Aggiornamento del core rimasto appeso: errore vero, niente "[locked]" (connettore WP 2.41.7)
 
 ### Fixed
