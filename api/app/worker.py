@@ -1471,6 +1471,25 @@ def _is_failure(r: dict) -> bool:
     return not r.get("ok") and not r.get("manual") and not r.get("held") and not r.get("retry")
 
 
+# Attesa della risposta di un aggiornamento: piu' dei 300 secondi dopo cui php-fpm (e nginx)
+# fermano PHP sulla maggior parte degli hosting, cosi' si legge l'esito vero del server invece di
+# andarsene prima. Con 180 secondi Sentinel mollava a meta' e riprovava da REST mentre il sito stava
+# ancora aggiornando il core: WordPress rispondeva "[locked]" e l'errore vero spariva.
+UPDATE_WAIT = 330.0
+
+
+def _busy_result(site: Site, ext_type: str, why: str) -> dict:
+    """Il sito ha ricevuto l'aggiornamento ma non ha dato l'esito: puo' essere ancora al lavoro o
+    essere stato fermato dal server a meta'. Niente secondo tentativo, niente altri aggiornamenti
+    su questo sito in questo giro: lo stato vero si rilegge al prossimo controllo."""
+    core = (" WordPress tiene bloccati gli aggiornamenti del core fino a 15 minuti."
+            if site.cms == "wp" and ext_type == "core" else "")
+    return {"ok": False, "new": "", "busy": True,
+            "error": f"{why}: l'aggiornamento è partito sul sito ma non si sa come è finito "
+                     f"(potrebbe essere ancora in corso o essere stato interrotto dal server).{core} "
+                     f"Il resto degli aggiornamenti di questo sito passa al prossimo giro."}
+
+
 def _params_lost(resp: dict) -> bool:
     """Il connettore ha ricevuto la richiesta senza i dati (tipo e slug vuoti): non e' l'esito
     dell'aggiornamento, e' una richiesta arrivata vuota (redirect, proxy, hosting)."""
@@ -1531,12 +1550,14 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
         return await _relay_update(site, "update", {"type": ext_type, "slug": slug, "expected": expected or "",
                                                      "backup": backup_flag})
     try:
-        async with site_client(site, timeout=180.0, follow_redirects=True) as client:
+        async with site_client(site, timeout=httpx.Timeout(UPDATE_WAIT, connect=30.0), follow_redirects=True) as client:
             if site.cms == "wp":
                 # 1) dal BACKEND del sito (admin-ajax.php): li' i plugin a licenza come
                 #    Elementor Pro caricano il proprio sistema di aggiornamento, via REST no.
                 # 2) se il connettore e' vecchio (risponde "0") o admin-ajax non e' raggiungibile,
                 #    il percorso REST di sempre.
+                # 3) MA se la richiesta e' arrivata a PHP e non e' tornato l'esito (nessuna risposta
+                #    in tempo, 502/504 del server), niente REST: l'aggiornamento e' gia' partito.
                 d = None
                 try:
                     # senza seguire i redirect: un 301/302 trasforma il POST in GET e i dati si
@@ -1549,10 +1570,17 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                         data={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag},
                         follow_redirects=False,
                     )
+                    if ra.status_code in (502, 504):
+                        return _busy_result(site, ext_type, f"il server del sito ha fermato PHP a metà (HTTP {ra.status_code}, "
+                                                            f"di solito il limite di tempo di php-fpm)")
                     if ra.status_code == 200:
                         ja = ra.json()
                         if isinstance(ja, dict) and "ok" in ja and not _params_lost(ja):
                             d = ja
+                except (httpx.ReadTimeout, httpx.RemoteProtocolError) as ex:
+                    why = (f"nessuna risposta dal sito in {int(UPDATE_WAIT)} secondi"
+                           if isinstance(ex, httpx.ReadTimeout) else "il sito ha chiuso la connessione senza rispondere")
+                    return _busy_result(site, ext_type, why)
                 except Exception:  # noqa: BLE001
                     d = None
                 if d is None:
@@ -1585,6 +1613,8 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                 else:
                     d = {"ok": False, "error": "formato risposta non valido", "new": ""}
             return _result_of(d)
+    except httpx.ReadTimeout:
+        return _busy_result(site, ext_type, f"nessuna risposta dal sito in {int(UPDATE_WAIT)} secondi")
     except Exception as ex:  # noqa: BLE001
         return {"ok": False, "error": str(ex)[:300], "new": ""}
 
@@ -2230,6 +2260,12 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                          site.name, site.id, name, current, res["new"])
                 await evlog(s, "updates", "ok", f"Aggiornato {name} {current or '?'} → {res['new']}", site=site,
                             details={"type": etype, "slug": slug, "from": current, "to": res["new"], "backup": res.get("backup") or ""})
+            if res.get("busy"):
+                # il sito puo' essere ancora al lavoro su questo aggiornamento: un altro adesso si
+                # accavallerebbe (o troverebbe il core bloccato). Il resto al prossimo giro.
+                log.warning("UPDATE SOSPESO '%s' (id=%s): %s senza esito, il resto al prossimo giro",
+                            site.name, site.id, name)
+                break
             await asyncio.sleep(item_pause)
 
         for (e, _t, sl, nm, cur) in held:

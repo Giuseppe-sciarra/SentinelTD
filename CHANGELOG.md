@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.51.1 — Aggiornamento del core rimasto appeso: errore vero, niente "[locked]" (connettore WP 2.41.7)
+
+### Fixed
+- **Niente secondo tentativo da REST quando l'aggiornamento è già partito.** Sentinel aspettava la
+  risposta 180 secondi, il sito poteva lavorare fino a 300 (limite di php-fpm). A 180 secondi
+  Sentinel riprovava da REST mentre il sito stava ancora aggiornando il core: WordPress rispondeva
+  "Attualmente è in corso un altro aggiornamento. [locked]" e il motivo vero spariva. Ora Sentinel
+  aspetta 330 secondi, oltre il limite del server. Se la richiesta è arrivata al sito ma l'esito non
+  torna (nessuna risposta, HTTP 502/504), lo scrive così e non riprova. Gli altri aggiornamenti dello
+  stesso sito passano al prossimo giro, per non accavallarsi a uno ancora in corso. Il secondo
+  tentativo da REST resta quando l'aggiornamento non è partito: connettore vecchio, redirect, backend
+  non raggiungibile.
+- **Connettore WordPress 2.41.7: un download fermo non blocca più il sito.** WordPress dà 300
+  secondi a ogni download, quanto il limite di php-fpm: un download che si piantava (linea che cade,
+  server di wordpress.org che smette di mandare dati) restava appeso finché php-fpm fermava PHP a
+  metà. Il core restava bloccato da WordPress per 15 minuti e, se il download finiva all'ultimo, la
+  copia dei file poteva essere interrotta a metà. Ora, durante un aggiornamento, i download dei
+  pacchetti hanno al massimo 150 secondi e si interrompono dopo 30 secondi senza dati. WordPress
+  riceve l'errore, libera il blocco, e Sentinel mostra il motivo vero (`cURL error 28`) invece del
+  solo "Download non riuscito.".
+- Connettore 2.41.7: se Sentinel smette di aspettare, l'aggiornamento sul sito va comunque fino in
+  fondo, senza fermarsi a metà della copia dei file. "[locked]" dice da quando WordPress tiene il
+  blocco e a che ora lo libera da solo.
+
+### Tests
+- `tests/test_update_busy.py`: nessuna risposta o 502/504 → niente REST, niente altri aggiornamenti
+  sul sito nello stesso giro; connettore vecchio o backend non raggiungibile → REST come prima.
+- `tests/connector_core_update.test.php`: limiti sui soli download dei pacchetti, errore del download
+  col motivo vero, "[locked]" con le ore, aggiornamento che non si ferma se Sentinel smette di aspettare.
+
 ## 2.51.0 — Copia prima degli aggiornamenti per singolo sito (connettore WP 2.41.6)
 
 ### Added

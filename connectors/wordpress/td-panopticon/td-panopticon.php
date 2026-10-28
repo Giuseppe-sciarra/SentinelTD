@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.41.6
+ * Version: 2.41.7
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -1377,6 +1377,69 @@ function tdpanop_refresh_update_data(): bool
         && is_object($c) && !empty($c->updates);
 }
 
+/* ---------------------------------------------------------------------------
+ * Download dei pacchetti durante un aggiornamento (2.41.7).
+ * WordPress da' 300 secondi a ogni download, quanto il limite dopo cui php-fpm ferma PHP su molti
+ * hosting. Un download che si pianta (linea che cade, server di wordpress.org che smette di mandare
+ * dati) restava appeso fino a quel limite: PHP fermato a meta' lavoro e, col core, gli aggiornamenti
+ * bloccati da WordPress per 15 minuti; se il download finiva all'ultimo, la copia dei file partiva e
+ * veniva interrotta a meta'. Qui: 30 secondi senza dati = download interrotto (WordPress libera il
+ * blocco e riporta l'errore), e al massimo 150 secondi per scaricare, cosi' resta il tempo di
+ * copiare i file prima di qualunque limite del server.
+ * ------------------------------------------------------------------------- */
+define('TDPANOP_DL_MAX', 150);     // secondi massimi per scaricare un pacchetto
+define('TDPANOP_DL_STALL', 30);    // secondi sotto 1 KB/s = download fermo
+
+function tdpanop_download_guard(): void
+{
+    static $on = false;
+    if ($on) {
+        return;
+    }
+    $on = true;
+    add_filter('http_request_args', 'tdpanop_download_args', 99, 2);
+    add_action('http_api_curl', 'tdpanop_download_curl', 99, 3);
+}
+
+function tdpanop_download_args($args, $url)
+{
+    // solo i download su file (download_url): le chiamate normali restano come sono
+    if (is_array($args) && !empty($args['stream']) && (float) ($args['timeout'] ?? 0) > TDPANOP_DL_MAX) {
+        $args['timeout'] = TDPANOP_DL_MAX;
+    }
+    return $args;
+}
+
+function tdpanop_download_curl($handle, $args, $url): void
+{
+    if (is_array($args) && !empty($args['stream']) && defined('CURLOPT_LOW_SPEED_LIMIT')) {
+        curl_setopt($handle, CURLOPT_LOW_SPEED_LIMIT, 1024);
+        curl_setopt($handle, CURLOPT_LOW_SPEED_TIME, TDPANOP_DL_STALL);
+    }
+}
+
+/** Errore dell'upgrader in chiaro: messaggio, dettaglio (per i download e' il motivo vero) e codice. */
+function tdpanop_error_text(WP_Error $err): string
+{
+    $msg  = trim(wp_strip_all_tags($err->get_error_message()));
+    $data = $err->get_error_data();
+    if (is_string($data) && trim($data) !== '' && stripos($msg, trim($data)) === false) {
+        $msg .= ': ' . trim(wp_strip_all_tags($data));
+    }
+    if (stripos($msg, 'cURL error 28') !== false) {
+        $msg .= ' (download fermo o troppo lento: interrotto dal connettore prima del limite di tempo del server)';
+    }
+    if ($err->get_error_code() === 'locked') {
+        // da quando WordPress tiene il blocco e quando lo libera da solo (Core_Upgrader: 15 minuti)
+        $ts = (int) get_option('core_updater.lock');
+        if ($ts > 0) {
+            $msg .= ' (blocco messo da WordPress il ' . tdpanop_translation_when($ts)
+                . ', si libera da solo il ' . tdpanop_translation_when($ts + 15 * MINUTE_IN_SECONDS) . ')';
+        }
+    }
+    return $msg . ' [' . $err->get_error_code() . ']';
+}
+
 function tdpanop_update(WP_REST_Request $req)
 {
     $type = (string) $req->get_param('type');
@@ -1397,6 +1460,11 @@ function tdpanop_update(WP_REST_Request $req)
     if (defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS) {
         return new WP_REST_Response(['ok' => false, 'error' => 'DISALLOW_FILE_MODS attivo: update bloccati'], 200);
     }
+
+    // Se il pannello smette di aspettare, l'aggiornamento va comunque fino in fondo: mai fermarsi
+    // a meta' della copia dei file.
+    ignore_user_abort(true);
+    tdpanop_download_guard();
 
     // Versione che il pannello si aspetta (opzionale): serve a distinguere "gia' aggiornato"
     // da "non aggiornabile da qui".
@@ -1671,7 +1739,7 @@ function tdpanop_update(WP_REST_Request $req)
         }
         if ($err !== null) {
             // errore reale: riportato com'e', con il suo codice per capire cosa e' successo
-            $emsg = trim(wp_strip_all_tags($err->get_error_message())) . ' [' . $err->get_error_code() . ']';
+            $emsg = tdpanop_error_text($err);
             return new WP_REST_Response(['ok' => false, 'current' => $verBefore, 'new' => $expected,
                 'error' => $emsg . ($lic !== '' ? ' (' . $lic . ')' : '')], 200);
         }
@@ -1679,7 +1747,7 @@ function tdpanop_update(WP_REST_Request $req)
 
     // errore esplicito dall'upgrader
     if (is_wp_error($res)) {
-        $emsg = trim(wp_strip_all_tags($res->get_error_message())) . ' [' . $res->get_error_code() . ']';
+        $emsg = tdpanop_error_text($res);
         return new WP_REST_Response(['ok' => false, 'error' => $emsg, 'current' => $verBefore], 200);
     }
 
