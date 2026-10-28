@@ -4,7 +4,7 @@ Sentinel TD talks to each website through a small connector installed on the sit
 
 | Platform | Source | Current version |
 |---|---|---|
-| WordPress | `wordpress/td-panopticon/` | 2.41.7 |
+| WordPress | `wordpress/td-panopticon/` | 2.41.8 |
 | Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.43.1 |
 
 The internal identifiers (`td-panopticon` folder, `tdpanopticon` Joomla element, REST
@@ -77,6 +77,12 @@ what the site sends *out*.
   panel, *Settings → Firewall mode*), after every job and after an update search. It runs the jobs
   (update, rollback, install, uninstall, vendor update, update search) with the same functions as
   the REST/com_ajax handlers and sends the results in the same session.
+- WordPress 2.41.8: the "Traduzioni (N)" entry in the status carries `announced`, when wordpress.org
+  announced the oldest pending translation (UTC timestamp). An update of type `language` accepts
+  `tr_wait` (minutes, from the panel's Settings) and installs only the translations announced at
+  least that long ago; if none is old enough it answers `noop` with the time they will be installed.
+  wordpress.org announces a new language pack before every download server has it, so installing
+  it right away sometimes got the old pack and the translation went yellow.
 - WordPress 2.41.7: package downloads during an update (`download_url`, files only) get at most
   150 seconds instead of WordPress's 300, and stop after 30 seconds below 1 KB/s. A stalled
   download used to hang until php-fpm's own 300-second limit killed PHP mid-update, leaving the

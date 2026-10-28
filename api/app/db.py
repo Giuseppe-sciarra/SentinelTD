@@ -167,6 +167,8 @@ async def run_migrations(conn) -> None:
 
     # Estensioni a licenza da aggiornare a mano (es. Elementor Pro senza pacchetto remoto)
     await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS update_manual BOOLEAN NOT NULL DEFAULT FALSE"))
+    # traduzioni WordPress: data dell'annuncio su wordpress.org (2.52.0)
+    await conn.execute(text("ALTER TABLE extensions ADD COLUMN IF NOT EXISTS announced_at TIMESTAMPTZ NULL"))
 
     # Domini: registrar, nameserver e decisione di rinnovo.
     for ddl in (

@@ -233,6 +233,16 @@ def _vgt(a: str, b: str) -> bool:
     return pa > pb
 
 
+def _announced(e: dict) -> datetime | None:
+    """Traduzioni WordPress (connettore 2.41.8+): quando wordpress.org ha annunciato quella in
+    attesa da piu' tempo. None per le altre estensioni e per i connettori piu' vecchi."""
+    try:
+        ts = int(e.get("announced") or 0)
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(ts, timezone.utc) if ts > 0 else None
+
+
 def _category(ext_type: str) -> str:
     """Mappa il tipo di estensione (WP/Joomla) in: plugin | theme | other."""
     t = (ext_type or "").lower()
@@ -912,6 +922,7 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
                 dlkey_missing=bool(e.get("dlkey_missing", False)),
                 update_failed_at=failed_at,
                 update_failed_version=failed_ver,
+                announced_at=_announced(e),
             ))
 
         site.tot_plugins, site.upd_plugins = tot["plugin"], upd["plugin"]

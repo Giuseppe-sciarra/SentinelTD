@@ -1525,8 +1525,10 @@ def backup_on(site: Site, global_on: bool) -> bool:
     return global_on
 
 
-async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
-    """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}."""
+async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "", tr_wait: int = 0) -> dict:
+    """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}.
+    tr_wait (traduzioni WordPress, connettore 2.41.8+): installa solo quelle annunciate da almeno
+    tr_wait minuti, le altre restano al giro dopo."""
     headers = site_headers(site, {
         "Authorization": f"Bearer {site.token}",
         # copia del token in un header che nessun hosting filtra: alcuni Apache in
@@ -1546,9 +1548,10 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
     except Exception:  # noqa: BLE001
         global_on = True
     backup_flag = "1" if backup_on(site, global_on) else "0"
+    extra = {"tr_wait": str(int(tr_wait))} if tr_wait else {}
     if relay.active(site):
         return await _relay_update(site, "update", {"type": ext_type, "slug": slug, "expected": expected or "",
-                                                     "backup": backup_flag})
+                                                     "backup": backup_flag, **extra})
     try:
         async with site_client(site, timeout=httpx.Timeout(UPDATE_WAIT, connect=30.0), follow_redirects=True) as client:
             if site.cms == "wp":
@@ -1567,7 +1570,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                         f"{site.url.rstrip('/')}/wp-admin/admin-ajax.php",
                         params={"action": "tdpanop_update", "_": cb},
                         headers=headers,
-                        data={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag},
+                        data={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag, **extra},
                         follow_redirects=False,
                     )
                     if ra.status_code in (502, 504):
@@ -1586,7 +1589,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
                 if d is None:
                     r = await client.post(
                         wp_rest_url(site, "update", f"_={cb}"),
-                        headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag},
+                        headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag, **extra},
                     )
                     raise_for_site(r)
                     d = r.json()
@@ -1955,6 +1958,17 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
 
         skipped = []   # estensioni saltate per cooldown (per log)
         skipped_dlkey = []   # saltate per download key mancante
+        # Traduzioni WordPress appena annunciate: wordpress.org le annuncia prima di avere il
+        # pacchetto nuovo su tutti i server di download (anche mezz'ora dopo). Installate subito,
+        # a volte arriva quello vecchio e vanno in giallo. Nei giri automatici si aspetta
+        # "translation_wait_minutes" (Impostazioni) dall'annuncio; con "Aggiorna" a mano no.
+        tr_fresh_min = 0
+        if site.cms == "wp" and not manual:
+            try:
+                tr_fresh_min = int((await get_operational_settings()).get("translation_wait_minutes", 90) or 0)
+            except Exception:  # noqa: BLE001
+                tr_fresh_min = 90
+        fresh = []   # (nome, da quando si installano)
         locked = site.locked_set
         for e in exts:
             # bloccato alla versione installata (pagina del sito): mai aggiornato, nemmeno a mano
@@ -1963,6 +1977,10 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # download key mancante: l'update non e' scaricabile, inutile tentare (fallirebbe).
             if getattr(e, "dlkey_missing", False):
                 skipped_dlkey.append(e.name)
+                continue
+            if (tr_fresh_min and site.cms == "wp" and e.type == "language" and e.announced_at is not None
+                    and now - _aware(e.announced_at) < timedelta(minutes=tr_fresh_min)):
+                fresh.append((e.name, _aware(e.announced_at) + timedelta(minutes=tr_fresh_min)))
                 continue
             # cooldown: salta se ha gia' fallito di recente SULLA STESSA versione target.
             # Se e' uscita una versione nuova (new_version diverso da quello fallito) -> riprova.
@@ -2028,8 +2046,14 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 log.info("UPDATE IN ATTESA '%s' (id=%s): %s %s -> %s, il Pro (%s) e' gia' stato tentato oggi senza esito",
                          site.name, site.id, nm, cur, e.new_version, pro)
 
+        for (nm, from_at) in fresh:
+            log.info("TRADUZIONI APPENA USCITE '%s' (id=%s): %s, si installano dalle %s UTC",
+                     site.name, site.id, nm, from_at.strftime("%H:%M"))
+
         if not queue:
-            if held:
+            if fresh and not (held or skipped_dlkey or skipped):
+                outcome["text"] = "niente da aggiornare adesso: traduzioni appena uscite su wordpress.org, si installano al giro dopo"
+            elif held:
                 outcome["text"] = f"niente da aggiornare adesso: {len(held)} in attesa del prodotto Pro"
             elif skipped_dlkey:
                 outcome["text"] = f"niente da aggiornare adesso: {len(skipped_dlkey)} senza download key"
@@ -2095,7 +2119,8 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 outcome["text"] = "tempo del giro finito (modalità firewall): il resto al prossimo giro"
                 outcome["relay_stop"] = True
                 break
-            res = await _update_one(site, etype, slug, expected=(ext.new_version if ext is not None else ""))
+            res = await _update_one(site, etype, slug, expected=(ext.new_version if ext is not None else ""),
+                                    **({"tr_wait": tr_fresh_min} if etype == "language" and tr_fresh_min else {}))
             if res.get("relay_timeout"):
                 # modalita' firewall: il sito non ha preso il lavoro (cron del sito fermo, sito giu').
                 # Non e' un aggiornamento fallito: niente storico ne' pausa, si riprova al prossimo giro.

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.41.7
+ * Version: 2.41.8
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -1115,13 +1115,24 @@ function tdpanop_status($req = null)
     $trans = tdpanop_pending_translations();
     if (!empty($trans)) {
         $n = count($trans);
+        // quando wordpress.org ha annunciato la traduzione in attesa da piu' tempo (2.41.8): il
+        // pannello aspetta un po' dall'annuncio prima di installare, perche' i server di download
+        // ricevono il pacchetto nuovo anche mezz'ora dopo (prima arrivava quello vecchio: giallo)
+        $announced = 0;
+        foreach ($trans as $t) {
+            $ts = tdpanop_translation_announced($t);
+            if ($ts > 0 && ($announced === 0 || $ts < $announced)) {
+                $announced = $ts;
+            }
+        }
         $extensions[] = [
-            'type'    => 'language',
-            'name'    => 'Traduzioni (' . $n . ')',
-            'slug'    => 'wp-translations',
-            'current' => '',
-            'new'     => (string) $n,
-            'update'  => true,
+            'type'      => 'language',
+            'name'      => 'Traduzioni (' . $n . ')',
+            'slug'      => 'wp-translations',
+            'current'   => '',
+            'new'       => (string) $n,
+            'update'    => true,
+            'announced' => $announced,
         ];
     }
 
@@ -1221,6 +1232,21 @@ function tdpanop_pending_translations(): array
         }
     }
     return $trans;
+}
+
+/** Quando wordpress.org ha annunciato la traduzione ("updated", in UTC). 0 se non si sa. */
+function tdpanop_translation_announced($t): int
+{
+    $t = (array) $t;
+    $u = isset($t['updated']) ? trim((string) $t['updated']) : '';
+    if ($u === '') {
+        return 0;
+    }
+    $ts = strtotime($u . ' UTC');
+    if ($ts === false) {
+        $ts = strtotime($u);
+    }
+    return $ts ? (int) $ts : 0;
 }
 
 /** Chiave di una traduzione: "tipo|slug|lingua" (come nello stato). */
@@ -1591,6 +1617,29 @@ function tdpanop_update(WP_REST_Request $req)
             if (!$due) {
                 return new WP_REST_Response(['ok' => true, 'error' => '', 'new' => 'nessuna traduzione da aggiornare'], 200);
             }
+            // Traduzioni appena annunciate (2.41.8): il pannello manda tr_wait (minuti, da
+            // Impostazioni). wordpress.org annuncia il pacchetto nuovo prima di averlo su tutti i
+            // server di download: installato subito, a volte arriva quello vecchio. Quelle piu'
+            // giovani restano al giro dopo; 2 minuti di tolleranza per gli orologi.
+            $wait = max(0, (int) $req->get_param('tr_wait')) * 60;
+            if ($wait > 0) {
+                $ready = [];
+                $next  = 0;
+                foreach ($due as $k => $t) {
+                    $ts = tdpanop_translation_announced($t);
+                    if ($ts === 0 || time() - $ts >= $wait - 120) {
+                        $ready[$k] = $t;
+                    } elseif ($next === 0 || $ts + $wait < $next) {
+                        $next = $ts + $wait;
+                    }
+                }
+                if (!$ready) {
+                    return new WP_REST_Response(['ok' => true, 'noop' => true, 'error' => '', 'new' => '',
+                        'message' => 'traduzioni appena uscite su wordpress.org: si installano dalle '
+                            . tdpanop_translation_when($next)], 200);
+                }
+                $due = $ready;
+            }
             $labels = [];
             foreach ($due as $k => $t) {
                 $labels[$k] = tdpanop_translation_label($t);
@@ -1817,6 +1866,7 @@ function tdpanop_ajax_update()
     $req->set_param('slug', sanitize_text_field(wp_unslash((string) ($_POST['slug'] ?? ''))));
     $req->set_param('expected', sanitize_text_field(wp_unslash((string) ($_POST['expected'] ?? ''))));
     $req->set_param('backup', sanitize_text_field(wp_unslash((string) ($_POST['backup'] ?? '1'))));
+    $req->set_param('tr_wait', sanitize_text_field(wp_unslash((string) ($_POST['tr_wait'] ?? '0'))));
     $resp = tdpanop_update($req);
     $data = ($resp instanceof WP_REST_Response) ? (array) $resp->get_data() : (array) $resp;
     $data['context'] = 'admin';
@@ -3008,7 +3058,7 @@ function tdpanop_relay_run(array $job, string $hub, array $deps = []): array
     try {
         $action = (string) ($job['action'] ?? '');
         $req = new WP_REST_Request('POST');
-        foreach (['type', 'slug', 'expected', 'backup', 'file', 'kind', 'activate'] as $k) {
+        foreach (['type', 'slug', 'expected', 'backup', 'tr_wait', 'file', 'kind', 'activate'] as $k) {
             if (isset($job[$k]) && is_scalar($job[$k])) {
                 $req->set_param($k, (string) $job[$k]);
             }

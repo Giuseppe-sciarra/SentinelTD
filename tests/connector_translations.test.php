@@ -12,6 +12,7 @@
 //   di un ripristino interrotto; un ripristino appena iniziato resta
 // - WordPress (core): quattro file .po; vale il piu' recente (spesso il backend), sia per dire
 //   se e' gia' a posto sia per la data nel messaggio; date nel fuso del sito, non in UTC
+// - appena annunciata (tr_wait dal pannello): non si installa prima del tempo, dopo si'
 // Uso: php tests/connector_translations.test.php   (si rilancia da solo per gli altri casi)
 $case = $argv[1] ?? 'installata';
 $root = sys_get_temp_dir() . '/sentinel-qa-tr-' . bin2hex(random_bytes(4));
@@ -171,6 +172,19 @@ if ($case === 'installata') {
     check(!is_dir("$bk/.restore-vecchio") && is_dir("$bk/.restore-adesso"), 'avanzi vecchi via, ripristino in corso no');
     check(is_file("$bk/index.php"), 'la cartella resta protetta');
     echo "Copia spenta: le copie gia' fatte si cancellano al primo aggiornamento.\n";
+} elseif ($case === 'appenauscita') {
+    // en_GB annunciata 30 minuti fa: con 90 minuti di attesa resta al giro dopo, senza installare
+    check(tdpanop_translation_announced(['updated' => '2026-10-28 19:33:54']) === gmmktime(19, 33, 54, 10, 28, 2026), 'data dell\'annuncio in UTC');
+    $GLOBALS['transient'] = [array_merge($offer, ['updated' => gmdate('Y-m-d H:i:s', time() - 1800)])];
+    $r = tdpanop_update(new WP_REST_Request(['type' => 'language', 'slug' => 'wp-translations', 'backup' => '0', 'tr_wait' => '90']))->get_data();
+    check($r['ok'] === true && !empty($r['noop']) && strpos($r['message'], 'traduzioni appena uscite su wordpress.org: si installano dalle ') === 0, 'aspetta: ' . json_encode($r));
+    check($GLOBALS['installs'] === 0, 'niente installato prima del tempo');
+    // annunciata 100 minuti fa: si installa
+    $GLOBALS['transient'] = [array_merge($offer, ['updated' => gmdate('Y-m-d H:i:s', time() - 6000)])];
+    $GLOBALS['afters'] = [[]];
+    $r = tdpanop_update(new WP_REST_Request(['type' => 'language', 'slug' => 'wp-translations', 'backup' => '0', 'tr_wait' => '90']))->get_data();
+    check($r['ok'] === true && $r['new'] === 'traduzioni aggiornate (1/1): WP Mail Logging (it_IT)', 'dopo l\'attesa: ' . json_encode($r));
+    echo "Traduzione appena annunciata: aspetta il tempo di Impostazioni, poi si installa.\n";
 } elseif ($case === 'memoria239') {
     $GLOBALS['options']['tdpanop_trans_ghosts'] = ['plugin|wp-mail-logging|it_IT' => $offer['updated']];
     check(count(tdpanop_pending_translations()) === 1, 'la traduzione nascosta dal 2.39 torna visibile');
@@ -178,7 +192,7 @@ if ($case === 'installata') {
     echo "Memoria del 2.39 cancellata: Sentinel mostra quello che mostra WordPress.\n";
 }
 if ($case === 'installata') {
-    foreach (['riproposta', 'secondo', 'fallita', 'nonverificata', 'core-riproposta', 'core-installata', 'copiaspenta', 'memoria239'] as $next) {
+    foreach (['riproposta', 'secondo', 'fallita', 'nonverificata', 'core-riproposta', 'core-installata', 'copiaspenta', 'appenauscita', 'memoria239'] as $next) {
         passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' ' . $next, $code);
         if ($code !== 0) { exit($code); }
     }

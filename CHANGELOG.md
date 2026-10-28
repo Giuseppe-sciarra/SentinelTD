@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.52.0 — Traduzioni appena uscite: si aspetta prima di installarle (connettore WP 2.41.8)
+
+### Added
+- **Impostazioni → "Traduzioni appena uscite: aspetta N minuti"** (di base 90, 0 = subito).
+  wordpress.org annuncia una traduzione nuova prima di averla su tutti i suoi server di download:
+  il 28/10 l'en_GB di WordPress è stata annunciata alle 20:33 ed è arrivata sul server di download
+  alle 21:01. Sentinel l'ha installata alle 21:02, ha preso quella vecchia, e la traduzione è
+  andata in giallo con l'email. Ora, nei giri automatici, una traduzione annunciata da meno di N
+  minuti resta al giro dopo: niente giallo, niente email. Con "Aggiorna" a mano si installa subito.
+- **Connettore WordPress 2.41.8**: manda a Sentinel quando è stata annunciata la traduzione in
+  attesa da più tempo e, all'aggiornamento, installa solo quelle annunciate da almeno N minuti (le
+  altre restano al giro dopo). Con i connettori più vecchi le traduzioni si installano come prima.
+
+### Tests
+- `tests/test_translation_wait.py`: appena annunciata → nessun tentativo né email; dopo l'attesa
+  → installata col tempo passato al connettore; a mano o con 0 minuti → subito; connettore vecchio
+  → come prima; limiti dell'impostazione.
+- `tests/connector_translations.test.php`: il connettore non installa prima del tempo e dopo sì.
+
 ## 2.51.3 — "← siti" torna alla cartella da cui sei entrato
 
 ### Fixed

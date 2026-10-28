@@ -188,6 +188,9 @@ class Extension(Base):
     update_failed_version: Mapped[str] = mapped_column(String(40), default="")
     # prodotto a licenza che non si aggiorna da remoto: riprova al massimo una volta al giorno
     update_manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    # traduzioni WordPress: quando wordpress.org ha annunciato quella in attesa da piu' tempo
+    # (connettore 2.41.8+). Il giro aspetta "translation_wait_minutes" da qui prima di installare.
+    announced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     site: Mapped[Site] = relationship(back_populates="extensions")
 
