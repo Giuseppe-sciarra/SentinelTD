@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.51.3 — "← siti" torna alla cartella da cui sei entrato
+
+### Fixed
+- **Dalla pagina di un sito, "← siti" riporta alla cartella da cui l'hai aperto** (per esempio
+  "1.Clienti interni - WP"), non più all'elenco di tutti i siti. Cambiare scheda nel sito
+  (Panoramica, Estensioni, Storico) non cambia la destinazione. Se il sito l'hai aperto dalla
+  dashboard o da un'altra pagina, si torna a tutti i siti come prima.
+
+### Tests
+- `tests/dashboard.test.cjs`: "← siti" dopo un sito aperto da una cartella, da tutti i siti, da
+  "Senza cartella" e dalla dashboard.
+
 ## 2.51.2 — Scheda Estensioni: il numero conta solo le estensioni
 
 ### Fixed

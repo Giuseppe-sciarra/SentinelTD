@@ -118,3 +118,13 @@ test('the Extensions tab counts only the table rows, not the core update',()=>{
   d.extensions.push({slug:'two-factor',update_available:true});
   assert.equal(a.extUpdates(d),1);assert.equal(a.extUpdates({}),0);
 });
+test('"← siti" goes back to the folder the site was opened from',()=>{
+  const {a,context}=app();const at=h=>{context.location={hash:h};a._readHash();};
+  at('#/folder/1.Clienti%20interni%20-%20WP');at('#/site/85');
+  assert.equal(a.backTo,'folder/1.Clienti%20interni%20-%20WP');
+  at('#/site/85/ext');at('#/site/85/history');                // cambiare scheda non lo cambia
+  assert.equal(a.backTo,'folder/1.Clienti%20interni%20-%20WP');
+  at('#/sites');at('#/site/85');assert.equal(a.backTo,'sites');  // dalla lista di tutti i siti
+  at('#/folder/__none');at('#/site/3');assert.equal(a.backTo,'folder/__none');
+  at('#/');at('#/site/85');assert.equal(a.backTo,'sites');       // dalla dashboard: tutti i siti
+});

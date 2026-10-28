@@ -30,6 +30,7 @@ function sentinel() {
 
     // ---------- ui ----------
     route: { page: 'dashboard', folder: null, siteId: null, tab: 'overview' },
+    backTo: 'sites',   // "← siti" nella pagina del sito: la lista da cui si e' entrati (cartella compresa)
     sideOpen: false, q: '', flt: 'all', sortKey: 'name', sortDir: 1,
     selMode: false, selIds: [],
     drawer: null,      // 'site' | 'install' | 'tags' | null
@@ -292,6 +293,14 @@ function sentinel() {
       else if (p[0] === 'expiries') r.page = 'domain-expiries'; // compatibilità bookmark vecchi
       else if (p[0] === 'domains' || p[0] === 'customers') { r.page = 'domains'; r.clientId = /^\d+$/.test(p[1] || '') ? parseInt(p[1]) : null; }
       else if (['security', 'history', 'settings', 'notifications', 'account', 'domain-expiries', 'component-expiries', 'reports', 'clients', 'stats', 'plugins', 'servers', 'eventlog'].includes(p[0])) r.page = p[0];
+      // entrando in un sito dalla lista di una cartella, "← siti" riporta a quella cartella (prima
+      // tornava sempre a tutti i siti). Cambiare scheda nel sito non lo cambia; da altre pagine
+      // (dashboard, ricerca, plugin...) si torna a tutti i siti.
+      const prev = this.route;
+      if (r.page === 'site') {
+        if (prev && prev.page === 'sites') this.backTo = prev.folder ? 'folder/' + encodeURIComponent(prev.folder) : 'sites';
+        else if (!(prev && prev.page === 'site')) this.backTo = 'sites';
+      }
       this.route = r; this.sideOpen = false;
     },
     go(path) { location.hash = '#/' + path; },

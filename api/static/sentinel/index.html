@@ -637,7 +637,7 @@
         <!-- ===== SITE DETAIL ===== -->
         <template x-if="route.page==='site'&&detail">
           <div>
-            <a href="#/sites" class="small mut">← siti</a>
+            <a :href="'#/' + backTo" class="small mut">← siti</a>
             <div class="row" style="margin:6px 0 14px;flex-wrap:wrap">
               <span class="dot" :class="statusTone(detail)" :title="statusTitle(detail)" style="width:12px;height:12px"></span>
               <div><h1 class="page-title" x-text="detail.name" translate="no"></h1><div class="page-sub"><a :href="detail.url" target="_blank" x-text="detail.url" translate="no"></a></div></div>
