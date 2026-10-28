@@ -20,15 +20,16 @@
 #   4. stesso giro per Postgres / Redis: riavvio solo se l'immagine è cambiata, controllo
 #      che risponda, altrimenti torna all'immagine di prima;
 #   5. pulizia di Docker che non tocca le immagini di rollback;
-#   6. email di riepilogo, spedita da Sentinel col server SMTP del .env (SMTP_*).
+#   6. email di riepilogo in testo semplice, solo se qualcosa si è aggiornato o è fallito
+#      (cosa, librerie, cosa no e perché, comandi per tornare indietro), spedita da Sentinel
+#      col server SMTP del .env (SMTP_*).
 #
 #   bash aggiorna-tutto.sh              → aggiornamento vero
 #   bash aggiorna-tutto.sh --dry-run    → dice cosa farebbe, non tocca niente
 #
 # Variabili (nel .env oppure davanti al comando):
 #   AGG_MAIL_A=tuo@indirizzo.it   chi riceve l'email (vince su AGG_MAIL_A_DEF qui sotto; vuoto ovunque = REPORT_TO)
-#   AGG_MAIL_SEMPRE=0       1 = email anche quando era già tutto aggiornato
-#   AGG_TIENI_ROLLBACK=2    quante immagini di rollback tenere (lo shooter pesa ~2,5 GB l'una)
+#   AGG_TIENI_ROLLBACK=2    quante immagini di rollback tenere per servizio (lo shooter ~2,5 GB l'una)
 # ═════════════════════════════════════════════════════════════════════════════
 PROGETTO="sentinel"
 NOME="Sentinel TD"
@@ -97,22 +98,85 @@ fi
 log() { echo "$(date '+%F %T') · $*"; }
 envval() { grep -E "^[[:space:]]*$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r'; }
 
-MAIL_SEMPRE="${AGG_MAIL_SEMPRE:-$(envval AGG_MAIL_SEMPRE)}";   MAIL_SEMPRE="${MAIL_SEMPRE:-0}"
 TIENI="${AGG_TIENI_ROLLBACK:-$(envval AGG_TIENI_ROLLBACK)}";   TIENI="${TIENI:-$TIENI_DEF}"
 HEALTH_TRIES="${AGG_HEALTH_TRIES:-36}"                         # x5 s = 3 minuti
 
 START_TS=$(date +%s)
 STAMP="$(date '+%Y%m%d-%H%M')"
 mkdir -p backups logs
-RIEPILOGO=""        # righe dell'email
-ESITO="nessuno"     # nessuno | ok | rollback | errore
-aggiungi() { RIEPILOGO+="$*"$'\n'; }
-peggiora() {        # l'esito finale è il peggiore incontrato
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Riepilogo ed email — blocco UGUALE in tutti gli aggiorna-tutto.sh (CRM, Tiditalk,
+# Sentinel TD, CataSync, TD Booking Suite): se lo cambi qui, cambialo anche negli altri.
+# Email di solo testo, che parte solo se qualcosa si è aggiornato o è fallito:
+#   AGGIORNATI · LIBRERIE AGGIORNATE · NON AGGIORNATI (con il perché) · PER TORNARE INDIETRO
+# La spedisce manda_email (più su), con il mittente e il destinatario di sempre.
+# ═════════════════════════════════════════════════════════════════════════════
+AGGIORNATI=""; LIBRERIE=""; NON_AGGIORNATI=""; INDIETRO=""
+ESITO="nessuno"     # nessuno | ok | rollback | errore: il peggiore incontrato
+peggiora() {
   case "$1" in
     errore)   ESITO="errore" ;;
     rollback) [[ "$ESITO" != "errore" ]] && ESITO="rollback" ;;
     ok)       [[ "$ESITO" == "nessuno" ]] && ESITO="ok" ;;
   esac
+  return 0
+}
+# $1 cosa, es. «db: PostgreSQL 17.5 → PostgreSQL 17.6»
+aggiornato() { AGGIORNATI+="- $1"$'\n'; peggiora ok; }
+# $1 righe «nome prima → dopo (tipo)», una per libreria
+librerie() {
+  [[ -n "${1//[[:space:]]/}" ]] || return 0
+  LIBRERIE+="$(printf '%s\n' "$1" | grep -v '^[[:space:]]*$' | sed -E 's/^[[:space:]]*([+-][[:space:]]+)?/- /')"$'\n'
+}
+# $1 cosa e perché · $2 errore | rollback | info (info: da sola non fa partire l'email) · $3 righe di dettaglio
+non_aggiornato() {
+  local d="${3:-}"
+  NON_AGGIORNATI+="- $1"$'\n'
+  [[ -n "${d//[[:space:]]/}" ]] && NON_AGGIORNATI+="$(printf '%s\n' "$d" | grep -v '^[[:space:]]*$' | sed 's/^/    /')"$'\n'
+  [[ "$2" == info ]] || peggiora "$2"
+}
+# le librerie che erano state provate, da mettere sotto il perché di un fallimento
+provate() { [[ -n "${MODIFICHE:-}" ]] && printf '\nlibrerie provate:\n%s' "$MODIFICHE"; return 0; }
+# $1 comando da lanciare sull'host per tornare alla versione di prima
+indietro() { INDIETRO+="$1"$'\n'; }
+
+# Perché un servizio non va: stato, healthcheck, riavvii, codice di uscita e righe del log.
+# Va letto PRIMA di tornare indietro (dopo, il container nuovo non c'è più).
+diagnosi() {
+  local cid; cid=$(docker compose ps -aq "$1" 2>/dev/null | head -1)
+  if [[ -n "$cid" ]]; then
+    docker inspect -f 'stato: {{.State.Status}} · healthcheck: {{if .State.Health}}{{.State.Health.Status}}{{else}}nessuno{{end}} · riavvii: {{.RestartCount}} · codice di uscita: {{.State.ExitCode}}{{if .State.Error}} · errore: {{.State.Error}}{{end}}' "$cid" 2>/dev/null
+    docker inspect -f '{{if .State.Health}}{{range .State.Health.Log}}healthcheck ({{.ExitCode}}): {{.Output}}{{"\n"}}{{end}}{{end}}' "$cid" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -3
+  fi
+  # le righe d'errore prima di tutto: un programma che rifiuta un'opzione stampa l'errore e poi tutto
+  # l'aiuto, e in coda al log resterebbe solo l'aiuto
+  echo "righe di errore nel log:"
+  docker compose logs --no-color --tail 600 "$1" 2>&1 | tr -d '\r' | sed 's/^[^|]*| //' \
+    | grep -iE 'error|errore|unrecogn|unknown|invalid|illegal|bad |wrong|cannot|can.t|failed|fatal|denied|not permitted|abort' \
+    | awk '!visto[$0]++' | tail -8
+  echo "ultime righe del log:"
+  docker compose logs --no-color --tail 12 "$1" 2>&1 | tr -d '\r' | tail -12
+}
+
+manda_riepilogo() {
+  local testo="" oggetto risp
+  [[ $DRY_RUN == 0 && "$ESITO" != "nessuno" ]] || return 0
+  [[ -n "$AGGIORNATI" ]]     && testo+="AGGIORNATI"$'\n'"$AGGIORNATI"$'\n'
+  [[ -n "$LIBRERIE" ]]       && testo+="LIBRERIE AGGIORNATE"$'\n'"$LIBRERIE"$'\n'
+  [[ -n "$NON_AGGIORNATI" ]] && testo+="NON AGGIORNATI"$'\n'"$NON_AGGIORNATI"$'\n'
+  [[ -n "$INDIETRO" ]]       && testo+="PER TORNARE INDIETRO (sull'host $(hostname))"$'\n'"$INDIETRO"
+  case "$ESITO" in
+    ok)       oggetto="$NOME: aggiornamento notturno riuscito" ;;
+    rollback) oggetto="$NOME: aggiornamento notturno annullato, torna la versione di prima" ;;
+    *)        oggetto="$NOME: aggiornamento notturno con errori" ;;
+  esac
+  if risp=$(manda_email "$oggetto" "$testo"); then
+    log "email di riepilogo inviata $(printf '%s' "$risp" | tail -1)"
+  else
+    log "⚠ email di riepilogo non inviata: $(printf '%s' "$risp" | tail -1)"
+    log "il riepilogo che avrebbe mandato:"; printf '%s\n' "$testo" | sed 's/^/      /'
+  fi
 }
 
 log "── Aggiornamento automatico di $NOME $( [[ $DRY_RUN == 1 ]] && echo '(dry-run) ' )──"
@@ -215,10 +279,8 @@ if [[ $LIB_ERR == 1 ]]; then
   log "⚠ non sono riuscito a calcolare le versioni nuove delle librerie (vedi logs/pip-risoluzione.log): tengo quelle di adesso"
   for df in "${DOCKERFILES[@]}"; do rm -f "$(dirname "$df")/requirements.txt.nuovo" "$df.nuovo"; done
   rm -f .agg-modifiche.txt
-  peggiora errore
-  aggiungi "❌ Librerie Python: controllo delle versioni nuove non riuscito, restano quelle di adesso."
-  aggiungi "   Ultime righe di logs/pip-risoluzione.log:"
-  aggiungi "$(tail -n 8 logs/pip-risoluzione.log 2>/dev/null | sed 's/^/   /')"
+  non_aggiornato "librerie Python: non sono riuscito a calcolare le versioni nuove, restano quelle di adesso (logs/pip-risoluzione.log)" errore \
+    "$(tail -n 8 logs/pip-risoluzione.log 2>/dev/null)"
 elif [[ -s .agg-modifiche.txt ]]; then
   LIB_CAMBIATE=1
   log "librerie Python da aggiornare:"; sed 's/^/   /' .agg-modifiche.txt
@@ -309,23 +371,17 @@ else
   if ! docker compose build --pull $SERVIZI_APP > logs/build.log 2>&1; then
     log "❌ build fallita (logs/build.log): non tocco $NOME che gira"
     rimetti_file
-    peggiora errore
-    aggiungi "❌ $NOME: la build della versione nuova non è riuscita. Quello che gira non è stato toccato."
-    aggiungi "   Ultime righe di logs/build.log:"
-    aggiungi "$(tail -n 12 logs/build.log | sed 's/^/   /')"
+    non_aggiornato "$NOME: la build della versione nuova non è riuscita, quello che gira non è stato toccato (logs/build.log)" errore \
+      "$(tail -n 12 logs/build.log)$(provate)"
   else
     log "build ok, riavvio $SERVIZI_APP…"
     docker compose up -d $SERVIZI_APP >> logs/build.log 2>&1
     KO=""
     for s in $SERVIZI_APP; do controlla "$s" || { KO="$s"; break; }; done
     if [[ -n "$KO" ]]; then
-      ERR=$(docker compose logs --tail 25 "$KO" 2>&1 | tail -25)
+      ERR=$(diagnosi "$KO")
       ripristina_app "$KO non parte o non risponde con la versione nuova"
-      peggiora rollback
-      aggiungi "⚠ $NOME: con la versione nuova $KO non partiva o non rispondeva. È tornato alla versione di prima, funziona come ieri."
-      aggiungi "   Ultime righe del log di $KO:"; aggiungi "$(printf '%s\n' "$ERR" | sed 's/^/   /')"
-      [[ -n "$MODIFICHE" ]] && { aggiungi "   Versioni che erano state provate:"; aggiungi "$MODIFICHE"; }
-      aggiungi "   Domani riprova da solo; se il problema resta, metti un limite alla libreria in requirements.txt (es. «nome<3  # motivo»)."
+      non_aggiornato "$NOME: con la versione nuova $KO non partiva o non rispondeva, è tornato alla versione di prima" rollback "$ERR$(provate)"
     else
       firma > .agg-ultima-build
       # basi non più usate (es. la Playwright vecchia): via il nome, i dati restano finché servono al rollback
@@ -333,18 +389,16 @@ else
         grep -qsF "FROM $b" "${DOCKERFILES[@]}" || docker rmi "$b" > /dev/null 2>&1 || true
       done
       log "✅ $NOME aggiornato e provato"
-      peggiora ok
-      aggiungi "✅ $NOME aggiornato ($(motivi)), prove passate:"
+      aggiornato "$NOME ricostruito ($(motivi))"
       for s in $SERVIZI_APP; do
         v=$(versione "$s")
-        [[ -n "$v" && "$v" != "${V_PRIMA[$s]}" ]] && aggiungi "   $s: ${V_PRIMA[$s]:-—} → $v"
+        [[ -n "$v" && "$v" != "${V_PRIMA[$s]}" ]] && aggiornato "$s: ${V_PRIMA[$s]:-—} → $v"
       done
-      [[ -n "$MODIFICHE" ]] && { aggiungi "   Librerie cambiate:"; aggiungi "$MODIFICHE"; }
-      aggiungi "   Per tornare alla versione di prima, sull'host:"
+      librerie "$MODIFICHE"
       ripr="cd $DIR"
       for x in "${BAK[@]}"; do ripr+=" && cp ${x#*=} ${x%%=*}"; done
       for r in "${ROLLBACK[@]}"; do read -r s img id <<< "$r"; ripr+=" && docker tag ${img%%:*}:rollback-$STAMP $img"; done
-      aggiungi "   $ripr && docker compose up -d --no-build $SERVIZI_APP"
+      indietro "$ripr && docker compose up -d --no-build $SERVIZI_APP"
     fi
   fi
 fi
@@ -353,7 +407,7 @@ fi
 # Gli altri servizi: immagine nuova se c'è, riavvio solo se cambiata
 # ═════════════════════════════════════════════════════════════════════════════
 aggiorna_immagine() {   # $1 servizio
-  local svc="$1" img voluta prima dopo vprima vdopo tag
+  local svc="$1" img voluta prima dopo vprima vdopo tag diag
   img=$(immagine_di "$svc")                       # quella che gira
   [[ -z "$img" ]] && { log "$svc: non avviato, salto"; return 0; }
   voluta=$(immagine_compose "$svc"); voluta="${voluta:-$img}"   # quella che chiede il compose
@@ -366,8 +420,7 @@ aggiorna_immagine() {   # $1 servizio
   fi
   if ! docker compose pull -q "$svc" > /dev/null 2>&1; then
     log "⚠ $svc: pull di $voluta non riuscito, resta com'è"
-    peggiora errore
-    aggiungi "❌ $svc: non sono riuscito a scaricare l'immagine nuova (resta quella di prima)."
+    non_aggiornato "$svc: non sono riuscito a scaricare l'immagine nuova ($voluta), resta quella di prima" errore
     return 0
   fi
   dopo=$(docker image inspect -f '{{.Id}}' "$voluta" 2>/dev/null || true)
@@ -375,7 +428,7 @@ aggiorna_immagine() {   # $1 servizio
     log "$svc: già all'ultima versione${vprima:+ ($vprima)}"
     return 0
   fi
-  tag="rollback/$PROGETTO-$svc:$STAMP"
+  tag="rollback/$PROGETTO-$svc:$STAMP"            # l'immagine di prima: resta per tornare indietro a mano
   docker tag "$prima" "$tag"
   if [[ "$voluta" != "$img" ]]; then log "$svc: il docker-compose.yml ora chiede $voluta (gira $img), cambio…"
   else log "$svc: immagine nuova, riavvio…"; fi
@@ -383,30 +436,32 @@ aggiorna_immagine() {   # $1 servizio
   if controlla "$svc"; then
     vdopo=$(versione "$svc")
     log "✅ $svc aggiornato${vprima:+: $vprima}${vdopo:+ → $vdopo}"
-    peggiora ok
-    aggiungi "✅ $svc aggiornato${vprima:+: $vprima}${vdopo:+ → $vdopo}"
-    [[ "$voluta" != "$img" ]] && aggiungi "   (immagine cambiata: $img → $voluta)"
-    docker rmi "$tag" > /dev/null 2>&1   # funziona: l'immagine vecchia non serve più
+    aggiornato "$svc${vprima:+: $vprima}${vdopo:+ → $vdopo}$( [[ "$voluta" != "$img" ]] && echo " (immagine cambiata: $img → $voluta)")"
+    indietro "cd $DIR && docker tag $tag $voluta && docker compose up -d --no-build $svc"
     [[ "$voluta" != "$img" ]] && { docker rmi "$img" > /dev/null 2>&1 || true; }
   else
+    diag=$(diagnosi "$svc")
     log "❌ $svc non risponde con l'immagine nuova: torno a quella di prima"
-    peggiora rollback
-    aggiungi "⚠ $svc: con l'immagine nuova ($voluta) non rispondeva. È tornato alla versione di prima."
+    non_aggiornato "$svc: con l'immagine nuova ($voluta) non rispondeva, è tornato alla versione di prima" rollback "$diag"
     docker tag "$prima" "$voluta"   # il compose usa questo nome: ci rimetto sotto l'immagine di prima
     docker compose up -d --no-build "$svc" > /dev/null 2>&1
     docker rmi "$tag" > /dev/null 2>&1
   fi
+  return 0
 }
 for s in "${ALTRI[@]}"; do aggiorna_immagine "$s"; done
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Pulizia di Docker (senza `prune -a`: le immagini di rollback restano)
+# Pulizia di Docker (senza `prune -a`: le immagini di rollback restano, le ultime TIENI per servizio)
 # ═════════════════════════════════════════════════════════════════════════════
 if [[ $DRY_RUN == 0 ]]; then
   for s in $SERVIZI_APP; do
     img=$(immagine_di "$s"); [[ -n "$img" ]] || continue
     vecchie=$(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep "^${img%%:*}:rollback-" | sort -r | tail -n +$((TIENI + 1)))
     [[ -n "$vecchie" ]] && { log "$s: tolgo le immagini di rollback più vecchie (tengo le ultime $TIENI)"; echo "$vecchie" | xargs -r docker rmi > /dev/null 2>&1 || true; }
+  done
+  for repo in $(docker image ls --format '{{.Repository}}' 2>/dev/null | grep "^rollback/$PROGETTO-" | sort -u); do
+    docker image ls --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null | sort -r | tail -n +$((TIENI + 1)) | xargs -r docker rmi > /dev/null 2>&1 || true
   done
   docker image prune -f > /dev/null 2>&1 || true
   docker builder prune -f --filter until=168h > /dev/null 2>&1 || true
@@ -415,24 +470,8 @@ fi
 # ═════════════════════════════════════════════════════════════════════════════
 # Email di riepilogo (la manda l'app, col suo SMTP del .env)
 # ═════════════════════════════════════════════════════════════════════════════
-DURATA=$(( $(date +%s) - START_TS ))
-log "esito: $ESITO (${DURATA}s)"
-if [[ $DRY_RUN == 0 && ( "$ESITO" != "nessuno" || "$MAIL_SEMPRE" == "1" ) ]]; then
-  [[ "$ESITO" == "nessuno" ]] && aggiungi "Era già tutto all'ultima versione."
-  aggiungi ""
-  aggiungi "Durata: $((DURATA / 60)) min $((DURATA % 60)) s · log sull'host $(hostname): $DIR/logs/aggiorna-tutto.log"
-  case "$ESITO" in
-    ok)       OGGETTO="✅ $NOME: aggiornamento notturno riuscito" ;;
-    rollback) OGGETTO="⚠ $NOME: aggiornamento notturno annullato, torna la versione di prima" ;;
-    errore)   OGGETTO="❌ $NOME: aggiornamento notturno con errori" ;;
-    *)        OGGETTO="$NOME: era già tutto aggiornato" ;;
-  esac
-  if RISP=$(manda_email "$OGGETTO" "$RIEPILOGO"); then
-    log "email di riepilogo inviata $(printf '%s' "$RISP" | tail -1)"
-  else
-    log "⚠ email di riepilogo non inviata: $(printf '%s' "$RISP" | tail -1)"
-  fi
-fi
+log "esito: $ESITO ($(( $(date +%s) - START_TS ))s)"
+manda_riepilogo
 log "── fine ──"
 [[ "$ESITO" == "errore" || "$ESITO" == "rollback" ]] && exit 1
 exit 0
