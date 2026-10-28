@@ -247,6 +247,14 @@ async def _resolve_final_url(url: str) -> str:
     return u
 
 
+def _backup_mode(value) -> str:
+    """Copia prima degli aggiornamenti per questo sito: "" (come in Impostazioni), "on", "off"."""
+    v = str(value or "").strip().lower()
+    if v not in ("", "on", "off"):
+        raise HTTPException(422, "Copia prima degli aggiornamenti: valore non valido")
+    return v
+
+
 @router.post("", response_model=SiteOut, status_code=201)
 async def create_site(payload: SiteIn, s: AsyncSession = Depends(get_session)):
     if payload.cms not in ("wp", "joomla"):
@@ -267,6 +275,7 @@ async def create_site(payload: SiteIn, s: AsyncSession = Depends(get_session)):
         data["extra_headers"] = normalize_extra_headers(data.get("extra_headers"))
     except ValueError as ex:
         raise HTTPException(422, str(ex))
+    data["backup_mode"] = _backup_mode(data.get("backup_mode"))
     data["token"] = token
     data["url"] = resolved
     data["tags"] = _norm_tags(data.get("tags"))
@@ -390,6 +399,8 @@ async def update_site(site_id: int, payload: SiteUpdate, s: AsyncSession = Depen
             data["extra_headers"] = normalize_extra_headers(data["extra_headers"])
         except ValueError as ex:
             raise HTTPException(422, str(ex))
+    if "backup_mode" in data:
+        data["backup_mode"] = _backup_mode(data["backup_mode"])
     # tags: normalizza in forma canonica CSV se passati esplicitamente
     if "tags" in data:
         data["tags"] = _norm_tags(data["tags"])

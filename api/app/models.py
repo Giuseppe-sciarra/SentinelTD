@@ -21,6 +21,9 @@ class Site(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_update: Mapped[bool] = mapped_column(Boolean, default=False)
     poll_interval_minutes: Mapped[int] = mapped_column(Integer, default=180)
+    # copia zip prima degli aggiornamenti (WordPress): "" = come in Impostazioni, "on" = si', "off" = no
+    # (hosting con poco spazio: il connettore non la fa e cancella quelle gia' fatte)
+    backup_mode: Mapped[str] = mapped_column(String(8), default="", server_default="")
 
     # stato ultimo check (denormalizzato: con 30-100 siti va benissimo)
     last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

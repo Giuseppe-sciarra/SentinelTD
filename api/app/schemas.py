@@ -16,6 +16,7 @@ class SiteIn(BaseModel):
     poll_interval_minutes: int = 180
     notifications_silenced: bool = False
     extra_headers: str = ""       # "Nome: valore" per riga, verso il connettore (firewall davanti al sito)
+    backup_mode: str = ""         # copia prima degli aggiornamenti: "" come in Impostazioni, "on", "off"
 
 
 class SiteUpdate(BaseModel):
@@ -31,6 +32,7 @@ class SiteUpdate(BaseModel):
     poll_interval_minutes: int | None = None
     notifications_silenced: bool | None = None
     extra_headers: str | None = None
+    backup_mode: str | None = None
 
 
 class ExtensionOut(BaseModel):
@@ -86,6 +88,7 @@ class SiteOut(BaseModel):
     # modalita' firewall (2.49.0): e' il sito a chiamare Sentinel
     relay_mode: bool = False
     relay_seen_at: datetime | None = None
+    backup_mode: str = ""         # copia prima degli aggiornamenti: "" come in Impostazioni, "on", "off"
 
 
 class SiteDetailOut(SiteOut):

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Sentinel TD Agent
  * Description: Connettore di Sentinel TD: espone stato versioni/update via REST e consente aggiornamenti da remoto. Token e collegamento in Impostazioni → Sentinel TD.
- * Version: 2.41.5
+ * Version: 2.41.6
  * Author: Tastiere Digitali
  *
  * INSTALLAZIONE: carica lo zip da Plugin → Aggiungi nuovo → Carica plugin, poi attiva.
@@ -759,6 +759,39 @@ function tdpanop_backup_item(string $type, string $slug): array
     return $out;
 }
 
+/**
+ * Copia spenta (Impostazioni o Modifica del sito): via le copie gia' fatte e gli avanzi di un
+ * ripristino interrotto. Le copie si cancellavano solo quando se ne faceva una nuova: con la copia
+ * spenta restavano sull'hosting per sempre, proprio dove lo spazio manca. Ritorna quante ne toglie.
+ */
+function tdpanop_backups_clear(): int
+{
+    $base = '';
+    if (function_exists('wp_upload_dir')) {
+        $up = wp_upload_dir(null, false);
+        $base = (string) ($up['basedir'] ?? '');
+    }
+    if ($base === '' && defined('WP_CONTENT_DIR')) {
+        $base = WP_CONTENT_DIR . '/uploads';
+    }
+    $dir = rtrim($base, '/') . '/sentinel-backups';
+    if ($base === '' || !is_dir($dir)) {
+        return 0;          // mai fatte copie qui: niente da togliere (e la cartella non si crea)
+    }
+    $n = 0;
+    foreach ((array) glob($dir . '/*.zip') as $f) {
+        if (@unlink($f)) {
+            $n++;
+        }
+    }
+    foreach ((array) glob($dir . '/.restore-*', GLOB_ONLYDIR) as $d) {
+        if (@filemtime($d) < time() - 3600) {     // un ripristino in corso non dura un'ora
+            tdpanop_rmdir($d);
+        }
+    }
+    return $n;
+}
+
 /** Tiene le ultime N copie per elemento e niente oltre TDPANOP_BACKUP_DAYS giorni. */
 function tdpanop_backups_prune(string $type, string $slug): void
 {
@@ -1349,8 +1382,11 @@ function tdpanop_update(WP_REST_Request $req)
     $type = (string) $req->get_param('type');
     $slug = (string) $req->get_param('slug');
     // copia zip prima dell'aggiornamento: il pannello manda backup=0 quando e' spenta in Impostazioni
-    // (e' l'operazione piu' pesante sull'hosting). Di base resta attiva.
+    // o per questo sito (e' l'operazione piu' pesante sull'hosting). Di base resta attiva.
     $doBackup = (string) $req->get_param('backup') !== '0';
+    if (!$doBackup) {
+        tdpanop_backups_clear();   // copia spenta: via anche quelle gia' fatte (hosting con poco spazio)
+    }
 
     require_once ABSPATH . 'wp-admin/includes/file.php';
     require_once ABSPATH . 'wp-admin/includes/misc.php';

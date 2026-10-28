@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.51.0 — Copia prima degli aggiornamenti per singolo sito (connettore WP 2.41.6)
+
+### Added
+- **Modifica del sito → "Copia di sicurezza prima degli aggiornamenti"**: "Come in Impostazioni"
+  (di base), "Sì, su questo sito" o "No, su questo sito". Serve agli hosting con poco spazio: la
+  copia si spegne solo lì, e sugli altri siti il ripristino resta. Vale per i siti WordPress.
+  Sotto c'è scritto se in Impostazioni è accesa o spenta.
+
+### Changed
+- **Connettore WordPress 2.41.6: con la copia spenta cancella quelle già fatte**, al primo
+  aggiornamento, in `wp-content/uploads/sentinel-backups/`, insieme agli avanzi di un ripristino
+  interrotto da più di un'ora. Prima le copie si cancellavano solo quando se ne faceva una nuova:
+  con la copia spenta restavano sull'hosting per sempre, proprio dove lo spazio manca.
+- In Impostazioni, sotto "Copia di sicurezza prima di ogni aggiornamento", è scritto che la scelta
+  si può cambiare sito per sito.
+
+### Tests
+- `tests/test_backup_per_site.py`: il sito segue Impostazioni, oppure la sua scelta vince; solo
+  tre valori ammessi.
+- `tests/connector_translations.test.php`: con la copia spenta il connettore cancella le copie
+  già fatte e gli avanzi vecchi, e lascia stare un ripristino in corso.
+
 ## 2.50.8 — Librerie del repository allineate a quelle in produzione
 
 ### Changed

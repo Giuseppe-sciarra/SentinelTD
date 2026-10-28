@@ -8,6 +8,8 @@
 // - non installata (download fallito)          -> fallito col motivo dell'installatore
 // - wordpress.org non risponde al ricontrollo  -> si giudica dai file scritti
 // - memoria del 2.39 rimasta sul sito          -> cancellata, la traduzione torna visibile
+// - copia spenta (backup=0): via le copie gia' fatte in uploads/sentinel-backups, e gli avanzi
+//   di un ripristino interrotto; un ripristino appena iniziato resta
 // - WordPress (core): quattro file .po; vale il piu' recente (spesso il backend), sia per dire
 //   se e' gia' a posto sia per la data nel messaggio; date nel fuso del sito, non in UTC
 // Uso: php tests/connector_translations.test.php   (si rilancia da solo per gli altri casi)
@@ -52,6 +54,7 @@ function wp_update_plugins() {
 }
 function wp_update_themes() {} function wp_version_check() {} function wp_clean_update_cache() {}
 function wp_get_translation_updates() { return array_map(fn($t) => (object) $t, $GLOBALS['transient']); }
+function wp_upload_dir($t = null, $c = true) { return ['basedir' => ABSPATH . 'wp-content/uploads']; }
 function wp_get_installed_translations($dom) { return $GLOBALS['installed'][$dom] ?? []; }
 function wp_date($f, $ts) { return gmdate($f, $ts + 3600); }   // sito in Europe/Rome (ora solare)
 function wp_get_pomo_file_data($f) {
@@ -153,6 +156,21 @@ if ($case === 'installata') {
     $GLOBALS['transient'] = [array_merge($core, ['updated' => '2026-10-28 09:00:00'])];
     check(count(tdpanop_pending_translations()) === 1, 'pacchetto piu\' nuovo: da aggiornare');
     echo "WordPress gia' a posto: non risulta da aggiornare; con un pacchetto nuovo si'.\n";
+} elseif ($case === 'copiaspenta') {
+    $bk = ABSPATH . 'wp-content/uploads/sentinel-backups';
+    @mkdir($bk . '/.restore-vecchio/sub', 0777, true);
+    @mkdir($bk . '/.restore-adesso', 0777, true);
+    touch($bk . '/.restore-vecchio', time() - 7200);
+    foreach (['plugin-elementor-3.1-20261001-100000.zip', 'theme-hello-1.0-20261002-100000.zip'] as $z) {
+        file_put_contents("$bk/$z", 'zip');
+    }
+    file_put_contents("$bk/index.php", "<?php\n");
+    $GLOBALS['afters'] = [[]];
+    run_update();                                                // il pannello manda backup=0
+    check(glob("$bk/*.zip") === [], 'copie gia\' fatte cancellate');
+    check(!is_dir("$bk/.restore-vecchio") && is_dir("$bk/.restore-adesso"), 'avanzi vecchi via, ripristino in corso no');
+    check(is_file("$bk/index.php"), 'la cartella resta protetta');
+    echo "Copia spenta: le copie gia' fatte si cancellano al primo aggiornamento.\n";
 } elseif ($case === 'memoria239') {
     $GLOBALS['options']['tdpanop_trans_ghosts'] = ['plugin|wp-mail-logging|it_IT' => $offer['updated']];
     check(count(tdpanop_pending_translations()) === 1, 'la traduzione nascosta dal 2.39 torna visibile');
@@ -160,7 +178,7 @@ if ($case === 'installata') {
     echo "Memoria del 2.39 cancellata: Sentinel mostra quello che mostra WordPress.\n";
 }
 if ($case === 'installata') {
-    foreach (['riproposta', 'secondo', 'fallita', 'nonverificata', 'core-riproposta', 'core-installata', 'memoria239'] as $next) {
+    foreach (['riproposta', 'secondo', 'fallita', 'nonverificata', 'core-riproposta', 'core-installata', 'copiaspenta', 'memoria239'] as $next) {
         passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' ' . $next, $code);
         if ($code !== 0) { exit($code); }
     }

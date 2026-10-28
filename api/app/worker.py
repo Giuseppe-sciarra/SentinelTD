@@ -1495,6 +1495,17 @@ async def _relay_update(site: Site, action: str, params: dict) -> dict:
     return _result_of(d)
 
 
+def backup_on(site: Site, global_on: bool) -> bool:
+    """Copia prima degli aggiornamenti su questo sito: la scelta del sito (Modifica) vince su
+    quella di Impostazioni."""
+    mode = (getattr(site, "backup_mode", "") or "").strip()
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return global_on
+
+
 async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") -> dict:
     """Chiama il connettore per aggiornare UNA estensione/core. Ritorna {ok, error, new}."""
     headers = site_headers(site, {
@@ -1507,13 +1518,15 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "") 
         "Pragma": "no-cache",
     })
     cb = int(time.time())   # cache-buster: evita risposte cachate dal reverse proxy
-    # copia zip prima dell'aggiornamento: "1" di base, "0" se spenta in Impostazioni (connettore WP 2.33+;
-    # i connettori piu' vecchi ignorano il parametro e copiano come sempre)
+    # copia zip prima dell'aggiornamento: "1" di base, "0" se spenta in Impostazioni o per questo
+    # sito (Modifica). Con "0" il connettore WP 2.41.6+ cancella anche le copie gia' fatte; i
+    # connettori piu' vecchi della 2.33 ignorano il parametro e copiano come sempre.
     try:
         from .settings_store import get_operational_settings as _gos
-        backup_flag = "1" if (await _gos()).get("pre_update_backup", True) else "0"
+        global_on = bool((await _gos()).get("pre_update_backup", True))
     except Exception:  # noqa: BLE001
-        backup_flag = "1"
+        global_on = True
+    backup_flag = "1" if backup_on(site, global_on) else "0"
     if relay.active(site):
         return await _relay_update(site, "update", {"type": ext_type, "slug": slug, "expected": expected or "",
                                                      "backup": backup_flag})
