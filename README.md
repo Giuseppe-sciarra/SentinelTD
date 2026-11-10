@@ -303,8 +303,9 @@ Every night `aggiorna-tutto.sh` updates by itself what Sentinel TD runs on:
 
 - **api and worker**: the latest Python 3.12 with the Debian packages of its image, and every
   library in `api/requirements.txt` at its latest version;
-- **shooter**: the latest Playwright together with its image (Chromium and Node included), and the
-  other libraries in `shooter/requirements.txt`;
+- **shooter**: Python 3.12 like api and worker, the latest Playwright as soon as it is on PyPI
+  (Playwright downloads Chromium, Google Chrome and Node during the build), and the other
+  libraries in `shooter/requirements.txt`;
 - **PostgreSQL 16 and Redis 7**: the new image of the same version, when there is one.
 
 After each step it checks that everything answers: the api on `/healthz`, the shooter with Chrome

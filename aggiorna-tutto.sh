@@ -5,8 +5,9 @@
 # Cosa aggiorna:
 #   • api e worker: Python 3.12 all'ultima patch + Debian (con l'immagine base) e TUTTE le
 #     librerie di api/requirements.txt all'ultima versione, major comprese;
-#   • shooter: Playwright all'ultima versione insieme alla sua immagine (Chromium e Node
-#     compresi) e le altre librerie di shooter/requirements.txt;
+#   • shooter: Python come api e worker, Playwright all'ultima versione appena esce su PyPI
+#     (Chromium, Google Chrome e Node li scarica Playwright durante la build) e le altre
+#     librerie di shooter/requirements.txt;
 #     le righe con un limite (es. «httpx<1  # motivo») restano come sono: è il modo per
 #     bloccarne una;
 #   • Postgres (stessa major: 16) e Redis (stessa major: 7): l'immagine nuova, se è uscita.
@@ -53,7 +54,7 @@ prova() {   # $1 servizio → 0 se risponde come deve (worker, postgres, redis: 
 versione() {   # $1 servizio → versione leggibile per log ed email
   case "$1" in
     api)      docker compose exec -T api python --version 2>/dev/null | tr -d '\r' ;;
-    shooter)  docker compose exec -T shooter python -c 'import os, subprocess, playwright; from importlib.metadata import version; n = subprocess.check_output([os.path.join(os.path.dirname(playwright.__file__), "driver", "node"), "--version"], text=True).strip(); print("Playwright", version("playwright") + ", Node", n)' 2>/dev/null | tr -d '\r' ;;
+    shooter)  docker compose exec -T shooter python -c 'import os, subprocess, playwright; from importlib.metadata import version; n = subprocess.check_output([os.path.join(os.path.dirname(playwright.__file__), "driver", "node"), "--version"], text=True).strip(); c = subprocess.run(["google-chrome", "--version"], capture_output=True, text=True).stdout.split(); print("Playwright", version("playwright") + ", Node", n + (", Chrome " + c[-1] if c else ""))' 2>/dev/null | tr -d '\r' ;;
     postgres) docker compose exec -T postgres postgres --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -1 | sed 's/^/PostgreSQL /' ;;
     redis)    docker compose exec -T redis redis-server --version 2>/dev/null | grep -oE 'v=[0-9.]+' | sed 's/^v=/Redis /' ;;
     worker)   ;;
@@ -229,19 +230,14 @@ for s in $SERVIZI_APP; do V_PRIMA[$s]="$(versione "$s")"; done
 rm -f .agg-modifiche.txt
 LIB_ERR=0
 : > logs/pip-risoluzione.log
-# $1 Dockerfile · $2 librerie da tenere alla versione di adesso (nomi separati da |, vuoto = nessuna).
-# Risultato in .agg-tmp/: requirements.txt.nuovo e modifiche.txt («nome prima → dopo (tipo)»).
+# $1 Dockerfile. Risultato in .agg-tmp/: requirements.txt.nuovo e modifiche.txt («nome prima → dopo (tipo)»).
 risolvi() {
-  local df="$1" tieni="${2:-}" d base
+  local df="$1" d base
   d=$(dirname "$df"); base=$(base_di "$df")
   rm -rf .agg-tmp; mkdir -p .agg-tmp; cp "$d/requirements.txt" .agg-tmp/requirements.txt
-  docker run --rm -e TIENI="$tieni" -v "$DIR/.agg-tmp:/w" -w /w "$base" sh -c '
+  docker run --rm -v "$DIR/.agg-tmp:/w" -w /w "$base" sh -c '
     python3 -m pip install -q --root-user-action=ignore --disable-pip-version-check --upgrade pip > /dev/null 2>&1
-    if [ -n "$TIENI" ]; then
-      sed -E "/^($TIENI)==/I! s/^([A-Za-z0-9._-]+(\[[^]]*\])?)==[^ ;#]+/\1/" requirements.txt > sciolti.txt
-    else
-      sed -E "s/^([A-Za-z0-9._-]+(\[[^]]*\])?)==[^ ;#]+/\1/" requirements.txt > sciolti.txt
-    fi
+    sed -E "s/^([A-Za-z0-9._-]+(\[[^]]*\])?)==[^ ;#]+/\1/" requirements.txt > sciolti.txt
     python3 -m pip install -q --root-user-action=ignore --disable-pip-version-check --dry-run --ignore-installed \
         --report /w/report.json -r sciolti.txt' >> logs/pip-risoluzione.log 2>&1
   if [[ -s .agg-tmp/report.json ]]; then
@@ -269,37 +265,12 @@ for df in "${DOCKERFILES[@]}"; do
   d=$(dirname "$df"); req="$d/requirements.txt"; [[ -f "$req" ]] || continue
   rm -f "$req.nuovo"
   risolvi "$df"
-  # L'immagine Playwright deve avere la stessa versione del pacchetto pip. Microsoft la pubblica
-  # anche giorni dopo il pacchetto: se non c'è ancora, Playwright resta dov'è (le altre librerie si
-  # aggiornano lo stesso) e sale da solo al primo giro in cui l'immagine c'è.
-  if [[ -s .agg-tmp/requirements.txt.nuovo ]] && grep -qE '^FROM mcr\.microsoft\.com/playwright/python:v' "$df"; then
-    pw=$(grep -oiE '^playwright==[0-9.]+' .agg-tmp/requirements.txt.nuovo | cut -d= -f3)
-    ora=$(grep -oiE '^playwright==[0-9.]+' "$req" | cut -d= -f3)
-    if [[ -n "$pw" && -n "$ora" && "$pw" != "$ora" ]]; then
-      img=$(sed -nE "s#^FROM (mcr\.microsoft\.com/playwright/python:v)[0-9.]+#\1$pw#p" "$df" | awk '{print $1; exit}')
-      if ! man=$(docker manifest inspect "$img" 2>&1 > /dev/null); then
-        if grep -qi 'no such manifest' <<< "$man"; then
-          perche="l'immagine Docker ($img) non è ancora pubblicata"
-        else
-          perche="non riesco a verificare se l'immagine Docker ($img) c'è: $(head -1 <<< "$man")"
-        fi
-        log "playwright $pw è uscito, ma $perche: resta $ora"
-        non_aggiornato "playwright $pw: uscito, ma $perche. Resta $ora e sale da solo quando l'immagine c'è" info
-        risolvi "$df" "playwright"
-      fi
-    fi
-  fi
   if [[ ! -s .agg-tmp/requirements.txt.nuovo ]]; then
     LIB_ERR=1
   elif [[ -s .agg-tmp/modifiche.txt ]]; then
     mv .agg-tmp/requirements.txt.nuovo "$req.nuovo"
     pre="   "; [[ "$d" != . ]] && pre="   ${d#./}: "
     sed "s#^#$pre#" .agg-tmp/modifiche.txt >> .agg-modifiche.txt
-    pw=$(grep -oiE '^playwright==[0-9.]+' "$req.nuovo" | cut -d= -f3)
-    if [[ -n "$pw" ]] && grep -qE '^FROM mcr\.microsoft\.com/playwright/python:v' "$df"; then
-      sed -E "s#^(FROM mcr\.microsoft\.com/playwright/python:v)[0-9.]+#\1$pw#" "$df" > "$df.nuovo"
-      cmp -s "$df" "$df.nuovo" && rm -f "$df.nuovo"
-    fi
   fi
 done
 rm -rf .agg-tmp
@@ -318,8 +289,8 @@ else
   log "librerie Python: già tutte all'ultima versione"
 fi
 
-# 2. Immagini base (Python + Debian, o Playwright): c'è una versione nuova?
-#    Si scarica quella del Dockerfile che verrà usato (il .nuovo, se Playwright sale).
+# 2. Immagini base (Python + Debian): c'è una versione nuova?
+#    Si scarica quella del Dockerfile che verrà usato (il .nuovo, se c'è).
 BASE_CAMBIATA=0
 declare -A BASI_VECCHIE
 for df in "${DOCKERFILES[@]}"; do
@@ -414,7 +385,7 @@ else
       non_aggiornato "$NOME: con la versione nuova $KO non partiva o non rispondeva, è tornato alla versione di prima" rollback "$ERR$(provate)"
     else
       firma > .agg-ultima-build
-      # basi non più usate (es. la Playwright vecchia): via il nome, i dati restano finché servono al rollback
+      # basi non più usate: via il nome, i dati restano finché servono al rollback
       for b in "${!BASI_VECCHIE[@]}"; do
         grep -qsF "FROM $b" "${DOCKERFILES[@]}" || docker rmi "$b" > /dev/null 2>&1 || true
       done

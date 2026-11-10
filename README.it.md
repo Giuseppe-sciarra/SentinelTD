@@ -325,8 +325,9 @@ docker compose up -d --build api worker
 
 - **api e worker**: l'ultima versione di Python 3.12 con i pacchetti Debian della sua immagine e
   tutte le librerie di `api/requirements.txt` all'ultima versione;
-- **shooter**: Playwright all'ultima versione insieme alla sua immagine (Chromium e Node compresi)
-  e le altre librerie di `shooter/requirements.txt`;
+- **shooter**: Python 3.12 come api e worker, Playwright all'ultima versione appena esce su PyPI
+  (Chromium, Google Chrome e Node li scarica Playwright durante la build) e le altre librerie di
+  `shooter/requirements.txt`;
 - **PostgreSQL 16 e Redis 7**: l'immagine nuova della stessa versione, se è uscita.
 
 Dopo ogni passo prova che tutto risponda: l'api su `/healthz`, lo shooter con Chrome avviato,

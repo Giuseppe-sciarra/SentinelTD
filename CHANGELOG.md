@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.53.0 — Shooter senza l'immagine Microsoft: Playwright sale appena esce
+
+### Changed
+- **Lo shooter parte da `python:3.12-slim`, come api e worker, e non più da
+  `mcr.microsoft.com/playwright/python`.** Playwright arriva da pip e scarica da solo Chromium,
+  Google Chrome e le librerie di sistema durante la build (`playwright install --with-deps`), come
+  già fa il CRM. Prima l'aggiornamento notturno doveva aspettare che Microsoft pubblicasse
+  l'immagine della versione nuova, che può uscire anche giorni dopo il pacchetto: il 10/11 il CRM
+  era già su Playwright 1.65.0 e Sentinel era fermo alla 1.64.1. In cambio la build dello shooter è
+  più lenta, perché scarica Chromium e Chrome ogni volta che si ricostruisce.
+- Nell'immagine c'è anche `libatomic1`: dalla 1.65 il Node incluso in Playwright (Node 26) lo
+  richiede, e l'immagine slim non lo ha.
+- `aggiorna-tutto.sh`: tolto il legame fra la versione di Playwright e l'immagine Microsoft, che
+  non serve più. Nell'email la versione dello shooter riporta anche Chrome
+  ("Playwright 1.65.0, Node v26.13.0, Chrome 157.0.8103.50").
+- Versioni nel repository allineate a quelle che l'aggiornamento notturno ha installato il 10/11:
+  fastapi 0.162.2, gunicorn 27.0.0, sqlalchemy 2.1.8, pydantic 2.14.3, pydantic-settings 2.16.2,
+  python-multipart 0.0.33, dnspython 2.9.2; shooter: fastapi 0.162.2 e Playwright 1.65.0.
+
+### Verificato
+- Build vera dello shooter (circa 3 minuti, immagine di circa 3 GB): Playwright 1.65.0, Node
+  v26.13.0, Chromium 158, Google Chrome 157 con i codec H.264. Foto di una pagina di prova con
+  accenti e simboli, foto "prima/dopo" e confronto visivo funzionanti.
+
 ## 2.52.1 — Aggiornamento notturno: Playwright aspetta la sua immagine Docker
 
 ### Fixed
