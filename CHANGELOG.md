@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.52.1 — Aggiornamento notturno: Playwright aspetta la sua immagine Docker
+
+### Fixed
+- **Una nuova versione di Playwright non fa più fallire tutta la build notturna.**
+  `aggiorna-tutto.sh` alzava il pacchetto pip e l'immagine `mcr.microsoft.com/playwright/python`
+  insieme. Il 10/11 Playwright 1.65.0 era su PyPI dalla sera prima, ma Microsoft non aveva ancora
+  pubblicato l'immagine `v1.65.0-noble`: la build si fermava e nessuna libreria veniva aggiornata,
+  nemmeno quelle dell'api e del worker. Ora, se l'immagine non c'è, Playwright resta alla
+  versione di adesso, le altre librerie si aggiornano lo stesso, e Playwright sale da solo al primo
+  giro in cui l'immagine c'è. Nell'email compare sotto "NON AGGIORNATI" con il motivo, ma da solo
+  non fa partire l'email.
+- **"redis: Redis 7.4.12 → Redis 7.4.12"**: quando chi pubblica l'immagine la ricostruisce con la
+  stessa versione, l'email ora scrive "stessa versione con l'immagine ricostruita".
+
 ## 2.52.0 — Traduzioni appena uscite: si aspetta prima di installarle (connettore WP 2.41.8)
 
 ### Added

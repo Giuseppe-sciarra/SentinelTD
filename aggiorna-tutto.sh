@@ -229,13 +229,19 @@ for s in $SERVIZI_APP; do V_PRIMA[$s]="$(versione "$s")"; done
 rm -f .agg-modifiche.txt
 LIB_ERR=0
 : > logs/pip-risoluzione.log
-for df in "${DOCKERFILES[@]}"; do
-  d=$(dirname "$df"); req="$d/requirements.txt"; [[ -f "$req" ]] || continue
-  base=$(base_di "$df")
-  rm -rf .agg-tmp "$req.nuovo"; mkdir -p .agg-tmp; cp "$req" .agg-tmp/requirements.txt
-  docker run --rm -v "$DIR/.agg-tmp:/w" -w /w "$base" sh -c '
+# $1 Dockerfile · $2 librerie da tenere alla versione di adesso (nomi separati da |, vuoto = nessuna).
+# Risultato in .agg-tmp/: requirements.txt.nuovo e modifiche.txt («nome prima → dopo (tipo)»).
+risolvi() {
+  local df="$1" tieni="${2:-}" d base
+  d=$(dirname "$df"); base=$(base_di "$df")
+  rm -rf .agg-tmp; mkdir -p .agg-tmp; cp "$d/requirements.txt" .agg-tmp/requirements.txt
+  docker run --rm -e TIENI="$tieni" -v "$DIR/.agg-tmp:/w" -w /w "$base" sh -c '
     python3 -m pip install -q --root-user-action=ignore --disable-pip-version-check --upgrade pip > /dev/null 2>&1
-    sed -E "s/^([A-Za-z0-9._-]+(\[[^]]*\])?)==[^ ;#]+/\1/" requirements.txt > sciolti.txt
+    if [ -n "$TIENI" ]; then
+      sed -E "/^($TIENI)==/I! s/^([A-Za-z0-9._-]+(\[[^]]*\])?)==[^ ;#]+/\1/" requirements.txt > sciolti.txt
+    else
+      sed -E "s/^([A-Za-z0-9._-]+(\[[^]]*\])?)==[^ ;#]+/\1/" requirements.txt > sciolti.txt
+    fi
     python3 -m pip install -q --root-user-action=ignore --disable-pip-version-check --dry-run --ignore-installed \
         --report /w/report.json -r sciolti.txt' >> logs/pip-risoluzione.log 2>&1
   if [[ -s .agg-tmp/report.json ]]; then
@@ -258,13 +264,37 @@ open("requirements.txt.nuovo", "w").write("".join(righe))
 open("modifiche.txt", "w").write("".join(x + "\n" for x in modifiche))
 PY
   fi
+}
+for df in "${DOCKERFILES[@]}"; do
+  d=$(dirname "$df"); req="$d/requirements.txt"; [[ -f "$req" ]] || continue
+  rm -f "$req.nuovo"
+  risolvi "$df"
+  # L'immagine Playwright deve avere la stessa versione del pacchetto pip. Microsoft la pubblica
+  # anche giorni dopo il pacchetto: se non c'è ancora, Playwright resta dov'è (le altre librerie si
+  # aggiornano lo stesso) e sale da solo al primo giro in cui l'immagine c'è.
+  if [[ -s .agg-tmp/requirements.txt.nuovo ]] && grep -qE '^FROM mcr\.microsoft\.com/playwright/python:v' "$df"; then
+    pw=$(grep -oiE '^playwright==[0-9.]+' .agg-tmp/requirements.txt.nuovo | cut -d= -f3)
+    ora=$(grep -oiE '^playwright==[0-9.]+' "$req" | cut -d= -f3)
+    if [[ -n "$pw" && -n "$ora" && "$pw" != "$ora" ]]; then
+      img=$(sed -nE "s#^FROM (mcr\.microsoft\.com/playwright/python:v)[0-9.]+#\1$pw#p" "$df" | awk '{print $1; exit}')
+      if ! man=$(docker manifest inspect "$img" 2>&1 > /dev/null); then
+        if grep -qi 'no such manifest' <<< "$man"; then
+          perche="l'immagine Docker ($img) non è ancora pubblicata"
+        else
+          perche="non riesco a verificare se l'immagine Docker ($img) c'è: $(head -1 <<< "$man")"
+        fi
+        log "playwright $pw è uscito, ma $perche: resta $ora"
+        non_aggiornato "playwright $pw: uscito, ma $perche. Resta $ora e sale da solo quando l'immagine c'è" info
+        risolvi "$df" "playwright"
+      fi
+    fi
+  fi
   if [[ ! -s .agg-tmp/requirements.txt.nuovo ]]; then
     LIB_ERR=1
   elif [[ -s .agg-tmp/modifiche.txt ]]; then
     mv .agg-tmp/requirements.txt.nuovo "$req.nuovo"
     pre="   "; [[ "$d" != . ]] && pre="   ${d#./}: "
     sed "s#^#$pre#" .agg-tmp/modifiche.txt >> .agg-modifiche.txt
-    # L'immagine Playwright deve avere la stessa versione del pacchetto pip.
     pw=$(grep -oiE '^playwright==[0-9.]+' "$req.nuovo" | cut -d= -f3)
     if [[ -n "$pw" ]] && grep -qE '^FROM mcr\.microsoft\.com/playwright/python:v' "$df"; then
       sed -E "s#^(FROM mcr\.microsoft\.com/playwright/python:v)[0-9.]+#\1$pw#" "$df" > "$df.nuovo"
@@ -436,7 +466,12 @@ aggiorna_immagine() {   # $1 servizio
   if controlla "$svc"; then
     vdopo=$(versione "$svc")
     log "✅ $svc aggiornato${vprima:+: $vprima}${vdopo:+ → $vdopo}"
-    aggiornato "$svc${vprima:+: $vprima}${vdopo:+ → $vdopo}$( [[ "$voluta" != "$img" ]] && echo " (immagine cambiata: $img → $voluta)")"
+    if [[ -n "$vprima" && "$vprima" == "$vdopo" && "$voluta" == "$img" ]]; then
+      # stessa versione, immagine ricostruita da chi la pubblica (di solito aggiornamenti di sistema)
+      aggiornato "$svc: $vdopo, stessa versione con l'immagine ricostruita"
+    else
+      aggiornato "$svc${vprima:+: $vprima}${vdopo:+ → $vdopo}$( [[ "$voluta" != "$img" ]] && echo " (immagine cambiata: $img → $voluta)")"
+    fi
     indietro "cd $DIR && docker tag $tag $voluta && docker compose up -d --no-build $svc"
     [[ "$voluta" != "$img" ]] && { docker rmi "$img" > /dev/null 2>&1 || true; }
   else
