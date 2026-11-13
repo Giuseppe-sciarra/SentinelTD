@@ -4,7 +4,7 @@ Sentinel TD talks to each website through a small connector installed on the sit
 
 | Platform | Source | Current version |
 |---|---|---|
-| WordPress | `wordpress/td-panopticon/` | 2.41.8 |
+| WordPress | `wordpress/td-panopticon/` | 2.41.9 |
 | Joomla 4/5/6 | `joomla/plg_system_tdpanopticon/` | 1.43.2 |
 
 The internal identifiers (`td-panopticon` folder, `tdpanopticon` Joomla element, REST
@@ -79,8 +79,12 @@ what the site sends *out*.
   the REST/com_ajax handlers and sends the results in the same session.
 - Joomla 1.43.2: an install with `activate=1` enables the installed extension whatever its type,
   also when it was already installed but disabled, and for a package (`pkg_`) every extension the
-  package contains. It used to enable only a plugin or module installed on its own. A template is
-  only enabled in the extensions table: the site's default style is not changed.
+  package contains. It used to enable only a plugin or module installed on its own, and for a
+  package it returned empty name, type and version: the installed ids now come from
+  `onExtensionAfterInstall`. The plugin and module caches are cleaned after enabling. A template
+  is only enabled in the extensions table: the site's default style is not changed.
+- WordPress 2.41.9: an install with `activate=1` no longer activates a plugin that is already
+  active (also network-active on a multisite) a second time.
 - WordPress 2.41.8: the "Traduzioni (N)" entry in the status carries `announced`, when wordpress.org
   announced the oldest pending translation (UTC timestamp). An update of type `language` accepts
   `tr_wait` (minutes, from the panel's Settings) and installs only the translations announced at

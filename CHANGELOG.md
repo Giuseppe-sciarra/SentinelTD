@@ -8,8 +8,13 @@
 - **Connettore Joomla 1.43.2: con la spunta accesa si attiva tutto quello che viene installato**,
   anche se era già installato ma disattivato. Vale per qualunque tipo di estensione e, per un
   pacchetto (`pkg_`), per tutte le estensioni che contiene: prima si attivavano solo un plugin o
-  un modulo installati da soli, e i plugin dentro un pacchetto restavano spenti. Un template
-  viene solo abilitato: lo stile predefinito del sito non cambia.
+  un modulo installati da soli, e i plugin dentro un pacchetto restavano spenti. Per un pacchetto
+  il connettore non riportava nemmeno nome, tipo e versione: ora sì. Dopo l'attivazione pulisce la
+  cache dei plugin e dei moduli di Joomla, altrimenti con la cache accesa partirebbero solo alla
+  scadenza. Un template viene solo abilitato: lo stile predefinito del sito non cambia.
+- **Connettore WordPress 2.41.9**: un plugin già attivo (anche per tutta la rete, su un multisito)
+  non viene attivato una seconda volta. Su un multisito l'attivazione vale per il sito a cui
+  risponde il connettore, non per tutta la rete.
 - **WordPress**: i plugin già installati ma disattivati venivano già attivati; ora la finestra lo
   dice. Scegliendo "Tema" la spunta si spegne da sola, perché attivare un tema lo rende quello
   attivo su tutti i siti selezionati; riaccendendola compare l'avviso.
@@ -17,6 +22,12 @@
 ### Tests
 - `tests/dashboard.test.cjs`: spunta accesa per i plugin, spenta per i temi, di nuovo accesa
   passando a Joomla.
+
+### Verificato
+- Su un Joomla 5.4.10 vero, passando dal connettore come fa Sentinel: plugin singolo e pacchetto
+  con un plugin e un modulo, nuovi e già installati ma disattivati. Con la spunta accesa finiscono
+  tutti attivi, con la spunta spenta restano come sono. Il connettore 1.43.1, sullo stesso
+  pacchetto, non attivava niente e riportava nome e versione vuoti.
 
 ## 2.53.0 — Shooter senza l'immagine Microsoft: Playwright sale appena esce
 

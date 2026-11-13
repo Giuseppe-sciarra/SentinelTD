@@ -73,7 +73,20 @@ final class Tdpanopticon extends CMSPlugin
     public function onExtensionAfterInstall(...$args): void
     {
         $this->markYoothemeFlush();
+        // Installazione lanciata dal connettore (doInstall): si annotano le estensioni che Joomla
+        // ha appena installato. Per un pacchetto l'evento arriva una volta per ogni estensione che
+        // contiene e per ultimo per il pacchetto. L'oggetto Installer non le riporta.
+        if ($this->installedIds !== null) {
+            $first = $args[0] ?? null;
+            $eid   = (is_object($first) && method_exists($first, 'getArgument')) ? $first->getArgument('eid') : ($args[1] ?? 0);
+            if (is_numeric($eid) && (int) $eid > 0) {
+                $this->installedIds[] = (int) $eid;
+            }
+        }
     }
+
+    /** Estensioni installate dal giro di doInstall in corso; null quando non e' in corso. */
+    private $installedIds = null;
 
     public function onExtensionAfterUpdate(...$args): void
     {
@@ -880,37 +893,52 @@ final class Tdpanopticon extends CMSPlugin
             }
             $app->getMessageQueue(true);   // pulisci la coda messaggi per leggere quelli di questo giro
 
-            $ok = $installer->install($package['dir']);
+            $this->installedIds = [];
+            try {
+                $ok = $installer->install($package['dir']);
+            } finally {
+                $ids = array_values(array_unique((array) $this->installedIds));
+                $this->installedIds = null;
+            }
 
             if (!$ok) {
                 $reason = $this->collectMessages($app) ?: 'Installazione fallita';
                 return ['ok' => false, 'error' => $reason, 'new' => ''];
             }
 
-            // --- ricava info estensione installata dall'oggetto Installer ---
-            $ext = $installer->extension ?? null;
-            $instType    = $ext ? (string) $ext->type : '';
-            $instElement = $ext ? (string) $ext->element : '';
-            $instName    = $ext ? (string) $ext->name : '';
-            $eid         = $ext ? (int) $ext->extension_id : 0;
-
-            $db      = Factory::getContainer()->get('DatabaseDriver');
-            $version = $eid ? $this->readInstalledVersion($db, $eid) : '';
+            // --- estensione installata: l'ultima annunciata da Joomla (per un pacchetto e' il
+            //     pacchetto stesso, le precedenti sono quelle che contiene). Prima si leggeva
+            //     $installer->extension, che dopo install() resta vuoto: nome, tipo e versione
+            //     tornavano vuoti e non veniva attivato niente (1.43.2). ---
+            $db   = Factory::getContainer()->get('DatabaseDriver');
+            $eid  = $ids ? (int) end($ids) : 0;
+            $info = $eid ? $this->extensionInfo($db, $eid) : [];
+            $instType    = (string) ($info['type'] ?? '');
+            $instElement = (string) ($info['element'] ?? '');
+            $instName    = (string) ($info['name'] ?? '');
+            $version     = $eid ? $this->readInstalledVersion($db, $eid) : '';
 
             // --- attivazione (se richiesta) ---
-            // Si accende tutto quello che il pacchetto ha installato, anche se era gia' installato
-            // ma disattivato (1.43.2): l'estensione stessa e, per un pacchetto (pkg_), tutte quelle
-            // che contiene, che Joomla lascia spente o nello stato di prima. Un template viene
-            // solo abilitato: lo stile predefinito del sito non cambia.
+            // Si accende tutto quello che questo zip ha installato, anche se era gia' installato
+            // ma disattivato: l'estensione stessa e, per un pacchetto (pkg_), quelle che contiene.
+            // Un template viene solo abilitato: lo stile predefinito del sito non cambia.
             $activated = false;
-            if ($activate && $eid) {
-                $ids = $instType === 'package' ? array_merge([$eid], $this->packageChildren($db, $eid)) : [$eid];
+            if ($activate && $ids) {
                 $activated = true;
                 foreach ($ids as $id) {
                     if (!$this->isExtensionEnabled($db, $id)) {
                         $this->setExtensionEnabled($db, $id, true);
                     }
                     $activated = $activated && $this->isExtensionEnabled($db, $id);
+                }
+                // Joomla tiene in cache l'elenco dei plugin e dei moduli attivi: senza pulirla,
+                // con la cache accesa quelli appena attivati partono solo quando scade
+                foreach (['com_plugins', 'com_modules', '_system'] as $group) {
+                    try {
+                        Factory::getCache($group, '')->clean();
+                    } catch (\Throwable $e) {
+                        // si vedra' alla scadenza della cache
+                    }
                 }
             }
 
@@ -1438,15 +1466,15 @@ final class Tdpanopticon extends CMSPlugin
         return (int) $db->loadResult() === 1;
     }
 
-    /** Estensioni installate da un pacchetto (#__extensions.package_id). */
-    private function packageChildren($db, int $packageId): array
+    /** Tipo, elemento e nome di un'estensione installata. */
+    private function extensionInfo($db, int $eid): array
     {
         $q = $db->getQuery(true)
-            ->select($db->quoteName('extension_id'))
+            ->select($db->quoteName(['type', 'element', 'name']))
             ->from($db->quoteName('#__extensions'))
-            ->where($db->quoteName('package_id') . ' = ' . $packageId);
+            ->where($db->quoteName('extension_id') . ' = ' . $eid);
         $db->setQuery($q);
-        return array_map('intval', (array) $db->loadColumn());
+        return (array) $db->loadAssoc();
     }
 
     private function setExtensionEnabled($db, int $eid, bool $enabled): void
