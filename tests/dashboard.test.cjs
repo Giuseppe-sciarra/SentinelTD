@@ -128,3 +128,11 @@ test('"← siti" goes back to the folder the site was opened from',()=>{
   at('#/folder/__none');at('#/site/3');assert.equal(a.backTo,'folder/__none');
   at('#/');at('#/site/85');assert.equal(a.backTo,'sites');       // dalla dashboard: tutti i siti
 });
+test('mass install: plugins activated by default, themes not, Joomla back to activate on',()=>{
+  const {a}=app();
+  assert.equal(a.inst.activate,true);
+  a.instSetKind('theme');assert.equal(a.inst.activate,false);   // attivare un tema cambia il tema dei siti
+  a.instSetKind('plugin');assert.equal(a.inst.activate,true);
+  a.instSetKind('theme');a.instSetCms('joomla');
+  assert.equal(a.inst.kind,'plugin');assert.equal(a.inst.activate,true);
+});

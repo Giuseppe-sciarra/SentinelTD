@@ -745,9 +745,11 @@ function sentinel() {
     },
     instSetCms(c) {
       if (this.inst.cms === c) return;
-      Object.assign(this.inst, { cms: c, sel: [], out: [], rmItems: [], results: [], searched: false, siteFilter: '', openKeys: [] });
+      Object.assign(this.inst, { cms: c, kind: 'plugin', activate: true, sel: [], out: [], rmItems: [], results: [], searched: false, siteFilter: '', openKeys: [] });
       if (this.inst.mode === 'remove' && this.inst.q.trim()) this.instSearch();
     },
+    // plugin: attivi dopo l'installazione di base; tema: no, attivarlo cambia il tema dei siti
+    instSetKind(k) { Object.assign(this.inst, { kind: k, activate: k === 'plugin' }); },
     instCmsCount(c) { return this.sites.filter(s => s.cms === c && s.enabled).length; },
     instVisibleSites() {
       const f = (this.inst.siteFilter || '').trim().toLowerCase();

@@ -2554,13 +2554,16 @@
               </div>
             </template>
           </label>
-          <div class="bk-opts" x-show="inst.cms==='wp'">
-            <div class="seg">
-              <button type="button" :class="inst.kind==='plugin'?'on':''" @click="inst.kind='plugin'">Plugin</button>
-              <button type="button" :class="inst.kind==='theme'?'on':''" @click="inst.kind='theme'">Tema</button>
+          <div class="bk-opts">
+            <div class="seg" x-show="inst.cms==='wp'">
+              <button type="button" :class="inst.kind==='plugin'?'on':''" @click="instSetKind('plugin')">Plugin</button>
+              <button type="button" :class="inst.kind==='theme'?'on':''" @click="instSetKind('theme')">Tema</button>
             </div>
             <label class="check"><input type="checkbox" x-model="inst.activate"> Attiva dopo l'installazione</label>
           </div>
+          <div class="hint" x-show="inst.cms==='joomla' && inst.activate">Attiva tutto quello che viene installato, anche se era già installato ma disattivato, comprese le estensioni dentro un pacchetto (connettore Joomla 1.43.2 o più recente). Un template viene solo abilitato: lo stile del sito non cambia.</div>
+          <div class="hint" x-show="inst.cms==='wp' && inst.kind==='plugin' && inst.activate">Il plugin viene attivato anche se era già installato ma disattivato.</div>
+          <div class="hint" x-show="inst.cms==='wp' && inst.kind==='theme' && inst.activate">Attenzione: il tema diventa quello attivo su tutti i siti selezionati.</div>
         </section>
       </template>
 

@@ -829,7 +829,7 @@ final class Tdpanopticon extends CMSPlugin
      * Installa un pacchetto (.zip) caricato via multipart (campo "package") e, se richiesto,
      * lo attiva. Parametri:
      *  - file "package": lo zip dell'estensione (plugin/module/template/component/package)
-     *  - activate (int, default 1): se 1 e l'estensione installata e' un plugin/module, la abilita
+     *  - activate (int, default 1): se 1 abilita l'estensione installata (e quelle di un pacchetto)
      *
      * Usa l'Installer nativo di Joomla, quindi e' equivalente a "Estensioni > Installa > Carica".
      * Il core Joomla NON e' installabile da qui (e' un pacchetto speciale, va fatto a mano).
@@ -897,13 +897,21 @@ final class Tdpanopticon extends CMSPlugin
             $db      = Factory::getContainer()->get('DatabaseDriver');
             $version = $eid ? $this->readInstalledVersion($db, $eid) : '';
 
-            // --- attivazione (solo plugin/module, solo se richiesto) ---
+            // --- attivazione (se richiesta) ---
+            // Si accende tutto quello che il pacchetto ha installato, anche se era gia' installato
+            // ma disattivato (1.43.2): l'estensione stessa e, per un pacchetto (pkg_), tutte quelle
+            // che contiene, che Joomla lascia spente o nello stato di prima. Un template viene
+            // solo abilitato: lo stile predefinito del sito non cambia.
             $activated = false;
-            if ($activate && $eid && in_array($instType, ['plugin', 'module'], true)) {
-                if (!$this->isExtensionEnabled($db, $eid)) {
-                    $this->setExtensionEnabled($db, $eid, true);
+            if ($activate && $eid) {
+                $ids = $instType === 'package' ? array_merge([$eid], $this->packageChildren($db, $eid)) : [$eid];
+                $activated = true;
+                foreach ($ids as $id) {
+                    if (!$this->isExtensionEnabled($db, $id)) {
+                        $this->setExtensionEnabled($db, $id, true);
+                    }
+                    $activated = $activated && $this->isExtensionEnabled($db, $id);
                 }
-                $activated = $this->isExtensionEnabled($db, $eid);
             }
 
             return [
@@ -1428,6 +1436,17 @@ final class Tdpanopticon extends CMSPlugin
             ->where($db->quoteName('extension_id') . ' = ' . $eid);
         $db->setQuery($q);
         return (int) $db->loadResult() === 1;
+    }
+
+    /** Estensioni installate da un pacchetto (#__extensions.package_id). */
+    private function packageChildren($db, int $packageId): array
+    {
+        $q = $db->getQuery(true)
+            ->select($db->quoteName('extension_id'))
+            ->from($db->quoteName('#__extensions'))
+            ->where($db->quoteName('package_id') . ' = ' . $packageId);
+        $db->setQuery($q);
+        return array_map('intval', (array) $db->loadColumn());
     }
 
     private function setExtensionEnabled($db, int $eid, bool $enabled): void
