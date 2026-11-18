@@ -178,6 +178,9 @@ async def run_migrations(conn) -> None:
         "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_renew_note TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE sites ADD COLUMN IF NOT EXISTS domain_renew_at TIMESTAMPTZ NULL",
         "ALTER TABLE sites ADD COLUMN IF NOT EXISTS backup_mode VARCHAR(8) NOT NULL DEFAULT ''",
+        # core appena uscito: quando Sentinel ha visto la versione da installare (2.55.0)
+        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS core_seen_version VARCHAR(40) NOT NULL DEFAULT ''",
+        "ALTER TABLE sites ADD COLUMN IF NOT EXISTS core_seen_at TIMESTAMPTZ NULL",
     ):
         await conn.execute(text(ddl))
 

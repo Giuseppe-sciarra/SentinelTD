@@ -19,6 +19,7 @@ DEFAULTS = {
     "expiry_critical_days": 7,
     "screenshot_every_hours": 12,   # ogni quante ore rigenerare l'anteprima dei siti
     "update_every_hours": 1,        # ogni quante ore il giro degli aggiornamenti (siti con l'aggiornamento automatico)
+    "core_wait_minutes": 30,        # core appena uscito: minuti di attesa da quando Sentinel lo vede, prima di installarlo (0 = subito)
     "translation_wait_minutes": 90, # traduzioni WordPress appena annunciate: minuti di attesa prima di installarle (0 = subito)
     "history_retention_days": 400,  # cronologia dettagliata degli update (report dettagliato)
     "log_retention_days": 30,       # registro degli eventi (pagina Registro): giorni conservati
@@ -77,6 +78,7 @@ def normalize(data: dict | None) -> dict:
         ("screenshot_every_hours", 1, 720),
         ("update_every_hours", 1, 24),
         ("translation_wait_minutes", 0, 1440),
+        ("core_wait_minutes", 0, 1440),
         ("history_retention_days", 7, 3650),
         ("log_retention_days", 1, 3650),
         ("log_max_rows", 500, 1000000),

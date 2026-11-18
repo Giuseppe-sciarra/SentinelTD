@@ -109,6 +109,10 @@ class Site(Base):
     core_current: Mapped[str] = mapped_column(String(40), default="")
     core_latest: Mapped[str] = mapped_column(String(40), default="")
     core_update: Mapped[bool] = mapped_column(Boolean, default=False)
+    # quando Sentinel ha visto per la prima volta, su questo sito, la versione del core da
+    # installare: il giro automatico aspetta "core_wait_minutes" da qui prima di installarla
+    core_seen_version: Mapped[str] = mapped_column(String(40), default="")
+    core_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updates_count: Mapped[int] = mapped_column(Integer, default=0)
     # contatori per categoria: aggiornabili / totali installati
     upd_plugins: Mapped[int] = mapped_column(Integer, default=0)

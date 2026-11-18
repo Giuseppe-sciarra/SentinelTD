@@ -833,6 +833,10 @@ async def apply_status(session: AsyncSession, site: Site, force: bool = False) -
         if core_known:
             site.core_latest = str(core.get("latest", core.get("current", "")))
             site.core_update = bool(core.get("update", False))
+            # versione del core da installare vista adesso per la prima volta su questo sito
+            if site.core_update and site.core_latest != (site.core_seen_version or ""):
+                site.core_seen_version = site.core_latest
+                site.core_seen_at = datetime.now(timezone.utc)
         elif site.core_update and site.core_latest and not _vgt(site.core_latest, site.core_current or "0"):
             site.core_update = False   # nel frattempo e' stato aggiornato a mano
         site.php_version = str(data.get("php", ""))

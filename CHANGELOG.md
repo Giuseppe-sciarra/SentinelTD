@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.55.0 — Core appena uscito: attesa impostabile prima di installarlo
+
+### Added
+- **Impostazioni → "Core appena uscito: aspetta N minuti"** (di base 30, 0 = subito). Nei giri
+  automatici Sentinel non installa una versione nuova di WordPress o Joomla finché non sono
+  passati N minuti da quando l'ha vista per la prima volta su quel sito. Se nel frattempo esce una
+  versione ancora più nuova, l'attesa riparte. Con "Aggiorna" a mano si installa subito.
+- Resta il giallo della 2.54.1: se dopo l'attesa wordpress.org risponde ancora "Not Found" sul
+  pacchetto, l'aggiornamento va "da riprovare" e si ritenta dopo 30 minuti.
+
+### Tests
+- `tests/test_core_wait.py`: versione vista adesso o da 10 minuti → aspetta; da 31 minuti →
+  installa; versione più nuova → l'attesa riparte; a mano o con 0 minuti → subito.
+
 ## 2.54.1 — Core WordPress non ancora pubblicato da wordpress.org: giallo, non fallito
 
 ### Fixed

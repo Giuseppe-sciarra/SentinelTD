@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import test_screenshot_schedule as fixtures
 from sqlalchemy import select
 
-from app import connectors, worker
+from app import connectors, settings_store, worker
 from app.models import UpdateHistory
 
 NOT_FOUND = {"ok": False, "new": "", "error": "Il download non è andato a buon fine.: Not Found [download_failed]"}
@@ -22,6 +22,7 @@ STATUS = {"cms": "wp", "core": {"current": "7.1.4", "latest": "7.1.5", "update":
 class CoreNotPublishedTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await fixtures.SchedulerTests.asyncSetUp(self)
+        await settings_store.save_operational_settings({"core_wait_minutes": 0})   # qui non si prova l'attesa
 
     async def asyncTearDown(self):
         await fixtures.SchedulerTests.asyncTearDown(self)

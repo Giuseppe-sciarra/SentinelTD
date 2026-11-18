@@ -1963,7 +1963,18 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
         # 2) costruisci la coda: prima il core, poi le estensioni con update.
         #    Il core non ha cooldown (raro e importante). Le estensioni si'.
         queue = []   # ognuno: (ext|None, type, slug, name, current)
-        if site.core_update:
+        # Core appena uscito: nei giri automatici si aspetta "core_wait_minutes" (Impostazioni) da
+        # quando Sentinel ha visto la versione nuova su questo sito. Con "Aggiorna" a mano no.
+        core_fresh = None   # da quando si installa
+        if site.core_update and not manual and site.core_seen_at is not None \
+                and (site.core_seen_version or "") == (site.core_latest or ""):
+            try:
+                core_wait_min = int((await get_operational_settings()).get("core_wait_minutes", 30) or 0)
+            except Exception:  # noqa: BLE001
+                core_wait_min = 30
+            if core_wait_min and now - _aware(site.core_seen_at) < timedelta(minutes=core_wait_min):
+                core_fresh = _aware(site.core_seen_at) + timedelta(minutes=core_wait_min)
+        if site.core_update and core_fresh is None:
             label = "WordPress core" if site.cms == "wp" else "Joomla core"
             queue.append((None, "core", "", label, site.core_current))
 
@@ -2061,12 +2072,17 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                 log.info("UPDATE IN ATTESA '%s' (id=%s): %s %s -> %s, il Pro (%s) e' gia' stato tentato oggi senza esito",
                          site.name, site.id, nm, cur, e.new_version, pro)
 
+        if core_fresh is not None:
+            log.info("CORE APPENA USCITO '%s' (id=%s): %s, si installa dalle %s UTC",
+                     site.name, site.id, site.core_latest, core_fresh.strftime("%H:%M"))
         for (nm, from_at) in fresh:
             log.info("TRADUZIONI APPENA USCITE '%s' (id=%s): %s, si installano dalle %s UTC",
                      site.name, site.id, nm, from_at.strftime("%H:%M"))
 
         if not queue:
-            if fresh and not (held or skipped_dlkey or skipped):
+            if core_fresh is not None and not (fresh or held or skipped_dlkey or skipped):
+                outcome["text"] = "niente da aggiornare adesso: versione del core appena uscita, si installa al giro dopo"
+            elif fresh and not (held or skipped_dlkey or skipped):
                 outcome["text"] = "niente da aggiornare adesso: traduzioni appena uscite su wordpress.org, si installano al giro dopo"
             elif held:
                 outcome["text"] = f"niente da aggiornare adesso: {len(held)} in attesa del prodotto Pro"
