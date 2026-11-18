@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.55.2 — Aggiornamento notturno: la cache delle build non riempie più il disco
+
+### Fixed
+- **`aggiorna-tutto.sh` tiene solo la cache dell'ultima build.** Prima la cache di Docker restava
+  per 7 giorni, e veniva tolta solo quella non più collegata a niente. Da quando lo shooter
+  scarica Chromium e Chrome a ogni build (2.53.0, circa 3 GB l'una) si accumulavano decine di GB.
+  Ora a fine giro resta solo la cache usata nelle ultime 24 ore, e il log scrive quanti GB ha
+  liberato. Le immagini di rollback non cambiano: le ultime 2 per servizio (`AGG_TIENI_ROLLBACK`).
+
 ## 2.55.1 — Aggiornamento WordPress fallito: nell'errore anche il primo tentativo
 
 ### Changed

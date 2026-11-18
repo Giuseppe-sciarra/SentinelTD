@@ -20,7 +20,7 @@
 #      requirements, ai Dockerfile e alle immagini di prima;
 #   4. stesso giro per Postgres / Redis: riavvio solo se l'immagine è cambiata, controllo
 #      che risponda, altrimenti torna all'immagine di prima;
-#   5. pulizia di Docker che non tocca le immagini di rollback;
+#   5. pulizia di Docker: restano le ultime immagini di rollback e la cache dell'ultima build;
 #   6. email di riepilogo in testo semplice, solo se qualcosa si è aggiornato o è fallito
 #      (cosa, librerie, cosa no e perché, comandi per tornare indietro), spedita da Sentinel
 #      col server SMTP del .env (SMTP_*).
@@ -470,7 +470,14 @@ if [[ $DRY_RUN == 0 ]]; then
     docker image ls --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null | sort -r | tail -n +$((TIENI + 1)) | xargs -r docker rmi > /dev/null 2>&1 || true
   done
   docker image prune -f > /dev/null 2>&1 || true
-  docker builder prune -f --filter until=168h > /dev/null 2>&1 || true
+  # Cache delle build: resta solo quella usata nelle ultime 24 ore, cioè l'ultima build. Prima
+  # restava per 7 giorni e solo in parte: da quando lo shooter scarica Chromium e Chrome a ogni
+  # build (circa 3 GB l'una) si accumulavano decine di GB.
+  prima=$(df -Pk "$DIR" | awk 'NR==2 {print $4}')
+  docker builder prune -af --filter until=24h > /dev/null 2>&1 || true
+  dopo=$(df -Pk "$DIR" | awk 'NR==2 {print $4}')
+  lib=$(( (dopo - prima) / 1048576 ))
+  [[ $lib -ge 1 ]] && log "pulizia della cache delle build: liberati circa $lib GB"
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
