@@ -44,7 +44,7 @@ EVENTS: dict[str, dict[str, Any]] = {
             "updates_lines": "Elenco testuale degli update (per Telegram)",
             "results": "Lista grezza [{name, from, to, ok, manual, held, retry, error}] per template avanzati",
             "manual_count": "Prodotti da aggiornare a mano (licenza)",
-            "retry_count": "Traduzioni da riprovare (in giallo, si riprova dopo 30 minuti)",
+            "retry_count": "Aggiornamenti da riprovare (in giallo, si riprova dopo 30 minuti)",
             "visual": "Controllo home prima/dopo: {status: ok|warn|ko|na, message, diff}",
         },
         "subject": "[Sentinel] {{ outcome_icon }} {{ site_name }} — {{ outcome_text }}{% if folder %} · {{ folder }}{% endif %}",

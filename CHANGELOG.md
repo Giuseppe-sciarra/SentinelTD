@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.54.1 — Core WordPress non ancora pubblicato da wordpress.org: giallo, non fallito
+
+### Fixed
+- **"Il download non è andato a buon fine.: Not Found" sul core non è più un aggiornamento
+  fallito.** wordpress.org propone il pacchetto di una versione nuova prima di averlo su tutti i
+  suoi server di download: il 18/11 la 7.1.5 in italiano è comparsa alle 19:05 e fra le 19:05 e le
+  19:09 alcuni siti hanno ricevuto "Not Found", con l'email rossa. Ora va in giallo ("da
+  riprovare"), senza avviso di fallimento, e Sentinel riprova dopo 30 minuti. Se dopo 3 ore non
+  passa ancora, torna un fallito vero. Gli altri errori del core restano rossi.
+
+### Tests
+- `tests/test_core_not_published.py`: giallo e nuovo tentativo dopo 30 minuti, ancora giallo al
+  giro dopo, rosso dopo 3 ore, altri errori del core sempre rossi, giallo azzerato quando passa.
+
 ## 2.54.0 — Installazione di massa: tutto attivo dopo l'installazione (connettore Joomla 1.43.2)
 
 ### Changed

@@ -1466,6 +1466,21 @@ def _tr_key(site_id: int) -> str:
     return f"tr:retry:{site_id}"
 
 
+def _core_key(site_id: int) -> str:
+    """Redis: quando il core di un sito e' andato in giallo la prima volta."""
+    return f"core:retry:{site_id}"
+
+
+def _core_not_published(site: Site, etype: str, res: dict) -> bool:
+    """Core WordPress: wordpress.org ha proposto un pacchetto che sul server di download non c'e'
+    ancora ("Not Found"). Succede nei minuti in cui pubblica i pacchetti nelle varie lingue: il
+    18/11/2026 la 7.1.5 in italiano e' comparsa alle 19:05 e fino alle 19:09 alcuni siti hanno
+    ricevuto "Not Found". Non e' un guasto del sito: in giallo, si riprova dopo 30 minuti."""
+    err = str(res.get("error") or "")
+    return (site.cms == "wp" and etype == "core" and not res.get("ok") and not res.get("busy")
+            and "[download_failed]" in err and "not found" in err.lower())
+
+
 def _is_failure(r: dict) -> bool:
     """Fallito davvero: non riuscito e non "in attesa", "a mano" o "da riprovare"."""
     return not r.get("ok") and not r.get("manual") and not r.get("held") and not r.get("retry")
@@ -2138,17 +2153,27 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
             # traduzione nuova prima di avere il pacchetto su tutti i suoi server, e poco dopo
             # si installa. In giallo ("da riprovare"), niente avviso di fallimento, niente
             # statistiche: si riprova dopo 30 minuti (vedi TRANSLATION_RETRY_*).
-            if site.cms == "wp" and etype == "language" and not res["ok"]:
+            # Stesso trattamento per il CORE quando wordpress.org propone un pacchetto non ancora
+            # pubblicato ("Not Found"): giallo per 3 ore dalla prima volta, poi fallito.
+            core_wait = False
+            if _core_not_published(site, etype, res):
+                try:
+                    _first = await ctx["redis"].get(_core_key(site.id))
+                    core_wait = (not _first) or (time.time() - float(_first) < TRANSLATION_RETRY_WINDOW.total_seconds())
+                except Exception:  # noqa: BLE001
+                    core_wait = True
+            if (site.cms == "wp" and etype == "language" and not res["ok"]) or core_wait:
                 err = res.get("error") or ""
-                log.info("TRADUZIONI DA RIPROVARE '%s' (id=%s): %s", site.name, site.id, err[:300])
+                what = "Core" if core_wait else "Traduzioni"
+                log.info("%s DA RIPROVARE '%s' (id=%s): %s", what.upper(), site.name, site.id, err[:300])
                 try:
                     # la prima volta che vanno in giallo: un nuovo tentativo fra 30 minuti, senza
                     # aspettare il giro. Le volte dopo ci pensa il giro di ogni ora.
-                    if await ctx["redis"].set(_tr_key(site.id), str(time.time()), nx=True, ex=2 * 86400):
+                    if await ctx["redis"].set(_core_key(site.id) if core_wait else _tr_key(site.id), str(time.time()), nx=True, ex=2 * 86400):
                         await ctx["redis"].enqueue_job("update_site", site.id, _defer_by=TRANSLATION_RETRY_FIRST,
                                                        _job_id=f"tr-retry:{site.id}:{int(time.time())}")
                 except Exception as ex:  # noqa: BLE001
-                    log.warning("Nuovo tentativo delle traduzioni non programmato (id=%s): %s", site.id, ex)
+                    log.warning("Nuovo tentativo non programmato (id=%s): %s", site.id, ex)
                 if ext is not None:
                     ext.update_failed_at = datetime.now(timezone.utc)
                     ext.update_failed_version = ext.new_version or ""
@@ -2161,7 +2186,7 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
                     from_version=current or "", to_version="",
                     ok=False, retry=True, error=err[:2000],
                 ))
-                await evlog(s, "updates", "warn", f"Traduzioni da riprovare: {err[:200]}",
+                await evlog(s, "updates", "warn", f"{what} da riprovare: {err[:200]}",
                             site=site, details={"type": etype, "slug": slug, "error": err})
                 await asyncio.sleep(item_pause)
                 continue
@@ -2240,9 +2265,9 @@ async def _update_site(ctx, site_id: int, manual: bool, outcome: dict):
 
             if res["ok"] and res["new"]:
                 done[slug] = res["new"]
-            if res["ok"] and site.cms == "wp" and etype == "language":
+            if res["ok"] and site.cms == "wp" and etype in ("language", "core"):
                 try:
-                    await ctx["redis"].delete(_tr_key(site.id))
+                    await ctx["redis"].delete(_tr_key(site.id) if etype == "language" else _core_key(site.id))
                 except Exception:  # noqa: BLE001
                     pass
             results.append({
