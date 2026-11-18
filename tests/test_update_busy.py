@@ -78,7 +78,7 @@ class UpdateOneTests(unittest.IsolatedAsyncioTestCase):
         res, _c = await self.update(lambda request: httpx.Response(302, headers={"location": "https://prova.example/login"}))
         self.assertIn("reindirizzamento (HTTP 302) verso prova.example", res["error"])
         res, _c = await self.update(lambda request: httpx.Response(200, text="<html>Errore   critico</html>"))
-        self.assertIn("risposta non valida (HTTP 200): <html>Errore critico</html>", res["error"])
+        self.assertIn("risposta non valida (HTTP 200): Errore critico", res["error"])
 
     async def test_old_connector_adds_no_note(self):
         res, _c = await self.update(lambda request: httpx.Response(200, text="0"))
