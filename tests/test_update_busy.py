@@ -67,6 +67,23 @@ class UpdateOneTests(unittest.IsolatedAsyncioTestCase):
         res, calls = await self.update(ajax)
         self.assertEqual(calls, ["ajax", "rest"])
 
+    async def test_both_attempts_are_reported_when_the_second_fails_too(self):
+        # il backend risponde 503, REST risponde "[locked]": nell'errore ci sono tutti e due
+        res, calls = await self.update(lambda request: httpx.Response(503, text="Service Unavailable"))
+        self.assertEqual(calls, ["ajax", "rest"])
+        self.assertIn("[locked]", res["error"])
+        self.assertIn("Primo tentativo, dal backend del sito (admin-ajax): HTTP 503", res["error"])
+
+    async def test_redirect_and_garbage_from_the_backend_are_named(self):
+        res, _c = await self.update(lambda request: httpx.Response(302, headers={"location": "https://prova.example/login"}))
+        self.assertIn("reindirizzamento (HTTP 302) verso prova.example", res["error"])
+        res, _c = await self.update(lambda request: httpx.Response(200, text="<html>Errore   critico</html>"))
+        self.assertIn("risposta non valida (HTTP 200): <html>Errore critico</html>", res["error"])
+
+    async def test_old_connector_adds_no_note(self):
+        res, _c = await self.update(lambda request: httpx.Response(200, text="0"))
+        self.assertNotIn("Primo tentativo", res["error"])
+
     def test_waits_longer_than_the_server_limit(self):
         self.assertGreater(worker.UPDATE_WAIT, 300)
 

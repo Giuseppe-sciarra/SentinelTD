@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.55.1 — Aggiornamento WordPress fallito: nell'errore anche il primo tentativo
+
+### Changed
+- **Quando l'aggiornamento di un sito WordPress fallisce dopo due tentativi, l'errore li riporta
+  entrambi.** Sentinel prova prima dal backend del sito (admin-ajax) e, se lì non ottiene una
+  risposta valida, riprova da REST. Prima nell'email finiva solo l'errore del secondo tentativo:
+  il 18/11 un sito ha dato "503" da REST e non si poteva sapere cosa avesse risposto il backend un
+  attimo prima. Ora in coda all'errore c'è "Primo tentativo, dal backend del sito (admin-ajax):"
+  seguito da quello che è successo: il codice HTTP, il reindirizzamento, la risposta non valida o
+  la connessione non riuscita. Con un connettore vecchio, che al backend risponde "0", non si
+  aggiunge niente.
+
+### Tests
+- `tests/test_update_busy.py`: i due tentativi nell'errore, reindirizzamento e risposta non valida
+  nominati, nessuna nota col connettore vecchio.
+
 ## 2.55.0 — Core appena uscito: attesa impostabile prima di installarlo
 
 ### Added

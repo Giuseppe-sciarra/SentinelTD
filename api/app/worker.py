@@ -1577,6 +1577,7 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "", 
                 # 3) MA se la richiesta e' arrivata a PHP e non e' tornato l'esito (nessuna risposta
                 #    in tempo, 502/504 del server), niente REST: l'aggiornamento e' gia' partito.
                 d = None
+                first = ""   # com'e' andato il tentativo dal backend, se non e' stato quello buono
                 try:
                     # senza seguire i redirect: un 301/302 trasforma il POST in GET e i dati si
                     # perdono per strada; il connettore rispondeva "type non valido" e l'aggiornamento
@@ -1592,22 +1593,44 @@ async def _update_one(site: Site, ext_type: str, slug: str, expected: str = "", 
                         return _busy_result(site, ext_type, f"il server del sito ha fermato PHP a metà (HTTP {ra.status_code}, "
                                                             f"di solito il limite di tempo di php-fpm)")
                     if ra.status_code == 200:
-                        ja = ra.json()
+                        try:
+                            ja = ra.json()
+                        except ValueError:
+                            ja = None
                         if isinstance(ja, dict) and "ok" in ja and not _params_lost(ja):
                             d = ja
+                        elif ra.text.strip() not in ("0", "-1"):      # "0" = connettore vecchio: normale
+                            first = "risposta non valida (HTTP 200): " + " ".join(ra.text.split())[:120]
+                    elif 300 <= ra.status_code < 400:
+                        first = f"reindirizzamento (HTTP {ra.status_code}) verso {ra.headers.get('location', '?')[:120]}"
+                    else:
+                        first = f"HTTP {ra.status_code}"
                 except (httpx.ReadTimeout, httpx.RemoteProtocolError) as ex:
                     why = (f"nessuna risposta dal sito in {int(UPDATE_WAIT)} secondi"
                            if isinstance(ex, httpx.ReadTimeout) else "il sito ha chiuso la connessione senza rispondere")
                     return _busy_result(site, ext_type, why)
-                except Exception:  # noqa: BLE001
+                except Exception as ex:  # noqa: BLE001
                     d = None
+                    first = f"connessione non riuscita ({type(ex).__name__}: {str(ex)[:120]})"
                 if d is None:
-                    r = await client.post(
-                        wp_rest_url(site, "update", f"_={cb}"),
-                        headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag, **extra},
-                    )
-                    raise_for_site(r)
-                    d = r.json()
+                    # Secondo tentativo, da REST. Se fallisce anche questo, nell'errore resta anche
+                    # com'era andato il primo: prima si vedeva solo il secondo e non si capiva se la
+                    # causa era la stessa (18/11/2026: "503" da REST senza sapere cosa aveva
+                    # risposto il backend un attimo prima).
+                    note = f" · Primo tentativo, dal backend del sito (admin-ajax): {first}" if first else ""
+                    try:
+                        r = await client.post(
+                            wp_rest_url(site, "update", f"_={cb}"),
+                            headers=headers, json={"type": ext_type, "slug": slug, "expected": expected or "", "backup": backup_flag, **extra},
+                        )
+                        raise_for_site(r)
+                        d = r.json()
+                    except httpx.ReadTimeout:
+                        raise
+                    except Exception as ex:  # noqa: BLE001
+                        return {"ok": False, "error": (str(ex)[:300] + note)[:600], "new": ""}
+                    if note and isinstance(d, dict) and not d.get("ok") and d.get("error"):
+                        d = {**d, "error": str(d["error"]) + note}
             else:  # joomla via com_ajax
                 params = {
                     "option": "com_ajax", "plugin": "tdpanopticon", "group": "system",
