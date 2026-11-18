@@ -348,7 +348,7 @@ was off at that time, the update starts as soon as it is back on. Then:
 The log never goes over 1 MB: when it gets there, the most recent lines are kept.
 
 Optional values in `.env`: `AGG_MAIL_SEMPRE=1` (email even when everything was already up to date)
-and `AGG_TIENI_ROLLBACK=2` (how many previous images to keep for rollback: the shooter one is about
+and `AGG_TIENI_ROLLBACK=1` (how many previous images to keep for rollback: the shooter one is about
 2.5 GB).
 
 To hold a library back, write a limit on its line in `requirements.txt`, with the reason, for

@@ -30,13 +30,13 @@
 #
 # Variabili (nel .env oppure davanti al comando):
 #   AGG_MAIL_A=tuo@indirizzo.it   chi riceve l'email (vince su AGG_MAIL_A_DEF qui sotto; vuoto ovunque = REPORT_TO)
-#   AGG_TIENI_ROLLBACK=2    quante immagini di rollback tenere per servizio (lo shooter ~2,5 GB l'una)
+#   AGG_TIENI_ROLLBACK=1    quante immagini di rollback tenere per servizio (lo shooter ~3 GB l'una)
 # ═════════════════════════════════════════════════════════════════════════════
 PROGETTO="sentinel"
 NOME="Sentinel TD"
 APP="api"                           # le prove e l'email partono da qui
 SERVIZI_APP="api worker shooter"    # i servizi costruiti da questa cartella (gli altri sono immagini scaricate)
-TIENI_DEF=2
+TIENI_DEF=1
 AGG_MAIL_A_DEF="tuo@indirizzo.it"   # chi riceve l'email di riepilogo se nel .env non c'è AGG_MAIL_A
 
 dentro() {   # $1 URL → la risposta, letta dal container dell'api (che non ha curl)

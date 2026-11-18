@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.55.3 — Aggiornamento notturno: una sola immagine di rollback per servizio
+
+### Changed
+- **`aggiorna-tutto.sh` tiene solo l'ultima immagine di rollback per servizio** (prima due). È
+  quella della versione che girava prima dell'ultimo aggiornamento, cioè quella a cui porta il
+  comando "PER TORNARE INDIETRO" dell'email. Chi ne vuole di più mette `AGG_TIENI_ROLLBACK=2`
+  (o più) nel `.env`: un valore già presente lì continua a valere.
+
 ## 2.55.2 — Aggiornamento notturno: la cache delle build non riempie più il disco
 
 ### Fixed

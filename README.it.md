@@ -371,7 +371,7 @@ si riaccende. Poi:
 Il log non supera 1 MB: quando ci arriva restano le righe più recenti.
 
 Valori facoltativi nel `.env`: `AGG_MAIL_SEMPRE=1` (email anche quando era già tutto aggiornato) e
-`AGG_TIENI_ROLLBACK=2` (quante immagini di prima tenere per tornare indietro: quella dello shooter
+`AGG_TIENI_ROLLBACK=1` (quante immagini di prima tenere per tornare indietro: quella dello shooter
 pesa circa 2,5 GB).
 
 Per tenere ferma una libreria scrivi un limite nella sua riga di `requirements.txt`, con il motivo,
